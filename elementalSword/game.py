@@ -207,12 +207,52 @@ class BirthCityPage(GridLayout):
                                 halign='center',valign='middle')
         self.add_widget(self.displaylbl)
         
-class LaunchPage(Button):
+class LaunchPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.usernames = []
-        self.text = ''
+        self.cols = 1
+        self.username = game_app.connect_page.username.text
+        self.usernames, self.ready = [self.username], {self.username:0}
+        self.label = Label(text=f'[color=000000]{self.username}: Not Ready[/color]', height=Window.size[1]*0.9, size_hint_y=None, markup=True)
+        self.add_widget(self.label)
+        self.readyButton = Button(text="Ready Up")
+        self.readyButton.bind(on_press=self.update_self)
+        self.add_widget(self.readyButton)
+        socket_client.start_listening(self.incoming_message, show_error)
+        socket_client.send("[LAUNCH]","Listening")
+    def check_launch(self):
+        all_ready = True
+        for value in self.ready.values():
+            if value == 0:
+                all_ready = False
+                break
+        if all_ready:
+            game_app.screen_manager.current = 'Birth City Chooser'
+    def refresh_label(self):
+        self.label.text = '[color=000000]'+'\n'.join([self.usernames[i]+': '+['Not Ready', 'Ready'][self.ready[self.usernames[i]]] for i in range(len(self.usernames))])+'[/color]'
+        self.check_launch()
+    def incoming_message(self, username, category, message):
+        if category == '[LAUNCH]':
+            if username not in self.ready:
+                self.usernames.append(username)
+            self.ready[username] = 1 if message == 'Ready' else 0
+        elif (category == '[CONNECTION]') and (message == 'Closed'):
+            self.usernames.remove(username)
+            self.ready.pop(username)
+        self.refresh_label()
+    def update_self(self, _):
+        self.ready[self.username] = 1 - self.ready[self.username]
+        # send the message to the server that they are ready
+        if self.ready[self.username]:
+            socket_client.send("[LAUNCH]","Ready")
+            self.readyButton.text = "Not Ready Anymore" 
+        else:
+            socket_client.send("[LAUNCH]","Not Ready")
+            self.readyButton.text = "Ready Up"
+        self.refresh_label()
         
+            
+            
         
 # Simple information/error page
 class InfoPage(GridLayout):
@@ -302,7 +342,7 @@ class ConnectPage(GridLayout):
 
         # Create chat page and activate it
         game_app.start_game_screen()
-        game_app.screen_manager.current = 'Birth City Chooser'
+        game_app.screen_manager.current = 'Launcher'
         
 
         
@@ -325,6 +365,12 @@ class EpicApp(App):
         
     def start_game_screen(self):
         Window.clearcolor = (1, 1, 1, 1)
+        # Launch Page
+        self.launch_page = LaunchPage()
+        screen = Screen(name = 'Launcher')
+        screen.add_widget(self.launch_page)
+        self.screen_manager.add_widget(screen)
+        
         # City chooser
         self.chooseCity_page = BirthCityPage()
         screen = Screen(name='Birth City Chooser')

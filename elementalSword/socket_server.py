@@ -1,6 +1,6 @@
 # Launch Server:
 """
-cd Documents\\GitHub\\Python-Scripts\\learnKivy
+cd Documents\\GitHub\\Python-Scripts\\elementalSword
 python socket_server.py
 
 """
@@ -8,15 +8,21 @@ python socket_server.py
 import socket
 import select
 
-ready_status = {}
-
 HEADER_LENGTH = 10
+PORT = 1234
+
+# List of connected clients - socket as a key, user header and name as data
+clients = {}
+client_code = {}
+# Launch variables
+ready_status = {}
+game_launched = False
 
 ## getting the hostname by socket.gethostname() method
 hostname = socket.gethostname()
 ## getting the IP address using socket.gethostbyname() method
 IP = socket.gethostbyname(hostname)
-PORT = 1234
+
 
 # Create a socket
 # socket.AF_INET - address family, IPv4, some otehr possible are AF_INET6, AF_BLUETOOTH, AF_UNIX
@@ -38,8 +44,7 @@ server_socket.listen()
 # List of sockets for select.select()
 sockets_list = [server_socket]
 
-# List of connected clients - socket as a key, user header and name as data
-clients = {}
+
 
 print(f'Listening for connections on {IP}:{PORT}...')
 
@@ -57,9 +62,14 @@ def receive_message(client_socket):
 
         # Convert header to int value
         message_length = int(message_header.decode('utf-8').strip())
-
+        
+        first_message = client_socket.recv(message_length)
+        
+        scnd_message_header = client_socket.recv(HEADER_LENGTH)
+        scnd_message_length = int(scnd_message_header.decode('utf-8').strip())
+        scnd_message = client_socket.recv(scnd_message_length)
         # Return an object of message header and message data
-        return {'header': message_header, 'data': client_socket.recv(message_length)}
+        return {'header': message_header, 'category': first_message, '2nd header': scnd_message_header, 'data':scnd_message}
 
     except:
 
@@ -68,6 +78,54 @@ def receive_message(client_socket):
         # socket.close() also invokes socket.shutdown(socket.SHUT_RDWR) what sends information about closing the socket (shutdown read/write)
         # and that's also a cause when we receive an empty message
         return False
+    
+def sendMessage(username_from, username_to, category, message):
+    username = username_from.encode('utf-8')
+    username_header = f"{len(username):<{HEADER_LENGTH}}".encode('utf-8')
+    category = category.encode('utf-8')
+    category_header = f"{len(category):<{HEADER_LENGTH}}".encode('utf-8')
+    message = message.encode('utf-8')
+    message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
+    client_socket = client_code[username_to]['socket']
+    client_socket.send(username_header + username + category_header + category + message_header + message)
+    
+def decoded_message(user, message):
+    username = user['data'].decode('utf-8')
+    category = message['category'].decode('utf-8')
+    msg = message["data"].decode("utf-8")
+    return username, category, msg
+
+def updateServer(username, category, msg):
+    if category == '[LAUNCH]':
+        if msg == 'Listening':
+            ready_status[username] = False
+            for other_username in ready_status:
+                if other_username != username:
+                    send_msg = 'Ready' if ready_status[other_username] else 'Not Ready'
+                    sendMessage(other_username, username, '[LAUNCH]', send_msg)
+        elif msg == 'Ready':
+            ready_status[username] = True
+        elif msg == 'Not Ready':
+            ready_status[username] = False
+            
+def close_socket(notified_socket):
+    closed_username = clients[notified_socket]['data'].decode('utf-8')
+    print('Closed connection from: {}'.format(closed_username))
+
+    # Remove from list for socket.socket()
+    sockets_list.remove(notified_socket)
+
+    # Remove from our list of users
+    _ = clients.pop(notified_socket)
+    del _
+    _ = client_code.pop(closed_username)
+    del _
+    _ = ready_status.pop(closed_username)
+    del _
+    
+    for username in client_code:
+        sendMessage(closed_username, username, '[CONNECTION]', 'Closed') 
+    
 
 while True:
 
@@ -100,13 +158,18 @@ while True:
             # If False - client disconnected before he sent his name
             if user is False:
                 continue
+            username = user['data'].decode('utf-8')
+            if username in client_code:
+                print(f"Duplicate username: {username} attempted to join. Connection Rejected.")
+                continue
 
             # Add accepted socket to select.select() list
             sockets_list.append(client_socket)
 
             # Also save username and username header
             clients[client_socket] = user
-            username = user['data'].decode('utf-8')
+            
+            client_code[username] = {'user':user, 'socket':client_socket}
             ready_status[username] = False
 
             print('Accepted new connection from {}:{}, username: {}'.format(*client_address, user['data'].decode('utf-8')))
@@ -119,21 +182,17 @@ while True:
 
             # If False, client disconnected, cleanup
             if message is False:
-                print('Closed connection from: {}'.format(clients[notified_socket]['data'].decode('utf-8')))
-
-                # Remove from list for socket.socket()
-                sockets_list.remove(notified_socket)
-
-                # Remove from our list of users
-                del clients[notified_socket]
-
+                close_socket(notified_socket)
                 continue
 
             # Get user by notified socket, so we will know who sent the message
             user = clients[notified_socket]
+            username, category, msg = decoded_message(user, message)
 
-            print(f'Received message from {user["data"].decode("utf-8")}: {message["data"].decode("utf-8")}')
-
+            print(f'Received message from {username}: {category} {msg}')
+            
+            updateServer(username, category, msg)
+                
             # Iterate over connected clients and broadcast message
             for client_socket in clients:
 
@@ -142,13 +201,8 @@ while True:
 
                     # Send user and message (both with their headers)
                     # We are reusing here message header sent by sender, and saved username header send by user when he connected
-                    client_socket.send(user['header'] + user['data'] + message['header'] + message['data'])
+                    client_socket.send(user['2nd header'] + user['data'] + message['header'] + message['category'] + message['2nd header'] + message['data'])
 
     # It's not really necessary to have this, but will handle some socket exceptions just in case
     for notified_socket in exception_sockets:
-
-        # Remove from list for socket.socket()
-        sockets_list.remove(notified_socket)
-
-        # Remove from our list of users
-        del clients[notified_socket]
+        close_socket(notified_socket)

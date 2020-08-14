@@ -4,6 +4,7 @@ from threading import Thread
 
 HEADER_LENGTH = 10
 client_socket = None
+joinCategory = '[CONNECTION]'
 
 # Connects to the server
 def connect(ip, port, my_username, error_callback):
@@ -27,16 +28,20 @@ def connect(ip, port, my_username, error_callback):
     # We need to encode username to bytes, then count number of bytes and prepare header of fixed size, that we encode to bytes as well
     username = my_username.encode('utf-8')
     username_header = f"{len(username):<{HEADER_LENGTH}}".encode('utf-8')
-    client_socket.send(username_header + username)
+    category = joinCategory.encode('utf-8')
+    category_header = f"{len(category):<{HEADER_LENGTH}}".encode('utf-8')
+    client_socket.send(category_header + category + username_header + username)
 
     return True
 
 # Sends a message to the server
-def send(message):
+def send(category, message):
     # Encode message to bytes, prepare header and convert to bytes, like for username above, then send
+    category = category.encode('utf-8')
+    category_header = f"{len(category):<{HEADER_LENGTH}}".encode('utf-8')
     message = message.encode('utf-8')
     message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
-    client_socket.send(message_header + message)
+    client_socket.send(category_header + category + message_header + message)
 
 # Starts listening function in a thread
 # incoming_message_callback - callback to be called when new message arrives
@@ -64,6 +69,10 @@ def listen(incoming_message_callback, error_callback):
 
                 # Receive and decode username
                 username = client_socket.recv(username_length).decode('utf-8')
+                
+                category_header = client_socket.recv(HEADER_LENGTH)
+                category_length = int(category_header.decode('utf-8').strip())
+                category = client_socket.recv(category_length).decode('utf-8')
 
                 # Now do the same for message (as we received username, we received whole message, there's no need to check if it has any length)
                 message_header = client_socket.recv(HEADER_LENGTH)
@@ -71,7 +80,7 @@ def listen(incoming_message_callback, error_callback):
                 message = client_socket.recv(message_length).decode('utf-8')
 
                 # Print message
-                incoming_message_callback(username, message)
+                incoming_message_callback(username, category, message)
 
         except Exception as e:
             # Any other exception - something happened, exit
