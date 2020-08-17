@@ -7,6 +7,7 @@ python socket_server.py
 
 import socket
 import select
+import pickle
 
 HEADER_LENGTH = 10
 PORT = 1234
@@ -14,9 +15,8 @@ PORT = 1234
 # List of connected clients - socket as a key, user header and name as data
 clients = {}
 client_code = {}
-# Launch variables
-ready_status = {}
-game_launched = False
+client_gameStatus = {}
+game_launched = [False]
 
 ## getting the hostname by socket.gethostname() method
 hostname = socket.gethostname()
@@ -84,7 +84,10 @@ def sendMessage(username_from, username_to, category, message):
     username_header = f"{len(username):<{HEADER_LENGTH}}".encode('utf-8')
     category = category.encode('utf-8')
     category_header = f"{len(category):<{HEADER_LENGTH}}".encode('utf-8')
-    message = message.encode('utf-8')
+    if type(message) is str:
+        message = message.encode('utf-8')
+    else:
+        message = pickle.dumps(message)
     message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
     client_socket = client_code[username_to]['socket']
     client_socket.send(username_header + username + category_header + category + message_header + message)
@@ -92,21 +95,33 @@ def sendMessage(username_from, username_to, category, message):
 def decoded_message(user, message):
     username = user['data'].decode('utf-8')
     category = message['category'].decode('utf-8')
-    msg = message["data"].decode("utf-8")
+    try:
+        msg = message["data"].decode("utf-8")
+    except UnicodeDecodeError:
+        msg = pickle.loads(message["data"])
     return username, category, msg
 
 def updateServer(username, category, msg):
     if category == '[LAUNCH]':
         if msg == 'Listening':
-            ready_status[username] = False
-            for other_username in ready_status:
+            client_gameStatus[username]['ready'] = False
+            for other_username in client_gameStatus:
                 if other_username != username:
-                    send_msg = 'Ready' if ready_status[other_username] else 'Not Ready'
+                    send_msg = 'Ready' if client_gameStatus[other_username]['ready'] else 'Not Ready'
                     sendMessage(other_username, username, '[LAUNCH]', send_msg)
         elif msg == 'Ready':
-            ready_status[username] = True
+            client_gameStatus[username]['ready'] = True
+            all_ready = True
+            for D in client_gameStatus.values():
+                if D['ready'] == False:
+                    all_ready = False
+                    break
+            if all_ready:
+                game_launched[0] = True
         elif msg == 'Not Ready':
-            ready_status[username] = False
+            client_gameStatus[username]['ready'] = False
+    elif category == '[CLAIM]':
+        client_gameStatus[username]['birth city'] = msg
             
 def close_socket(notified_socket):
     closed_username = clients[notified_socket]['data'].decode('utf-8')
@@ -120,7 +135,7 @@ def close_socket(notified_socket):
     del _
     _ = client_code.pop(closed_username)
     del _
-    _ = ready_status.pop(closed_username)
+    _ = client_gameStatus.pop(closed_username)
     del _
     
     for username in client_code:
@@ -170,7 +185,7 @@ while True:
             clients[client_socket] = user
             
             client_code[username] = {'user':user, 'socket':client_socket}
-            ready_status[username] = False
+            client_gameStatus[username] = {}
 
             print('Accepted new connection from {}:{}, username: {}'.format(*client_address, user['data'].decode('utf-8')))
 

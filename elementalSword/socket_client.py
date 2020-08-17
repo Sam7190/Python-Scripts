@@ -1,5 +1,6 @@
 import socket
 import errno
+import pickle
 from threading import Thread
 
 HEADER_LENGTH = 10
@@ -39,7 +40,10 @@ def send(category, message):
     # Encode message to bytes, prepare header and convert to bytes, like for username above, then send
     category = category.encode('utf-8')
     category_header = f"{len(category):<{HEADER_LENGTH}}".encode('utf-8')
-    message = message.encode('utf-8')
+    if type(message) is str:
+        message = message.encode('utf-8')
+    else:
+        message = pickle.dumps(message)
     message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
     client_socket.send(category_header + category + message_header + message)
 
@@ -77,8 +81,11 @@ def listen(incoming_message_callback, error_callback):
                 # Now do the same for message (as we received username, we received whole message, there's no need to check if it has any length)
                 message_header = client_socket.recv(HEADER_LENGTH)
                 message_length = int(message_header.decode('utf-8').strip())
-                message = client_socket.recv(message_length).decode('utf-8')
-
+                receivedMessage = client_socket.recv(message_length)
+                try:
+                    message = receivedMessage.decode('utf-8')
+                except UnicodeDecodeError:
+                    message = pickle.loads(receivedMessage)
                 # Print message
                 incoming_message_callback(username, category, message)
 
