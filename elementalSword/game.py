@@ -37,12 +37,19 @@ ytiles = 15
 
 def lclPlayer():
     return game_app.game_page.board_page.localPlayer
-
-def encounter(name, lvlrange, styles):
-    pass
-
 def rbtwn(mn, mx, size=None):
     return np.random.choice(np.arange(mn, mx+1), size)
+
+def encounter(name, lvlrange, styles):
+    P = lclPlayer()
+    # Pause all buttons so only fighting screen remains
+    P.paused = True
+    # Conduct Fight
+    lvl = rbtwn(lvlrange[0],lvlrange[1])
+    cbstyle = styles[rbtwn(0,len(styles)-1)]
+    output(f'Encounter Lv{lvl} {name} using {cbstyle}','yellow')
+    # Allow buttons to be pressed again
+    P.paused = False
 
 def isbetween(mn, mx, numb):
     return (numb >= mn) * (numb <= mx)
@@ -72,17 +79,79 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
             elif amt>0:
                 P.takeAction(amt)
             if empty_tile: P.currenttile.empty_tile()
-            if consume != 'tiered':
+            if (consume is None) or ('tiered' not in consume):
                 P.go2action()
+            else:
+                # Otherwise the player must be descended into a cave or ontop of a mountain
+                tier = int(consume[-1])
+                P.tiered = True if tier > 1 else False
+                P.go2action(tier)
     return exit_loop
 
 # Consequences
 def C_road(action=1):
-    P = lclPlayer()
+    encounter('Highway Robber',[3,30],['Physical','Trooper'])
     exitActionLoop('road',action)()
-    # [INCOMPLETE] Highway robber encounter
+    
+def C_cave(tier=1, skip=False):
+    P = lclPlayer()
+    def enemy_approach(_=None):
+        stealth = P.activateSkill('Stealth')
+        r = rbtwn(0,4*tier)
+        if r <= stealth:
+            P.useSkill('Stealth',1,2*tier-1)
+            output('Successfully avoided monster','green')
+        else:
+            encounter('Monster',[[None,3,15,35][tier], [None,20,40,60][tier]], ['Physical','Wizard','Elemental','Trooper'])
+        exitActionLoop(f'tiered {tier}')()
+    if not skip:
+        survival = P.activateSkill('Survival')
+        r = rbtwn(0,2**tier)
+        if r <= survival:
+            P.useSkill('Survival',1,2*tier-1)
+            output('Successfully evaded the sharp rocks','green')
+        else:
+            hp_dmg = 1 + (2*(tier-1))
+            output(f'Fell on the harsh rocks: -{hp_dmg} HP','red')
+            P.takeDamage(hp_dmg)
+        enemy_approach()
+    else:
+        return enemy_approach
+    
+def C_outpost(skip=False):
+    def enemy_approach(_=None):
+        P = lclPlayer()
+        stealth = P.activateSkill('Stealth')
+        r = rbtwn(0,12)
+        if r <= stealth:
+            P.useSkill('Stealth')
+            output('Successfully avoided bandit','green')
+        else:
+            encounter('Bandit',[15,40],['Physical','Elemental'])
+        exitActionLoop()()
+    if not skip:
+        r = rbtwn(1,3)
+        if r==1:
+            enemy_approach()
+        else:
+            exitActionLoop()()
+    else:
+        return enemy_approach
+    
+def C_mountain(tier=1):
+    P = lclPlayer()
+    survival = P.activateSkill('Survival')
+    r = rbtwn(0,2**tier)
+    if r <= survival:
+        P.useSkill('Survival',1,2*tier-1)
+        output('Successfully traversed harsh environment','green')
+    else:
+        output(f'Buffeted by harsh environment: -{tier} HP, -{tier} fatigue','red')
+        P.updateFatigue(tier)
+        P.takeDamage(tier)
+    exitActionLoop(f'tiered {tier}')()
 
-consequences = {'road':C_road}
+consequences = {'road':C_road, 'cave':C_cave, 'outpost':C_outpost, 'mountain':C_mountain}
 
 # Actions
 def Train(abilities, master, confirmed):
@@ -130,7 +199,6 @@ def Train(abilities, master, confirmed):
                 output("You were unable to keep up with training.",'red')
                 P.takeAction()
                 Train(abilities, master, False)
-                # [INCOMPLETE] Most likely action will be taken but even if round did not end, the action buttons can be clicked.
             elif rbtwn(1,3) == 1:
                 output(f"You successfully leveled up in {abilities}",'green')
                 P.updateSkill(abilities,1)
@@ -200,7 +268,7 @@ def Gather(item, discrete):
             if gathered == 1:
                 P.useSkill('Gathering')
             gathered += 1
-        output(f"Gathered {gathered} {item}")
+        output(f"Gathered {gathered} {item}",'green')
         P.addItem(item, gathered)
         exitActionLoop(None, 1)()
     return gather
@@ -240,7 +308,7 @@ def persuade_trainer(abilities, master, fail_func, threshold=12):
         if rbtwn(1,threshold) <= persuasion:
             P.useSkill('Persuasion')
             output(f'Persuaded {master} to teach you.','green')
-            Train(['Agility','Gathering'], master, False)
+            Train(abilities, master, False)
         else:
             output(f'Failed to persuade {master} to teach you.','red')
             fail_func()
@@ -257,35 +325,66 @@ def A_pond():
                                     'Giant Serpent':[9,9,encounter('Giant Serpent',[20,45],['Elemental'])]},12)}
     actionGrid(actions, True)
     
-def A_cave(tier=None):
+def A_cave(tier=1):
+    def move_down(_):
+        P = lclPlayer()
+        if P.paused:
+            return
+        C_cave(tier+1, False)
+    def move_up(_):
+        P = lclPlayer()
+        if P.paused:
+            return
+        C_cave(tier-1, False)
     action_tiers = {1:{'Excavate':Excavate({'Lead':[1,4,getItem('lead')],
                                             'Tin':[5,8,getItem('tin')],
-                                            'Monster':[9,15,encounter('Monster',[3,30],['Elemental','Wizard','Physical','Trooper'])]},20),
-                       'Move Down':A_cave(2)},
+                                            'Monster':[9,15,C_cave(1,True)]},20),
+                       'Descend':move_down},
                     2:{'Excavate':Excavate({'Tantalum':[1,3,getItem('tantalum')],
                                             'Aluminum':[4,6,getItem('aluminum')],
-                                            'Monster':[7,14,encounter('Monster',[15,40],['Elemental','Wizard','Physical','Trooper'])]},20),
-                       'Move Down':A_cave(3),
-                       'Move Up':A_cave(1)},
+                                            'Monster':[7,14,C_cave(2,True)]},20),
+                       'Descend':move_down,
+                       'Ascend':move_up},
                     3:{'Excavate':Excavate({'Tungsten':[1,2,getItem('tungsten')],
                                             'Titanium':[3,4,getItem('titanium')],
-                                            'Monster':[5,13,encounter('Monster',[35,60],['Elemental','Wizard','Physical','Trooper'])]},20),
-                       'Move Up':A_cave(2)}}
-    if tier is None:
-        actionGrid(action_tiers[1], True)
-    else:
-        def move_cave(_):
-            P = lclPlayer()
-            if P.paused:
-                return
-            exitActionLoop('tiered',1)
-            P.tiered = True if tier > 1 else False
-            actionGrid(action_tiers[tier], True)
-        return move_cave
+                                            'Monster':[5,13,C_cave(3,True)]},20),
+                       'Ascend':move_up}}
+    actionGrid(action_tiers[tier], True)
             
-            
+def A_outpost():
+    actions = {'Excavate':({'String':[1,3,getItem('string')],
+                            'Beads':[4,6,getItem('beads')],
+                            'Sand':[7,8,getItem('sand')],
+                            'Bandit':[9,10,C_outpost(True)]},12)}
+    actionGrid(actions, True)
+    
+def A_mountain(tier=1):
+    def move_down(_):
+        P = lclPlayer()
+        if P.paused:
+            return
+        C_mountain(tier-1, False)
+    def move_up(_):
+        P = lclPlayer()
+        if P.paused:
+            return
+        C_mountain(tier+1, False)
+    action_tiers = {1:{'Excavate':Excavate({'Copper':[1,5,getItem('copper')],
+                                            'Iron':[6,10,getItem('iron')],
+                                            'Monk':[11,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},20),
+                       'Ascend':move_up},
+                    2:{'Excavate':Excavate({'Kevlium':[1,4,getItem('kevlium')],
+                                            'Nickel':[5,8,getItem('nickel')],
+                                            'Monk':[9,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},20),
+                       'Descend':move_down,
+                       'Ascend':move_up},
+                    3:{'Excavate':Excavate({'Diamond':[1,3,getItem('tungsten')],
+                                            'Chromium':[4,6,getItem('titanium')],
+                                            'Monk':[7,8,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},20),
+                       'Descend':move_down}}
+    actionGrid(action_tiers[tier], True)
 
-avail_actions = {'plains':A_plains}#,'pond','cave','outpost','mountain','oldlibrary','ruins','battle1','battle2','wilderness','village1','village2','village3','village4','village5',
+avail_actions = {'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain}#,'oldlibrary','ruins','battle1','battle2','wilderness','village1','village2','village3','village4','village5',
 #                 'anafola','benfriege','demetry','enfeir','fodker','glaser','kubani','pafiz','scetcher','starfex','tamarania','tamariza','tutalu','zinzibar'}
 cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
@@ -435,6 +534,15 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
                 self.neighbors.add((x, y))
     def is_neighbor(self):
         return self.parentBoard.localPlayer.currentcoord in self.neighbors
+    def findNearest(self, tiles, T=None, depth=0, checked=set(), queue=[]):
+        if T is None: T = self
+        if T.tile in tiles:
+            return (T.gridx, T.gridy)
+        checked.add((T.gridx, T.gridy))
+        depth += 1
+        queue += list(T.neighbors)
+        nextT = self.parentBoard.gridtiles[queue.pop(0)]
+        return nextT.findNearest(tiles, nextT, depth, checked, queue)
     def on_enter(self, *args):
         hovering[0] += 1
         self.source = f'images\\selectedtile\\{self.tile}.png'
@@ -491,6 +599,12 @@ class BoardPage(FloatLayout):
             self.game_page.recover_button.bind(on_press=self.localPlayer.recover)
             self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
             self.localPlayer.add_mainStatPage()
+    def sendFaceMessage(self, msg, clr=None):
+        def clear_lbl(_):
+            self.startLabel.text = ''
+        self.startLabel.text = msg
+        output(msg, clr)
+        Clock.schedule_once(clear_lbl, 2)
     def updateView(self, deltaZoom=0):
         # Make sure change does not go beyond the bounds of [0,3]
         if deltaZoom:
@@ -706,9 +820,12 @@ class Player(Image):
             consequences[self.currenttile.tile]()
         else:
             exitActionLoop(None,1)()
-    def go2action(self):
+    def go2action(self, param=None):
         if (self.currenttile.tile in avail_actions) and (not self.currenttile.is_empty):
-            avail_actions[self.currenttile.tile]()
+            if param is None:
+                avail_actions[self.currenttile.tile]()
+            else:
+                avail_actions[self.currenttile.tile](param)
         else:
             actionGrid({}, True)
     def moveto(self, coord, trigger_consequence=True, skip_check=False):
@@ -732,10 +849,7 @@ class Player(Image):
             game_app.game_page.recover_button.text = f'Rest ({self.get_recover()})'
             self.parentBoard.updateView()
             self.pos_hint = {'center_x':self.currenttile.centx, 'center_y':self.currenttile.centy}
-            if skip_check == 1:
-                # The action and fatigue consequence has already been accounted for.
-                consequences['road'](0)
-            elif trigger_consequence: self.go2consequence()
+            if trigger_consequence: self.go2consequence()
     def get_mainStatUpdate(self):
         return [f'{self.fatigue}/{self.max_fatigue}',
                 f'{self.current[self.attributes["Hit Points"]]}/{self.combat[self.attributes["Hit Points"]]+self.boosts[self.attributes["Hit Points"]]}',
@@ -810,17 +924,34 @@ class Player(Image):
         for P in self.parentBoard.Players.values():
             P.paused = False
         self.parentBoard.localPlayer.actions = self.max_actions
-        def clear_lbl(_):
-            self.parentBoard.startLabel.text = ''
-        self.parentBoard.startLabel.text = 'Start Round'
-        output('Start Round!')
+        self.parentBoard.sendFaceMessage('Start Round!')
         for T in self.parentBoard.gridtiles.values():
             T.update_empty_tile()
-        Clock.schedule_once(clear_lbl, 2)
         check_paralysis()
-    def updateFatigue(self, fatigue):
-        self.fatigue += fatigue
+    def updateFatigue(self, fatigue, add=True):
+        self.fatigue = self.fatigue + fatigue if add else fatigue
         check_paralysis()
+    def takeDamage(self, amt):
+        hp_idx = self.attributes['Hit Points']
+        self.current[hp_idx] = max([0, self.current[hp_idx]-amt])
+        if self.current[hp_idx] == 0:
+            if self.Combat > 2:
+                CL = list(self.attributes)
+                while True:
+                    Ratr = np.random.choice(CL)
+                    if ((Ratr=='Attack') or (Ratr=='Hit Points')) and (self.combat[self.attributes[Ratr]]>1):
+                        break
+                    elif self.combat[self.attributes[Ratr]] > 0:
+                        break
+                self.updateAttribute(Ratr, -1)
+                self.parentBoard.sendFaceMessage('You Fainted!','red')
+                output(f"You lose {Ratr}, are paralyzed, and rushed to nearest city.",'red')
+            # Just in case they die in a tiered environment, make sure they are not stuck.
+            self.tiered = False
+            # Move to nearest city
+            self.moveto(self.currenttile.findNearest(cities))
+            # Artificially paralyze the player by setting fatigue to 11
+            self.updateFatigue(11, False)
     def takeAction(self, fatigue=1, verbose=True):
         if verbose: output(f"[ACTION {self.max_actions-self.actions+1}] You took {fatigue} fatigue")
         self.actions -= 1
@@ -833,28 +964,30 @@ class Player(Image):
     def updateSkill(self, skill, val=1):
         self.skills[skill] += val
         self.Knowledge += val
-    def addXP(self, skill, xp):
-        output(f"Gained {xp}xp for {skill}.",'green')
+    def addXP(self, skill, xp, msg=''):
+        output(f"Gained {xp}xp for {skill}{msg}.",'green')
         self.xps[skill] += xp
         while (self.xps[skill] >= (3 + self.skills[skill])):
             self.xps[skill] -= (3 + self.skills[skill])
             self.updateSkill(skill)
             output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
-    def activateSkill(self, skill):
+    def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
-        if rbtwn(1,10) > self.fatigue:
+        if rbtwn(1,10) <= self.fatigue:
             output(f"Fatigue impacted your {skill} skill.",'yellow')
             actv_lvl = np.max([0,lvl-self.fatigue])
         else:
             actv_lvl = lvl
-            if lvl < 3: self.addXP(skill, 1)
+            if lvl <= max_lvl_xp: self.addXP(skill, xp, ' by activation')
         return actv_lvl
     def useSkill(self, skill, xp=1, max_lvl_xp=6):
         if self.skills[skill] <= max_lvl_xp:
             self.addXP(skill, xp)
     def updateAttribute(self, attribute, val=1):
         self.combat[self.attributes[attribute]] += val
+        self.current[self.attributes[attribute]] += val
         self.Combat += val
+        self.update_mainStatPage()
     def levelup(self, ability, val=1):
         if ability in self.skills:
             self.updateSkill(ability, val)
