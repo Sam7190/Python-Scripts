@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image as pilImage
 import os
 import sys
+from copy import deepcopy
 import socket_client
 #import mechanic as mcnc
 import kivy
@@ -40,16 +41,18 @@ def lclPlayer():
 def rbtwn(mn, mx, size=None):
     return np.random.choice(np.arange(mn, mx+1), size)
 
-def encounter(name, lvlrange, styles):
+def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=None, action_amt=1, empty_tile=False):
     P = lclPlayer()
     # Pause all buttons so only fighting screen remains
     P.paused = True
-    # Conduct Fight
+    # [INCOMPLETE] Conduct Fight
     lvl = rbtwn(lvlrange[0],lvlrange[1])
     cbstyle = styles[rbtwn(0,len(styles)-1)]
     output(f'Encounter Lv{lvl} {name} using {cbstyle}','yellow')
     # Allow buttons to be pressed again
     P.paused = False
+    # For now exit the action loop - but we will want this to be different depending on circumstances
+    exitActionLoop(consume, action_amt, empty_tile)()
 
 def isbetween(mn, mx, numb):
     return (numb >= mn) * (numb <= mx)
@@ -88,72 +91,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 P.go2action(tier)
     return exit_loop
 
-# Consequences
-def C_road(action=1):
-    encounter('Highway Robber',[3,30],['Physical','Trooper'])
-    exitActionLoop('road',action)()
-    
-def C_cave(tier=1, skip=False):
-    P = lclPlayer()
-    def enemy_approach(_=None):
-        stealth = P.activateSkill('Stealth')
-        r = rbtwn(0,4*tier)
-        if r <= stealth:
-            P.useSkill('Stealth',1,2*tier-1)
-            output('Successfully avoided monster','green')
-        else:
-            encounter('Monster',[[None,3,15,35][tier], [None,20,40,60][tier]], ['Physical','Wizard','Elemental','Trooper'])
-        exitActionLoop(f'tiered {tier}')()
-    if not skip:
-        survival = P.activateSkill('Survival')
-        r = rbtwn(0,2**tier)
-        if r <= survival:
-            P.useSkill('Survival',1,2*tier-1)
-            output('Successfully evaded the sharp rocks','green')
-        else:
-            hp_dmg = 1 + (2*(tier-1))
-            output(f'Fell on the harsh rocks: -{hp_dmg} HP','red')
-            P.takeDamage(hp_dmg)
-        enemy_approach()
-    else:
-        return enemy_approach
-    
-def C_outpost(skip=False):
-    def enemy_approach(_=None):
-        P = lclPlayer()
-        stealth = P.activateSkill('Stealth')
-        r = rbtwn(0,12)
-        if r <= stealth:
-            P.useSkill('Stealth')
-            output('Successfully avoided bandit','green')
-        else:
-            encounter('Bandit',[15,40],['Physical','Elemental'])
-        exitActionLoop()()
-    if not skip:
-        r = rbtwn(1,3)
-        if r==1:
-            enemy_approach()
-        else:
-            exitActionLoop()()
-    else:
-        return enemy_approach
-    
-def C_mountain(tier=1):
-    P = lclPlayer()
-    survival = P.activateSkill('Survival')
-    r = rbtwn(0,2**tier)
-    if r <= survival:
-        P.useSkill('Survival',1,2*tier-1)
-        output('Successfully traversed harsh environment','green')
-    else:
-        output(f'Buffeted by harsh environment: -{tier} HP, -{tier} fatigue','red')
-        P.updateFatigue(tier)
-        P.takeDamage(tier)
-    exitActionLoop(f'tiered {tier}')()
 
-consequences = {'road':C_road, 'cave':C_cave, 'outpost':C_outpost, 'mountain':C_mountain}
-
-# Actions
 def Train(abilities, master, confirmed):
     P = lclPlayer()
     if P.paused:
@@ -239,7 +177,7 @@ def Train(abilities, master, confirmed):
             else:
                 critthink = P.activateSkill('Critical Thinking')
                 if rbtwn(1,16) <= critthink:
-                    P.useSkill('Critical Thinking', 2, 8)
+                    P.useSkill('Critical Thinking', 2, 7)
                     output(f"You successfully leveled up in {abilities}",'green')
                     P.updateSkill(abilities,1)
                     exitActionLoop(None,1)()
@@ -247,15 +185,256 @@ def Train(abilities, master, confirmed):
                     output("You were unsuccessful.",'red')
                     P.takeAction()
                     Train(abilities, master, False)
-                    
-def getItem(item, amt=1):
+
+def getItem(item, amt=1, consume=None, empty_tile=False, action_amt=1):
     P = lclPlayer()
     def getitem(_=None):
         if P.paused:
             return
         P.addItem(item, amt)
-        exitActionLoop(None, 1)()
+        exitActionLoop(consume, action_amt, empty_tile)()
     return getitem
+
+def buyItem(item, cost, from_trader, amt=1, empty_tile=False):
+    P = lclPlayer()
+    def buyitem(_=None):
+        if P.paused:
+            return
+        if P.coins < (cost*amt):
+            output("Insufficient funds!",'yellow')
+        else:
+            P.coins -= (cost*amt)
+            if from_trader and (item in P.currenttile.trader_wares):
+                # [INCOMPLETE] the buy update is not implemented
+                P.currenttile.buy_from_trader(item)
+            # [INCOMPLETE] decide what "buy" exitActionLoop does
+            getItem(item, amt, 'buy', False, 0)
+    return buyitem
+
+# Consequences
+def C_road(action=1):
+    P = lclPlayer()
+    coord, depth = P.currenttile.findNearest(cities)
+    r = np.random.rand()
+    if r <= (depth/6):
+        encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume='road', action_amt=action)
+    elif P.currenttile.trader_rounds == 0:
+        r = rbtwn(1,6)
+        if r == 1:
+            # Trader appears with 1/6 chance
+            P.currenttile.trader_appears()
+        exitActionLoop('road')()
+    
+def C_plains():
+    P = lclPlayer()
+    survival = P.activateSkill("Survival")
+    r = rbtwn(0,8)
+    if r <= survival:
+        P.useSkill('Survival')
+        output('Successfully avoided traps','green')
+        exitActionLoop()()
+    else:
+        output('Trap hits you, +1 fatigue', 'red')
+        paralyzed = P.takeDamage(0,1)
+        if not paralyzed: exitActionLoop()()
+    
+    
+def C_cave(tier=1, skip=False):
+    P = lclPlayer()
+    def enemy_approach(_=None):
+        stealth = P.activateSkill('Stealth')
+        r = rbtwn(0,4*tier)
+        if r <= stealth:
+            P.useSkill('Stealth',1,2*tier-1)
+            output('Successfully avoided monster','green')
+            exitActionLoop(f'tiered {tier}')()
+        else:
+            rewards = {1: {'hide':1, 'raw meat':1}, 2: {'hide':3, 'raw meat':1}, 3: {'hide':5, 'raw meat':2}}
+            encounter('Monster',[[None,3,15,35][tier], [None,20,40,60][tier]], ['Physical','Wizard','Elemental','Trooper'],rewards[tier], consume=f'tiered {tier}')
+    if not skip:
+        fainted = False
+        survival = P.activateSkill('Survival')
+        r = rbtwn(0,2**tier)
+        if r <= survival:
+            P.useSkill('Survival',1,2*tier-1)
+            output('Successfully evaded the sharp rocks','green')
+        else:
+            hp_dmg = 1 + (2*(tier-1))
+            output(f'Fell on the harsh rocks: -{hp_dmg} HP','red')
+            fainted = P.takeDamage(hp_dmg, 0)
+        if not fainted: enemy_approach()
+    else:
+        return enemy_approach
+    
+def C_outpost(skip=False):
+    def enemy_approach(_=None):
+        P = lclPlayer()
+        stealth = P.activateSkill('Stealth')
+        r = rbtwn(0,12)
+        if r <= stealth:
+            P.useSkill('Stealth')
+            output('Successfully avoided bandit','green')
+            exitActionLoop()()
+        else:
+            encounter('Bandit',[15,40],['Physical','Elemental'],{'coins':[2,5]})
+    if not skip:
+        r = rbtwn(1,3)
+        if r==1:
+            enemy_approach()
+        else:
+            exitActionLoop()()
+    else:
+        return enemy_approach
+    
+def C_mountain(tier=1):
+    P = lclPlayer()
+    survival = P.activateSkill('Survival')
+    r = rbtwn(0,2**tier)
+    fainted_or_paralyzed = False
+    if r <= survival:
+        P.useSkill('Survival',1,2*tier-1)
+        output('Successfully traversed harsh environment','green')
+    else:
+        output(f'Buffeted by harsh environment: -{tier} HP, -{tier} fatigue','red')
+        fainted_or_paralyzed = P.takeDamage(tier, tier)
+    if (not fainted_or_paralyzed): exitActionLoop(f'tiered {tier}')()
+    
+def C_oldlibrary(skip=False):
+    def hermit_approach(_=None):
+        P = lclPlayer()
+        persuasion = P.activateSkill('Persuasion')
+        r = rbtwn(1,12)
+        if r <= persuasion:
+            P.useSkill('Persuasion')
+            output('Successfully persuaded the hermit to teach you!','green')
+            Train(['Cunning','Critical Thinking'],'hermit',False)
+        else:
+            output('Unsuccessful in persuasion','red')
+            encounter('Hermit',[55,75],['Wizard','Elemental'],{'coins':[5, 9]},{'Hit Points':12})
+    if not skip:
+        r = rbtwn(1,4)
+        if r == 1:
+            hermit_approach()
+        else:
+            exitActionLoop()()
+    else:
+        return hermit_approach
+    
+def C_ruins(skip=False, ret_func=False):
+    P = lclPlayer()
+    def spring_trap(_=None):
+        if P.paused:
+            return
+        fainted = False
+        survival = P.activateSkill('Survival')
+        r = rbtwn(1,12)
+        if r <= survival:
+            P.useSkill('Survival')
+            output('Successfully avoided traps','green')
+        else:
+            output('Trap hits you take 2 HP damage','red')
+            fainted = P.takeDamage(2, 0)
+        if ret_func=='trap':
+            if not fainted: exitActionLoop()()
+    def get_cloth(_=None):
+        city = P.currenttile.neighbortiles.intersection({'fodker','zinzibar','enfeir'}).pop()
+        cloth = f'old {city} cloth'
+        if ret_func == 'cloth':
+            getItem(cloth)()
+        else:
+            return cloth
+    def approach(_=None):
+        if P.paused:
+            return
+        persuasion = P.activateSkill('Persuasion')
+        r = rbtwn(1,12)
+        if r <= persuasion:
+            P.useSkill('Persuasion')
+            output("Successfully persuaded ancient wizard to teach you",'green')
+            Train(['Hit Points','Heating'],'ancient wizard',False)
+        else:
+            output("Unsuccessful in persuasion",'red')
+            # The ruins must be a neighbor of one of the three cities, the reward depends on that.
+            encounter('Ancient Wizard',[60,85],['Wizard'],{get_cloth():2},{'Cunning':12})
+    if not skip:
+        spring_trap()
+        approach()
+    elif ret_func == 'trap':
+        return spring_trap
+    elif ret_func == 'cloth':
+        return get_cloth
+    else:
+        return approach
+    
+def C_battlezone(skip=False):
+    P = lclPlayer()
+    def ninja_encounter(_=None):
+        r = rbtwn(1,4)
+        if r == 1:
+            encounter('Ninja',[65,90],['Physical'],{'coins':[7,11]},{'Stealth':[6,8]})
+        elif r == 2:
+            encounter('Ninja',[45,70],['Physical'],{'coins':[5,9]},{'Stealth':[5,6]})
+        elif r == 3:
+            encounter('Ninja',[35,60],['Physical'],{'coins':[8,15]},{'Stealth':5},2)
+        else:
+            encounter('Ninja',[25,50],['Physical'],{'coins':[6,17]},{'Stealth':3},3)
+    if not skip:
+        stealth = P.activateSkill('Stealth')
+        r = rbtwn(1,16)
+        if r <= stealth:
+            P.useSkill('Stealth',2,7)
+            output("Avoided ninjas.",'green')
+            exitActionLoop()()
+        else:
+            ninja_encounter()
+    else:
+        return ninja_encounter
+
+def C_wilderness():
+    P = lclPlayer()
+    survival = P.activateSkill("Survival")
+    r = rbtwn(1,14)
+    if r <= survival:
+        P.useSkill("Survival",2,7)
+        output("Survived difficult terrain",'green')
+        exitActionLoop()()
+    else:
+        output("Took 3 fatigue and 2 HP damage from terrain",'red')
+        fainted_or_paralyzed = P.takeDamage(2, 3)
+        if not fainted_or_paralyzed:
+            stealth = P.activateSkill("Stealth")
+            r = rbtwn(1,14)
+            if r <= stealth:
+                P.useSkill("Stealth",2,7)
+                output("Avoided dangerous wilderness monster",'green')
+                exitActionLoop()()
+            else:
+                encounter('Wild Vine Monster',[95,120],['Elemental'],{'bark':4})
+
+consequences = {'road':C_road, 'plains':C_plains, 'cave':C_cave, 'outpost':C_outpost, 'mountain':C_mountain, 'oldlibrary':C_oldlibrary, 'ruins':C_ruins, 'battle1':C_battlezone, 'battle2':C_battlezone, 'wilderness':C_wilderness}
+
+# Actions
+KnowledgeBooks = {'critical thinking book':1,'bartering book':2,'persuasion book':2,'crafting book':2,
+                  'heating book':3,'smithing book':2,'stealth book':1,'survival book':3,'gathering book':2,'excavating book':2}
+def getBook(rarity=True):
+    def getbook(_=None):
+        L = list(KnowledgeBooks)
+        if rarity:
+            cumsum = [0]
+            for book in L:
+                cumsum.append(KnowledgeBooks[book]+cumsum[-1])
+            r, i = rbtwn(1,cumsum[-1]), 1
+            while (r > cumsum[i]):
+                i += 1
+            return L[i-1]
+        else:
+            return np.random.choice(L)
+    return getbook
+def book2skill(book):
+    wl = book.split(' ')
+    for i in range(len(wl)):
+        wl[i] = wl[i][0].upper() + wl[i][1:]
+    return ' '.join(wl[:-1])
 
 def Gather(item, discrete):
     P = lclPlayer()
@@ -314,15 +493,27 @@ def persuade_trainer(abilities, master, fail_func, threshold=12):
             fail_func()
     return persuade_teacher
 
+def A_road():
+    P = lclPlayer()
+    if P.currenttile.trader_rounds > 0:
+        actions = {}
+        for item in P.currenttile.trader_wares:
+            for categ in gameItems:
+                if item in categ:
+                    actions[item] = buyItem(item, categ[item], True)
+        actionGrid(actions, True)
+
 def A_plains():
-    actions = {'Excavate':Excavate({'Hunstman':[1,1,persuade_trainer(['Agility','Gathering'],'huntsman',exitActionLoop())],
-                                    'Wild Herd':[2,6,Gather('raw meat',0)]},9)}
+    exc = {'Hunstman':[1,1,persuade_trainer(['Agility','Gathering'],'huntsman',exitActionLoop())],
+           'Wild Herd':[2,6,Gather('raw meat',0)]}
+    actions = {'Excavate':Excavate(exc,9)}
     actionGrid(actions, True)
     
 def A_pond():
-    actions = {'Excavate':Excavate({'Go Fishing':[1,5,Gather('raw fish',0)],
-                                    'Clay':[6,8,getItem('clay')],
-                                    'Giant Serpent':[9,9,encounter('Giant Serpent',[20,45],['Elemental'])]},12)}
+    exc = {'Go Fishing':[1,5,Gather('raw fish',0)],
+           'Clay':[6,8,getItem('clay')],
+           'Giant Serpent':[9,9,encounter('Giant Serpent',[20,45],['Elemental'],{'scales':[1,3]})]}
+    actions = {'Excavate':Excavate(exc,12)}
     actionGrid(actions, True)
     
 def A_cave(tier=1):
@@ -336,26 +527,20 @@ def A_cave(tier=1):
         if P.paused:
             return
         C_cave(tier-1, False)
-    action_tiers = {1:{'Excavate':Excavate({'Lead':[1,4,getItem('lead')],
-                                            'Tin':[5,8,getItem('tin')],
-                                            'Monster':[9,15,C_cave(1,True)]},20),
-                       'Descend':move_down},
-                    2:{'Excavate':Excavate({'Tantalum':[1,3,getItem('tantalum')],
-                                            'Aluminum':[4,6,getItem('aluminum')],
-                                            'Monster':[7,14,C_cave(2,True)]},20),
-                       'Descend':move_down,
-                       'Ascend':move_up},
-                    3:{'Excavate':Excavate({'Tungsten':[1,2,getItem('tungsten')],
-                                            'Titanium':[3,4,getItem('titanium')],
-                                            'Monster':[5,13,C_cave(3,True)]},20),
-                       'Ascend':move_up}}
+    exc = {1:{'Lead':[1,4,getItem('lead')],'Tin':[5,8,getItem('tin')],'Monster':[9,15,C_cave(1,True)]},
+           2:{'Tantalum':[1,3,getItem('tantalum')],'Aluminum':[4,6,getItem('aluminum')],'Monster':[7,14,C_cave(2,True)]},
+           3:{'Tungsten':[1,2,getItem('tungsten')],'Titanium':[3,4,getItem('titanium')],'Monster':[5,13,C_cave(3,True)]}}
+    action_tiers = {1:{'Excavate':Excavate(exc[1],20),'Descend':move_down},
+                    2:{'Excavate':Excavate(exc[2],20),'Descend':move_down,'Ascend':move_up},
+                    3:{'Excavate':Excavate(exc[3],20),'Ascend':move_up}}
     actionGrid(action_tiers[tier], True)
             
 def A_outpost():
-    actions = {'Excavate':({'String':[1,3,getItem('string')],
-                            'Beads':[4,6,getItem('beads')],
-                            'Sand':[7,8,getItem('sand')],
-                            'Bandit':[9,10,C_outpost(True)]},12)}
+    exc = {'String':[1,3,getItem('string')],
+           'Beads':[4,6,getItem('beads')],
+           'Sand':[7,8,getItem('sand')],
+           'Bandit':[9,10,C_outpost(True)]}
+    actions = {'Excavate':(exc,12)}
     actionGrid(actions, True)
     
 def A_mountain(tier=1):
@@ -363,28 +548,103 @@ def A_mountain(tier=1):
         P = lclPlayer()
         if P.paused:
             return
-        C_mountain(tier-1, False)
+        C_mountain(tier-1)
     def move_up(_):
         P = lclPlayer()
         if P.paused:
             return
-        C_mountain(tier+1, False)
-    action_tiers = {1:{'Excavate':Excavate({'Copper':[1,5,getItem('copper')],
-                                            'Iron':[6,10,getItem('iron')],
-                                            'Monk':[11,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},20),
-                       'Ascend':move_up},
-                    2:{'Excavate':Excavate({'Kevlium':[1,4,getItem('kevlium')],
-                                            'Nickel':[5,8,getItem('nickel')],
-                                            'Monk':[9,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},20),
-                       'Descend':move_down,
-                       'Ascend':move_up},
-                    3:{'Excavate':Excavate({'Diamond':[1,3,getItem('tungsten')],
-                                            'Chromium':[4,6,getItem('titanium')],
-                                            'Monk':[7,8,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},20),
-                       'Descend':move_down}}
+        C_mountain(tier+1)
+    exc = {1:{'Copper':[1,5,getItem('copper')],'Iron':[6,10,getItem('iron')],'Monk':[11,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},
+           2:{'Kevlium':[1,4,getItem('kevlium')],'Nickel':[5,8,getItem('nickel')],'Monk':[9,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},
+           3:{'Diamond':[1,3,getItem('tungsten')],'Chromium':[4,6,getItem('titanium')],'Monk':[7,8,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]}}
+    action_tiers = {1:{'Excavate':Excavate(exc[1],20),'Ascend':move_up},
+                    2:{'Excavate':Excavate(exc[2],20),'Descend':move_down,'Ascend':move_up},
+                    3:{'Excavate':Excavate(exc[3],20),'Descend':move_down}}
     actionGrid(action_tiers[tier], True)
+    
+def A_oldlibrary():
+    exc = {'Book':[1,8,getBook()],'Hermit':[9,14,C_oldlibrary(True)]}
+    actions = {'Excavate':Excavate(exc,20)}
+    actionGrid(actions, True)
+    
+def A_ruins():
+    def read_attempt(_):
+        P = lclPlayer()
+        book = getBook(True)()
+        skill = book2skill(book)
+        if P.skills[skill] < 8:
+            critthink = P.activateSkill('Critical Thinking')
+            r = rbtwn(1,12)
+            if r <= critthink:
+                output(f"Understood teachings from old {book}.",'green')
+                P.updateSkill(skill)
+            else:
+                # Get 3 xp from reading
+                output(f"Understood some from old {book}.")
+                P.addXP(skill, 3)
+        else:
+            output(f"Found old {book} but can't learn anything new.",'yellow')
+        exitActionLoop()()
+    exc = {'Trap':[1,5,C_ruins(True,'trap')],
+           'Cloth':[6,7,C_ruins(True,'cloth')],
+           'Wizard':[8,10,C_ruins(True,'ancient wizard')],
+           'Old Book':[11,14,read_attempt]}
+    actions = {'Excavate':Excavate(exc,20)}
+    actionGrid(actions, True)
+    
+def A_battlezone():
+    def rare_find(_):
+        r = rbtwn(1,4)
+        if r==1:
+            getItem('shinopsis')()
+        elif r==2:
+            getItem('ebony')()
+        elif r==3:
+            getItem('astatine')()
+        else:
+            getItem('promethium')()
+    exc = {'Tantalum':[1,1,getItem('tantalum')],
+           'Aluminum':[2,2,getItem('aluminum')],
+           'Kevlium':[3,3,getItem('kevlium')],
+           'Nickel':[4,4,getItem('nickel')],
+           'Tungsten':[5,5,getItem('tungsten')],
+           'Titanium':[6,6,getItem('titanium')],
+           'Diamond':[7,7,getItem('diamond')],
+           'Chromium':[8,8,getItem('chromium')],
+           'Rare':[9,9,rare_find],
+           'Ninja':[10,16,C_battlezone(True)],
+           'Nothing':[17,20,exitActionLoop()]}
+    actions = {'Excavate':Excavate(exc,20)}
+    actionGrid(actions, True)
+    
+def A_wilderness():
+    def rare_find(_):
+        r = rbtwn(1,6)
+        if r==1:
+            getItem('shinopsis', empty_tile=True)()
+        elif r==2:
+            getItem('ebony', empty_tile=True)()
+        elif r==3:
+            getItem('astatine', empty_tile=True)()
+        elif r==4:
+            getItem('promethium', empty_tile=True)()
+        else:
+            getItem('gem', empty_tile=True)()
+    def tree_gather(_):
+        P = lclPlayer()
+        gathering = P.activateSkill("Gathering")
+        if gathering > 0:
+            P.useSkill("Gathering", 2, 7)
+            item = 'fruit' if rbtwn(1,2)==1 else 'bark'
+            output(f"You gather {gathering} {item}")
+            getItem(item, gathering, empty_tile=True)
+        else:
+            exitActionLoop(empty_tile=True)()
+    exc = {'Rare Find':[1,3,rare_find],'Grand Tree':[4,10,tree_gather],'Nothing':[11,20,exitActionLoop(empty_tile=True)]}
+    actions = {'Excavate':Excavate(exc,20)}
+    actionGrid(actions, True)
 
-avail_actions = {'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain}#,'oldlibrary','ruins','battle1','battle2','wilderness','village1','village2','village3','village4','village5',
+avail_actions = {'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}#,'wilderness','village1','village2','village3','village4','village5',
 #                 'anafola','benfriege','demetry','enfeir','fodker','glaser','kubani','pafiz','scetcher','starfex','tamarania','tamariza','tutalu','zinzibar'}
 cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
@@ -400,6 +660,12 @@ cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavat
           'tamariza':{'Combat Style':'Wizard','Coins':5,'Knowledges':[('Critical Thinking',1)],'Combat Boosts':[('Def-Physical',1),('Def-Elemental',2),('Hit Points',1)]},
           'tutalu':{'Combat Style':'Trooper','Coins':3,'Knowledges':[('Excavating',2)],'Combat Boosts':[('Attack',3)]},
           'zinzibar':{'Combat Style':'Physical','Coins':2,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Agility',2),('Attack',1)]}}
+gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish':1,'cooked fish':2,'well cooked fish':3,'fruit':2},
+             'Crafting':{'string':1,'beads':1,'hide':1,'sand':1,'clay':2,'scales':2,'leather':2,'bark':2,'ceramic':3,'glass':5,'rubber':6,'gems':8},
+             'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
+             'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
+             'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':8},
+             'Quests':{'cooling cubes'}}
 game_launched = [False]
 hovering = [0]
 
@@ -487,33 +753,62 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.empty_label = None
         self.empty_label_rounds = None
         self.is_empty = False
+        self.trader_label = None
+        self.trader_rounds = 0
+        self.trader_wares = set()
+        self.trader_wares_label = None
         self.neighbors = set()
         self.bind(on_press=self.initiate)
         self.tile = tile
         self.gridx = x
         self.gridy = y
         self.updateView()
-    def empty_tile(self, rounds=6, scale=0.5, recvd=False):
+    def empty_tile(self, rounds=6, recvd=False):
         if not recvd:
             socket_client.send('[EMPTY]',(self.gridx, self.gridy))
         self.opacity = 0.4
         self.empty_label_rounds=rounds
-        self.empty_label = Label(text=str(rounds), bold=True,pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True)
+        self.empty_label = Label(text=str(rounds), bold=True,pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True, font_size=20)
         self.parentBoard.add_widget(self.empty_label)
         self.is_empty = True
-    def update_empty_tile(self):
+    def trader_appears(self, rounds=3, recvd=False):
+        if not recvd:
+            Categories = list(gameItems)
+            Categories.remove('Quests')
+            Categories.remove('Cloth')
+            randomCategories = np.random.choice(Categories, 4)
+            self.trader_wares = set()
+            for c in randomCategories:
+                self.trader_wares.add(np.random.choice(list(gameItems[c])))
+            socket_client.send('[TRADER]',[(self.gridx, self.gridy), self.trader_wares])
+        else:
+            self.trader_wares = recvd
+        self.color = (0.5, 1, 0.5, 1)
+        self.trader_label = Label(text=str(rounds), bold=True, pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True, font_size=20)
+        self.trader_rounds = rounds
+        self.parentBoard.add_widget(self.trader_label)
+    def update_tile_properties(self):
         if self.is_empty:
-            print(self.is_empty, self.empty_label_rounds)
             self.empty_label_rounds -= 1
             if self.empty_label_rounds == 0:
                 self.empty_label_rounds = None
                 self.empty_label.text = ''
-                self.remove_widget(self.empty_label)
+                self.parentBoard.remove_widget(self.empty_label)
                 self.empty_label = None
                 self.is_empty = False
                 self.opacity = 1
             else:
                 self.empty_label.text = str(self.empty_label_rounds)
+        if self.trader_rounds > 0:
+            self.trader_rounds -= 1
+            if self.trader_rounds == 0:
+                self.trader_label.text = ''
+                self.parentBoard.remove_widget(self.trader_label)
+                self.trader_label = None
+                self.color = (1, 1, 1, 1)
+                self.trader_wares = set()
+            else:
+                self.trader_label.text = str(self.trader_rounds)
     def updateView(self, xshift=0, yshift=0):
         xpos, ypos = get_relpos(self.gridx, self.gridy)
         mag_x = 1 if self.parentBoard is None else self.parentBoard.zoom + 1
@@ -524,31 +819,61 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         if self.empty_label is not None:
             self.empty_label.pos_hint = self.pos_hint
             self.empty_label.size_hint = self.size_hint
+        if self.trader_label is not None:
+            self.trader_label.pos_hint = self.pos_hint
+            self.trader_label.size_hint = self.size_hint
         self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
     def set_neighbors(self):
         neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if self.gridy % 2 else -1, 1], [1 if self.gridy % 2 else -1, -1]]
-        self.neighbors = set()
+        self.neighbors, self.neighbortiles = set(), set()
         for dx, dy in neighbors:
             x, y = self.gridx + dx, self.gridy + dy
             if (x, y) in self.parentBoard.gridtiles:
                 self.neighbors.add((x, y))
+                self.neighbortiles.add(self.parentBoard.gridtiles[(x,y)].tile)
     def is_neighbor(self):
         return self.parentBoard.localPlayer.currentcoord in self.neighbors
-    def findNearest(self, tiles, T=None, depth=0, checked=set(), queue=[]):
+    def findNearest(self, tiles, T=None, depth=0, checked=set(), queue={}):
         if T is None: T = self
         if T.tile in tiles:
-            return (T.gridx, T.gridy)
-        checked.add((T.gridx, T.gridy))
-        depth += 1
-        queue += list(T.neighbors)
-        nextT = self.parentBoard.gridtiles[queue.pop(0)]
-        return nextT.findNearest(tiles, nextT, depth, checked, queue)
+            nextDepth = None
+            return (T.gridx, T.gridy), depth
+        nextinLine = deepcopy(T.neighbors.difference(checked))
+        checked = checked.union(nextinLine)
+        if (depth+1) in queue:
+            queue[depth+1] = queue[depth+1].union(nextinLine)
+        else:
+            queue[depth+1] = nextinLine
+        nextDepth = min(queue.keys())
+        if len(queue[nextDepth]) == 0:
+            queue.pop(nextDepth)
+            nextDepth = min(queue.keys())
+            if len(queue[nextDepth]) == 0:
+                print("Warning: are you sure you are looking for a tile that exists?")
+        nextT = self.parentBoard.gridtiles[queue[nextDepth].pop()]
+        return nextT.findNearest(tiles, nextT, nextDepth, checked, queue)
     def on_enter(self, *args):
         hovering[0] += 1
         self.source = f'images\\selectedtile\\{self.tile}.png'
+        if (self.trader_rounds > 0) and (self.trader_wares_label is None):
+            L = []
+            for item in self.trader_wares:
+                for categ in gameItems:
+                    if item in gameItems[categ]:
+                        L.append(f'{item}: [color=ffff75]{gameItems[categ][item]}[/color]')
+                        break
+            self.trader_wares_label = Label(text='\n'.join(L), color=(1, 1, 1, 1), markup=True, pos_hint = {'x':self.centx, 'y':self.centy}, size_hint=(self.size_hint[0], self.size_hint[1]))
+            self.parentBoard.add_widget(self.trader_wares_label)
+            with self.trader_wares_label.canvas.before:
+                self.wares_color = Color(0.2, 0.2, 0.2, 0.7)
+                self.wares_rect = Rectangle(pos=(self.pos[0]+self.size[0]/2,self.pos[1]+self.size[1]/2), size=(self.size[0]*1.5,self.size[1]))
     def on_leave(self, *args):
         hovering[0] -= 1
         self.source = f'images\\tile\\{self.tile}.png'
+        if self.trader_wares_label is not None:
+            self.trader_wares_label.text = ''
+            self.parentBoard.remove_widget(self.trader_wares_label)
+            self.trader_wares_label = None
     def initiate(self, instance):
         if self.parentBoard.localPlayer.paused:
             return
@@ -707,7 +1032,6 @@ class GamePage(GridLayout):
     def make_actionGrid(self, funcDict, save_rest=False):
         self.clear_actionGrid(save_rest)
         for txt, func in funcDict.items():
-            print(txt, func)
             B = Button(text=txt)
             B.bind(on_press=func)
             self.actionButtons.append(B)
@@ -837,12 +1161,12 @@ class Player(Image):
             if skip_check != True:
                 socket_client.send('[MOVE]',coord)
             if skip_check == 3:
-                self.updateFatigue(2)
+                self.takeDamage(0,2)
                 self.update_mainStatPage()
             elif skip_check == 2:
                 output(f"[ACTION {self.max_actions-self.actions+1}] Moving onto road consumes action.")
                 self.actions -= 1
-                self.updateFatigue(1)
+                self.takeDamage(0,1)
                 self.update_mainStatPage()
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
@@ -926,14 +1250,12 @@ class Player(Image):
         self.parentBoard.localPlayer.actions = self.max_actions
         self.parentBoard.sendFaceMessage('Start Round!')
         for T in self.parentBoard.gridtiles.values():
-            T.update_empty_tile()
+            T.update_tile_properties()
         check_paralysis()
-    def updateFatigue(self, fatigue, add=True):
-        self.fatigue = self.fatigue + fatigue if add else fatigue
-        check_paralysis()
-    def takeDamage(self, amt):
+    def takeDamage(self, hp_amt, ftg_amt, add=True):
         hp_idx = self.attributes['Hit Points']
-        self.current[hp_idx] = max([0, self.current[hp_idx]-amt])
+        self.current[hp_idx] = max([0, self.current[hp_idx]-hp_amt])
+        fainted = False
         if self.current[hp_idx] == 0:
             if self.Combat > 2:
                 CL = list(self.attributes)
@@ -949,13 +1271,20 @@ class Player(Image):
             # Just in case they die in a tiered environment, make sure they are not stuck.
             self.tiered = False
             # Move to nearest city
-            self.moveto(self.currenttile.findNearest(cities))
+            coord, distance = self.currenttile.findNearest(cities)
+            self.moveto(coord)
             # Artificially paralyze the player by setting fatigue to 11
-            self.updateFatigue(11, False)
+            self.fatigue = 11
+            fainted = True
+        if not fainted:
+            self.fatigue = self.fatigue + ftg_amt if add else ftg_amt
+        paralyzed = True if self.fatigue>10 else False
+        check_paralysis()
+        return (fainted or paralyzed)
     def takeAction(self, fatigue=1, verbose=True):
         if verbose: output(f"[ACTION {self.max_actions-self.actions+1}] You took {fatigue} fatigue")
         self.actions -= 1
-        if fatigue > 0: self.updateFatigue(fatigue)
+        if fatigue > 0: self.takeDamage(0,fatigue)
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
         self.update_mainStatPage()
         if self.actions <= 0:
@@ -980,7 +1309,7 @@ class Player(Image):
             actv_lvl = lvl
             if lvl <= max_lvl_xp: self.addXP(skill, xp, ' by activation')
         return actv_lvl
-    def useSkill(self, skill, xp=1, max_lvl_xp=6):
+    def useSkill(self, skill, xp=1, max_lvl_xp=5):
         if self.skills[skill] <= max_lvl_xp:
             self.addXP(skill, xp)
     def updateAttribute(self, attribute, val=1):
@@ -1132,6 +1461,10 @@ class LaunchPage(GridLayout):
             def pauseUser(_):
                 game_app.game_page.board_page.Players[username].pause()
             Clock.schedule_once(pauseUser, 0.2)
+        elif (category == '[TRADER]') and (type(message[1]) is set):
+            def clockedTrader(_):
+                game_app.game_page.board_page.gridtiles[message[0]].trader_appears(recvd=message[1])
+            Clock.schedule_once(clockedTrader, 0.2)
     def update_self(self, _):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready
