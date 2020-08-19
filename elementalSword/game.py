@@ -10,6 +10,7 @@ import os
 import sys
 from copy import deepcopy
 import socket_client
+from time import time
 #import mechanic as mcnc
 import kivy
 from kivy.app import App
@@ -79,6 +80,14 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 if P.road_moves == 0:
                     P.takeAction(amt)
                     P.road_moves = P.max_road_moves
+            elif (consume == 'buy') or (consume == 'bartered'):
+                P.avail_transactions -= 1
+                if consume == 'bartered': P.activated_bartering=True
+                if P.avail_transactions == 0:
+                    # If the player makes his max transactions, then it is the same as if he bartered. Otherwise, bartering is handled in the takeAction method.
+                    P.activated_bartering = False
+                    P.takeAction(amt)
+                    P.avail_transactions = P.max_avail_transactions
             elif amt>0:
                 P.takeAction(amt)
             if empty_tile: P.currenttile.empty_tile()
@@ -91,6 +100,67 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 P.go2action(tier)
     return exit_loop
 
+def getItem(item, amt=1, consume=None, empty_tile=False, action_amt=1):
+    P = lclPlayer()
+    def getitem(_=None):
+        if P.paused:
+            return
+        P.addItem(item, amt)
+        exitActionLoop(consume, action_amt, empty_tile)()
+    return getitem
+
+def buyItem(item, cost, from_trader, amt=1, consume='buy'):
+    P = lclPlayer()
+    def buyitem(_=None):
+        if P.paused:
+            return
+        if P.coins < (cost*amt):
+            output("Insufficient funds!",'yellow')
+        else:
+            P.coins -= (cost*amt)
+            if from_trader and (item in P.currenttile.trader_wares):
+                # [INCOMPLETE] the buy update is not implemented
+                P.currenttile.buy_from_trader(item)
+            getItem(item, amt, consume, False, 1)()
+    return buyitem
+
+def Trading(items, trader, barter=False):
+    # [INCOMPLETE] Selling is not yet implemented
+    P = lclPlayer()
+    if P.paused:
+        return
+    def activate_bartering(_):
+        if P.paused:
+            return
+        bartering = P.activateSkill('Bartering')
+        r = rbtwn(1, 12)
+        if r <= bartering:
+            P.useSkill('Bartering')
+            output("You successfully Barter", 'green')
+            if (bartering > 8) and trader:
+                Trading(items, trader, 2) # Reduce prices by max of 2
+            else:
+                Trading(items, trader, 1)
+        else:
+            Trading(items, trader, None) # Not given the opportunity to barter again unless performs a different action first
+    actions = {}
+    for item in items:
+        for categ in gameItems:
+            if item in gameItems[categ]:
+                cost = gameItems[categ][item] if trader else mrktPrice[gameItems[categ][item]]
+                cost = cost if (barter is None) or (not barter) else cost-barter
+                clr = 'ffff75' if (barter is None) or (not barter) else '00ff75'
+                actions[f'{item}:[color={clr}]{cost}[/color]'] = buyItem(item, cost, trader, consume='buy' if barter==False else 'bartered')
+                # Give the player the option to go back to regular action menu of the tile
+                actions['Back'] = exitActionLoop(None, 0)
+    # If the player has not activated bartering already, give them a chance to do so
+    if (barter == False) and (P.activated_bartering==False): actions['Barter'] = activate_bartering
+    actionGrid(actions, False)
+    
+def await_trading(items, trader, barter=False):
+    def trade(_):
+        Trading(items, trader, barter)
+    return trade
 
 def Train(abilities, master, confirmed):
     P = lclPlayer()
@@ -185,31 +255,6 @@ def Train(abilities, master, confirmed):
                     output("You were unsuccessful.",'red')
                     P.takeAction()
                     Train(abilities, master, False)
-
-def getItem(item, amt=1, consume=None, empty_tile=False, action_amt=1):
-    P = lclPlayer()
-    def getitem(_=None):
-        if P.paused:
-            return
-        P.addItem(item, amt)
-        exitActionLoop(consume, action_amt, empty_tile)()
-    return getitem
-
-def buyItem(item, cost, from_trader, amt=1, empty_tile=False):
-    P = lclPlayer()
-    def buyitem(_=None):
-        if P.paused:
-            return
-        if P.coins < (cost*amt):
-            output("Insufficient funds!",'yellow')
-        else:
-            P.coins -= (cost*amt)
-            if from_trader and (item in P.currenttile.trader_wares):
-                # [INCOMPLETE] the buy update is not implemented
-                P.currenttile.buy_from_trader(item)
-            # [INCOMPLETE] decide what "buy" exitActionLoop does
-            getItem(item, amt, 'buy', False, 0)
-    return buyitem
 
 # Consequences
 def C_road(action=1):
@@ -496,12 +541,11 @@ def persuade_trainer(abilities, master, fail_func, threshold=12):
 def A_road():
     P = lclPlayer()
     if P.currenttile.trader_rounds > 0:
-        actions = {}
-        for item in P.currenttile.trader_wares:
-            for categ in gameItems:
-                if item in categ:
-                    actions[item] = buyItem(item, categ[item], True)
+        actions = {'Trader': await_trading(P.currenttile.trader_wares, True, False)}
         actionGrid(actions, True)
+    else:
+        # Otherwise clear the action grid except rest stuff
+        actionGrid({}, True)
 
 def A_plains():
     exc = {'Hunstman':[1,1,persuade_trainer(['Agility','Gathering'],'huntsman',exitActionLoop())],
@@ -540,7 +584,7 @@ def A_outpost():
            'Beads':[4,6,getItem('beads')],
            'Sand':[7,8,getItem('sand')],
            'Bandit':[9,10,C_outpost(True)]}
-    actions = {'Excavate':(exc,12)}
+    actions = {'Excavate':Excavate(exc,12)}
     actionGrid(actions, True)
     
 def A_mountain(tier=1):
@@ -644,437 +688,9 @@ def A_wilderness():
     actions = {'Excavate':Excavate(exc,20)}
     actionGrid(actions, True)
 
-avail_actions = {'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}#,'wilderness','village1','village2','village3','village4','village5',
+avail_actions = {'road':A_road,'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}#,'wilderness','village1','village2','village3','village4','village5',
 #                 'anafola','benfriege','demetry','enfeir','fodker','glaser','kubani','pafiz','scetcher','starfex','tamarania','tamariza','tutalu','zinzibar'}
-cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
-          'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
-          'demetry':{'Combat Style':'Elemental','Coins':9,'Knowledges':[('Bartering',2)],'Combat Boosts':[]},
-          'enfeir':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Cunning',2)]},
-          'fodker':{'Combat Style':'Trooper','Coins':5,'Knowledges':[('Smithing',1)],'Combat Boosts':[('Stability',2),('Def-Physical',2)]},
-          'glaser':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Survival',1)],'Combat Boosts':[('Def-Trooper',3),('Cunning',1)]},
-          'kubani':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Crafting',1),('Gathering',1)],'Combat Boosts':[('Def-Wizard',3),('Agility',1)]},
-          'pafiz':{'Combat Style':'Wizard','Coins':4,'Knowledges':[('Persuasion',1)],'Combat Boosts':[('Def-Elemental',3)]},
-          'scetcher':{'Combat Style':'Physical','Coins':4,'Knowledges':[],'Combat Boosts':[('Attack',1),('Hit Points',1),('Def-Physical',1),('Def-Wizard',1),('Def-Elemental',1),('Def-Trooper',1)]},
-          'starfex':{'Combat Style':'Elemental','Coins':5,'Knowledges':[('Heating',1),('Gathering',1)],'Combat Boosts':[('Attack',2)]},
-          'tamarania':{'Combat Style':'Physical','Coins':7,'Knowledges':[('Smithing',2)],'Combat Boosts':[('Attack',2)]},
-          'tamariza':{'Combat Style':'Wizard','Coins':5,'Knowledges':[('Critical Thinking',1)],'Combat Boosts':[('Def-Physical',1),('Def-Elemental',2),('Hit Points',1)]},
-          'tutalu':{'Combat Style':'Trooper','Coins':3,'Knowledges':[('Excavating',2)],'Combat Boosts':[('Attack',3)]},
-          'zinzibar':{'Combat Style':'Physical','Coins':2,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Agility',2),('Attack',1)]}}
-gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish':1,'cooked fish':2,'well cooked fish':3,'fruit':2},
-             'Crafting':{'string':1,'beads':1,'hide':1,'sand':1,'clay':2,'scales':2,'leather':2,'bark':2,'ceramic':3,'glass':5,'rubber':6,'gems':8},
-             'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
-             'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
-             'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':8},
-             'Quests':{'cooling cubes'}}
-game_launched = [False]
-hovering = [0]
 
-def make_positions(start_y=0):
-    pos = {}
-    for i in range(start_y, ytiles):
-        for j in range(xtiles):
-            tiletype = input(f'({j},{i}): ')
-            if tiletype != '':
-                if tiletype not in pos:
-                    pos[tiletype] = [(j, i)]
-                else:
-                    pos[tiletype].append((j, i))
-    return pos
-
-def merge_positions(pos1, pos2):
-    pos = {}
-    for key in pos1:
-        if key not in pos2:
-            pos[key] = pos1[key]
-        else:
-            seen_tup = set()
-            pos[key] = []
-            for tup in pos1[key]:
-                pos[key].append(tup)
-                seen_tup.add(tup)
-            for tup in pos2[key]:
-                if tup not in seen_tup:
-                    pos[key].append(tup)
-    for key in pos2:
-        if key not in pos:
-            pos[key] = pos2[key]
-    return pos
-
-positions = {'road': [(3, 1),(4, 1),(5, 1),(6, 1),(8, 1),(9, 1),(10, 1),(11, 2),(12, 2),(13, 2),(2, 2),(3, 2),(3, 3),(1, 3),(1, 4),(1, 5),(2, 5),(3, 5),
-                      (4, 6),(8, 2),(7, 3),(14, 3),(5, 4),(6, 4),(7, 4),(9, 4),(10, 4),(11, 4),(12, 4),(15, 4),(6, 5),(10, 5),(12, 5),(14, 5),(6, 6),(11, 6),
-                      (13, 6),(14, 6),(1, 7),(5, 7),(6, 7),(7, 7),(8, 7),(9, 7),(10, 7),(12, 7),(2, 8),(4, 8),(12, 8),(2, 9),(3, 9),(4, 9),(12, 9),(5, 10),
-                      (13, 10),(5, 11),(13, 11),(6, 12),(13, 12)],
-             'randoms': [(4, 2),(5, 2),(6, 2),(2, 3),(9, 2),(10, 2),(11, 1),(5, 3),(6, 3),(9, 3),(13, 3),(2, 4),(13, 4),(14, 4),(5, 5),(9, 5),(11, 5),(13, 5),
-                         (3, 6),(7, 6),(8, 6),(9, 6),(10, 6),(2, 7),(13, 7),(1, 8),(3, 8),(6, 8),(7, 8),(8, 8),(9, 8),(10, 8),(13, 8),(14, 8),(15, 8),(5, 9),
-                         (6, 9),(7, 9),(8, 9),(9, 9),(10, 9),(11, 9),(13, 9),(14, 9),(4, 10),(6, 10),(11, 10),(12, 10),(14, 10),(3, 11),(4, 11),(6, 11),
-                         (11, 11),(12, 11),(4, 12),(7, 12),(12, 12)],
-             'ruins': [(1, 1), (2, 0), (3, 0), (14, 0), (15, 1)],
-             'battle1': [(14, 2)], 'battle2': [(14, 1)],
-             'village1': [(0, 5),(7, 0),(4, 3),(12, 1),(8, 3),(10, 3),(15, 3),(5, 6),(12, 6),(14, 7),(1, 9),(5, 12),(12, 13)],
-             'village2': [(8, 0),(0, 6),(16, 2),(12, 3),(3, 4),(7, 5),(3, 7),(15, 7),(11, 8),(1, 10),(4, 13),(13, 14)],
-             'village3': [(7, 2),(4, 5),(8, 5),(16, 6),(0, 7),(5, 8),(1, 11),(5, 14),(14, 14)],
-             'village4': [(15, 5), (2, 6), (2, 11), (14, 13), (6, 14)],
-             'village5': [(3, 10), (14, 12), (6, 13)],
-             'fodker': [(2, 1)],'kubani': [(7, 1)],'scetcher': [(4, 4)],'pafiz': [(1, 6)],'tamariza': [(4, 7)],'zinzibar': [(15, 2)],'enfeir': [(13, 1)],
-             'tamarania': [(11, 3)],'demetry': [(8, 4)],'starfex': [(15, 6)],'anafola': [(11, 7)],'tutalu': [(2, 10)],'benfriege': [(5, 13)],'glaser': [(13, 13)],
-             'wilderness': [(7, 10),(8, 10),(9, 10),(10, 10),(7, 11),(8, 11),(9, 11),(10, 11),(8, 12),(9, 12),(10, 12),(11, 12),(7, 13),(11, 13)]}
-randoms = ['oldlibrary','outpost','cave','mountain','plains','pond']
-
-def get_dim(dx, dy):
-    return int(xpix*dx), int((ypix * (dy-(dy//2))) + (xpix * (dy//2) / np.sqrt(3)))
-
-xsize, ysize = get_dim(xtiles, ytiles)
-scale = 1
-xprel, yprel = scale * (xpix / xsize), scale * (ypix / ysize)
-
-def get_pos(x, y):
-    if y % 2:
-        xoffset, yoffset = xpix/2, (xpix/np.sqrt(3)) + (ypix/2 - xpix/(2*np.sqrt(3)))
-    else:
-        xoffset, yoffset = 0, 0
-    return (x * xpix) + xoffset, (y // 2) * (ypix + xpix/np.sqrt(3)) + yoffset
-
-def get_posint(x, y):
-    px, py = get_pos(x, y)
-    return int(px), int(py)
-
-def get_relpos(x, y):
-    px, py = get_pos(x, y)
-    return float(px / xsize), float(py / ysize)
-
-def get_hexcolor(rgb):
-    return '%02x%02x%02x' % rgb
-
-class Tile(ButtonBehavior, HoverBehavior, Image):
-    def __init__(self, tile, x, y, **kwargs):
-        super(Tile, self).__init__(**kwargs)
-        self.source = f'images\\tile\\{tile}.png'
-        self.parentBoard = None
-        self.empty_label = None
-        self.empty_label_rounds = None
-        self.is_empty = False
-        self.trader_label = None
-        self.trader_rounds = 0
-        self.trader_wares = set()
-        self.trader_wares_label = None
-        self.neighbors = set()
-        self.bind(on_press=self.initiate)
-        self.tile = tile
-        self.gridx = x
-        self.gridy = y
-        self.updateView()
-    def empty_tile(self, rounds=6, recvd=False):
-        if not recvd:
-            socket_client.send('[EMPTY]',(self.gridx, self.gridy))
-        self.opacity = 0.4
-        self.empty_label_rounds=rounds
-        self.empty_label = Label(text=str(rounds), bold=True,pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True, font_size=20)
-        self.parentBoard.add_widget(self.empty_label)
-        self.is_empty = True
-    def trader_appears(self, rounds=3, recvd=False):
-        if not recvd:
-            Categories = list(gameItems)
-            Categories.remove('Quests')
-            Categories.remove('Cloth')
-            randomCategories = np.random.choice(Categories, 4)
-            self.trader_wares = set()
-            for c in randomCategories:
-                self.trader_wares.add(np.random.choice(list(gameItems[c])))
-            socket_client.send('[TRADER]',[(self.gridx, self.gridy), self.trader_wares])
-        else:
-            self.trader_wares = recvd
-        self.color = (0.5, 1, 0.5, 1)
-        self.trader_label = Label(text=str(rounds), bold=True, pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True, font_size=20)
-        self.trader_rounds = rounds
-        self.parentBoard.add_widget(self.trader_label)
-    def update_tile_properties(self):
-        if self.is_empty:
-            self.empty_label_rounds -= 1
-            if self.empty_label_rounds == 0:
-                self.empty_label_rounds = None
-                self.empty_label.text = ''
-                self.parentBoard.remove_widget(self.empty_label)
-                self.empty_label = None
-                self.is_empty = False
-                self.opacity = 1
-            else:
-                self.empty_label.text = str(self.empty_label_rounds)
-        if self.trader_rounds > 0:
-            self.trader_rounds -= 1
-            if self.trader_rounds == 0:
-                self.trader_label.text = ''
-                self.parentBoard.remove_widget(self.trader_label)
-                self.trader_label = None
-                self.color = (1, 1, 1, 1)
-                self.trader_wares = set()
-            else:
-                self.trader_label.text = str(self.trader_rounds)
-    def updateView(self, xshift=0, yshift=0):
-        xpos, ypos = get_relpos(self.gridx, self.gridy)
-        mag_x = 1 if self.parentBoard is None else self.parentBoard.zoom + 1
-        mag_y = 1 if self.parentBoard is None else self.parentBoard.zoom + 1
-        self.size_hint = (xprel * mag_x, yprel * mag_y)
-        xpos, ypos = xpos * mag_x, ypos * mag_x
-        self.pos_hint = {'x': xpos + xshift, 'y': ypos + yshift}
-        if self.empty_label is not None:
-            self.empty_label.pos_hint = self.pos_hint
-            self.empty_label.size_hint = self.size_hint
-        if self.trader_label is not None:
-            self.trader_label.pos_hint = self.pos_hint
-            self.trader_label.size_hint = self.size_hint
-        self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
-    def set_neighbors(self):
-        neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if self.gridy % 2 else -1, 1], [1 if self.gridy % 2 else -1, -1]]
-        self.neighbors, self.neighbortiles = set(), set()
-        for dx, dy in neighbors:
-            x, y = self.gridx + dx, self.gridy + dy
-            if (x, y) in self.parentBoard.gridtiles:
-                self.neighbors.add((x, y))
-                self.neighbortiles.add(self.parentBoard.gridtiles[(x,y)].tile)
-    def is_neighbor(self):
-        return self.parentBoard.localPlayer.currentcoord in self.neighbors
-    def findNearest(self, tiles, T=None, depth=0, checked=set(), queue={}):
-        if T is None: T = self
-        if T.tile in tiles:
-            nextDepth = None
-            return (T.gridx, T.gridy), depth
-        nextinLine = deepcopy(T.neighbors.difference(checked))
-        checked = checked.union(nextinLine)
-        if (depth+1) in queue:
-            queue[depth+1] = queue[depth+1].union(nextinLine)
-        else:
-            queue[depth+1] = nextinLine
-        nextDepth = min(queue.keys())
-        if len(queue[nextDepth]) == 0:
-            queue.pop(nextDepth)
-            nextDepth = min(queue.keys())
-            if len(queue[nextDepth]) == 0:
-                print("Warning: are you sure you are looking for a tile that exists?")
-        nextT = self.parentBoard.gridtiles[queue[nextDepth].pop()]
-        return nextT.findNearest(tiles, nextT, nextDepth, checked, queue)
-    def on_enter(self, *args):
-        hovering[0] += 1
-        self.source = f'images\\selectedtile\\{self.tile}.png'
-        if (self.trader_rounds > 0) and (self.trader_wares_label is None):
-            L = []
-            for item in self.trader_wares:
-                for categ in gameItems:
-                    if item in gameItems[categ]:
-                        L.append(f'{item}: [color=ffff75]{gameItems[categ][item]}[/color]')
-                        break
-            self.trader_wares_label = Label(text='\n'.join(L), color=(1, 1, 1, 1), markup=True, pos_hint = {'x':self.centx, 'y':self.centy}, size_hint=(self.size_hint[0], self.size_hint[1]))
-            self.parentBoard.add_widget(self.trader_wares_label)
-            with self.trader_wares_label.canvas.before:
-                self.wares_color = Color(0.2, 0.2, 0.2, 0.7)
-                self.wares_rect = Rectangle(pos=(self.pos[0]+self.size[0]/2,self.pos[1]+self.size[1]/2), size=(self.size[0]*1.5,self.size[1]))
-    def on_leave(self, *args):
-        hovering[0] -= 1
-        self.source = f'images\\tile\\{self.tile}.png'
-        if self.trader_wares_label is not None:
-            self.trader_wares_label.text = ''
-            self.parentBoard.remove_widget(self.trader_wares_label)
-            self.trader_wares_label = None
-    def initiate(self, instance):
-        if self.parentBoard.localPlayer.paused:
-            return
-        elif hovering[0] > 1:
-            output("Hovering over too many tiles! No action performed!",'yellow')
-            return
-        # If the tile is a neighbor and the player is not descended in a cave or ontop of a mountain... (tiered)
-        elif self.is_neighbor() and (not self.parentBoard.localPlayer.tiered):
-            self.parentBoard.localPlayer.moveto((self.gridx, self.gridy))
-
-class BoardPage(FloatLayout):
-    def __init__(self, game_page, **kwargs):
-        super().__init__(**kwargs)
-        self.game_page = game_page
-        self.localuser = game_app.connect_page.username.text
-        self.size = get_dim(xtiles, ytiles)
-        self.zoom = 0
-        self.gridtiles = {}
-        self.Players = {}
-        self.localPlayer = None
-        for tiletype in positions:
-            if tiletype == 'randoms':
-                continue
-            for x, y in positions[tiletype]: self.add_tile(tiletype, x, y)
-        np.random.seed(seed)
-        randomChoice = np.random.choice(randoms*int(np.ceil(len(positions['randoms'])/len(randoms))), len(positions['randoms']))
-        for i in range(len(positions['randoms'])):
-            x, y = positions['randoms'][i]
-            self.add_tile(randomChoice[i], x, y)
-        for T in self.gridtiles.values():
-            T.set_neighbors()
-        self.zoomButton = Button(text="Zoom", pos_hint={'x':0,'y':0}, size_hint=(0.06, 0.03))
-        self.zoomButton.bind(on_press=self.updateView)
-        self.add_widget(self.zoomButton)
-    def add_tile(self, tiletype, x, y):
-        T = Tile(tiletype, x, y)
-        self.gridtiles[(x,y)] = T
-        T.parentBoard = self
-        self.add_widget(T)
-    def add_player(self, username, birthcity):
-        self.Players[username] = Player(self, username, birthcity)
-        self.add_widget(self.Players[username])
-        if username == self.localuser:
-            self.localPlayer = self.Players[username]
-            # So that the start round will appear above the player
-            self.startLabel = Label(text='',bold=True,color=(0.5, 0, 1, 0.7),pos_hint={'x':0,'y':0},size_hint=(1,1),font_size=50)
-            self.add_widget(self.startLabel)
-            self.game_page.recover_button.bind(on_press=self.localPlayer.recover)
-            self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
-            self.localPlayer.add_mainStatPage()
-    def sendFaceMessage(self, msg, clr=None):
-        def clear_lbl(_):
-            self.startLabel.text = ''
-        self.startLabel.text = msg
-        output(msg, clr)
-        Clock.schedule_once(clear_lbl, 2)
-    def updateView(self, deltaZoom=0):
-        # Make sure change does not go beyond the bounds of [0,3]
-        if deltaZoom:
-            self.zoom = 0 if self.zoom == 3 else self.zoom+1
-        if (self.zoom == 0) and (type(deltaZoom) is int) and (deltaZoom==0):
-            # We still update the players because of initiation troubles
-            for P in self.Players.values():
-                P.updateView()
-            return
-        lrpx, lrpy = get_relpos(self.localPlayer.currenttile.gridx, self.localPlayer.currenttile.gridy)
-        lrpx *= (self.zoom+1)
-        lrpy *= (self.zoom+1)
-        if self.zoom > 0:
-            shiftx, shifty = (0.5 - (xprel*(self.zoom+1)/2) - lrpx), (0.5 - (yprel*(self.zoom+1)/2) - lrpy)
-        else:
-            shiftx, shifty = 0, 0
-        for T in self.gridtiles.values():
-            T.updateView(shiftx, shifty)
-        for P in self.Players.values():
-            P.updateView()
-            
-class Table(GridLayout):
-    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, **kwargs):
-        super().__init__(**kwargs)
-        self.cols = len(header)
-        self.wrap_text = wrap_text
-        self.header = header
-        if bkg_color is not None:
-            with self.canvas.before:
-                Color(bkg_color[0],bkg_color[1],bkg_color[2],bkg_color[3],mode='rgba')
-                self.bkg = Rectangle(pos=self.pos, size=self.size)
-            self.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
-        self.cells = {}
-        for h in header:
-            self.cells[h] = []
-            clr = ['[b]','[/b]'] if header_color is None else [f'[color={get_hexcolor(header_color)}][b]','[/b][/color]']
-            if text_color is None:
-                L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center')
-            else:
-                L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',color=text_color)
-            if wrap_text: L.text_size = L.size
-            self.add_widget(L)
-        # In the case that data is one-dimensional, then make it a matrix of one row.
-        data = np.reshape(data,(1,-1)) if len(np.shape(data))==1 else data
-        for row in data:
-            j = 0
-            for item in row:
-                cell = header[j]
-                j += 1
-                L = Label(text=str(item)) if text_color is None else Label(text=str(item),color=text_color)
-                if wrap_text: L.text_size = L.size
-                self.add_widget(L)
-                self.cells[cell].append(L)
-    def update_bkgSize(self, instance, value):
-        self.bkg.size = self.size
-        self.bkg.pos = self.pos
-        if self.wrap_text:
-            for L in self.children:
-                L.text_size = L.size
-            
-class GamePage(GridLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.cols = 2
-        self.button_num = 1
-        self.board_page = BoardPage(self)
-        self.add_widget(self.board_page)
-        input_y, label_y, stat_y, action_y, output_y = 0.05, 0.4, 0.1, 0.2, 0.25
-        self.stat_ypos, self.stat_ysize = input_y+label_y, stat_y
-        self.right_line = RelativeLayout(size_hint_x=0.25)
-        self.output = Label(text='Action Buttons:',pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y),color=(0.1,0.1,0.1,0.8),valign='bottom',halign='left',markup=True)
-        self.output.text_size = self.output.size
-        with self.output.canvas.before:
-            Color(0.6, 0.6, 0.8, 0.5, mode='rgba')
-            self.outrect=Rectangle(pos=self.output.pos, size=self.output.size)
-        self.output.bind(pos=self.update_bkgSize, size=self.update_bkgSize)
-        self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
-        self.recover_button = Button(text='Rest (2)')
-        self.eat_button = Button(text='Eat')
-        # Button is bound after local player is detected
-        self.actionGrid.add_widget(self.recover_button)
-        self.actionGrid.add_widget(self.eat_button)
-        self.actionButtons = [self.recover_button, self.eat_button]
-        self.statGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y)},size_hint_y=stat_y,cols=4)
-        self.display_page = Label(text='Chat Box (press enter to send message)\n',pos_hint={'x':0,'y':input_y},color=(1,1,1,0.8),size_hint=(1,label_y),markup=True)
-        self.display_page.text_size = self.display_page.size
-        with self.display_page.canvas.before:
-            Color(0, 0, 0, 0.7, mode='rgba')
-            self.rect=Rectangle(pos=self.display_page.pos,size=self.display_page.size)
-        # Make the display background update itself evertime there is a window size change
-        self.display_page.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
-        self.new_message = TextInput(pos_hint={'x':0,'y':0},size_hint=(1,input_y))
-        self.right_line.add_widget(self.output)
-        self.right_line.add_widget(self.actionGrid)
-        self.right_line.add_widget(self.display_page)
-        self.right_line.add_widget(self.new_message)
-        self.add_widget(self.right_line)
-        # Any keyboard press will trigger the event:
-        Window.bind(on_key_down=self.on_key_down)
-    def make_actionGrid(self, funcDict, save_rest=False):
-        self.clear_actionGrid(save_rest)
-        for txt, func in funcDict.items():
-            B = Button(text=txt)
-            B.bind(on_press=func)
-            self.actionButtons.append(B)
-            self.actionGrid.add_widget(B)
-    def clear_actionGrid(self, save_rest=False):
-        for B in self.actionButtons:
-            self.actionGrid.remove_widget(B)
-        if save_rest:
-            self.actionButtons = [self.recover_button, self.eat_button]
-            self.actionGrid.add_widget(self.recover_button)
-            self.actionGrid.add_widget(self.eat_button)
-        else:
-            self.actionButtons = []
-    def update_bkgSize(self, instance, value):
-        self.rect.size = self.display_page.size
-        self.rect.pos = self.display_page.pos
-        self.outrect.size = self.output.size
-        self.outrect.pos = self.output.pos
-        self.display_page.text_size = self.display_page.size
-        self.output.text_size = self.output.size
-    def update_output(self, message, color=None):
-        trns_clr = {'red':get_hexcolor((255,0,0)),'green':get_hexcolor((0,255,0)),'yellow':get_hexcolor((147,136,21)),'blue':get_hexcolor((0,0,255))}
-        if color is None:
-            message = message
-        elif color in trns_clr:
-            message = '[color='+trns_clr[color]+']'+message+'[/color]'
-        else:
-            hx = get_hexcolor(color)
-            message = '[color='+hx+']'+message+'[/color]'
-        self.output.text += '\n' + message
-    def update_display(self, username, message):
-        clr = get_hexcolor((131,215,190)) if username == self.board_page.localuser else get_hexcolor((211, 131, 131))
-        self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
-    def on_key_down(self, instance, keyboard, keycode, text, modifiers):
-        # We want to take an action only when Enter key is being pressed, and send a message
-        if keycode == 40:
-            # Send Message
-            message = self.new_message.text
-            self.new_message.text = ''
-            if message:
-                self.update_display(self.board_page.localuser, message)
-                socket_client.send('[CHAT]',message)
-        
 class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
         super().__init__(**kwargs)
@@ -1094,6 +710,7 @@ class Player(Image):
         self.paused = False
         self.max_road_moves = 2
         self.max_actions = 2
+        self.max_avail_transactions = 3
         self.max_capacity = 3
         self.max_fatigue = 10
         self.combatstyle = cities[self.birthcity]['Combat Style']
@@ -1103,7 +720,10 @@ class Player(Image):
         self.actions = 2
         self.item_count = 0
         self.items = {}
+        self.activated_bartering = False
+        self.avail_transactions = 3
         self.fatigue = 0
+        
         self.coins = cities[self.birthcity]['Coins']
         self.paralyzed_rounds = 0
         self.tiered = False
@@ -1111,6 +731,7 @@ class Player(Image):
         # Player Track
         #Combat
         self.attributes = {'Agility':0,'Cunning':1,'Technique':2,'Hit Points':3,'Attack':4,'Stability':5,'Def-Physical':6,'Def-Wizard':7, 'Def-Elemental':8, 'Def-Trooper':9}
+        self.atrorder = ['Agility','Cunning','Technique','Hit Points','Attack','Stability','Def-Physical','Def-Wizard','Def-Elemental','Def-Trooper']
         self.combat = np.array([0, 0, 0, 2, 1, 0, 0, 0, 0, 0])
         self.boosts = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         for atr, val in cities[self.birthcity]['Combat Boosts']:
@@ -1160,6 +781,12 @@ class Player(Image):
         else:
             if skip_check != True:
                 socket_client.send('[MOVE]',coord)
+            self.currentcoord = coord
+            self.currenttile = self.parentBoard.gridtiles[coord]
+            game_app.game_page.recover_button.text = f'Rest ({self.get_recover()})'
+            self.parentBoard.updateView()
+            self.pos_hint = {'center_x':self.currenttile.centx, 'center_y':self.currenttile.centy}
+            # Take damage and action afterwards
             if skip_check == 3:
                 self.takeDamage(0,2)
                 self.update_mainStatPage()
@@ -1168,12 +795,12 @@ class Player(Image):
                 self.actions -= 1
                 self.takeDamage(0,1)
                 self.update_mainStatPage()
-            self.currentcoord = coord
-            self.currenttile = self.parentBoard.gridtiles[coord]
-            game_app.game_page.recover_button.text = f'Rest ({self.get_recover()})'
-            self.parentBoard.updateView()
-            self.pos_hint = {'center_x':self.currenttile.centx, 'center_y':self.currenttile.centy}
             if trigger_consequence: self.go2consequence()
+    def add_PlayerTrack(self):
+        self.PlayerTrack = PlayerTrack(self)
+        screen = Screen(name='Player Track')
+        screen.add_widget(self.PlayerTrack)
+        self.parentBoard.game_page.main_screen.add_widget(screen)
     def get_mainStatUpdate(self):
         return [f'{self.fatigue}/{self.max_fatigue}',
                 f'{self.current[self.attributes["Hit Points"]]}/{self.combat[self.attributes["Hit Points"]]+self.boosts[self.attributes["Hit Points"]]}',
@@ -1284,6 +911,10 @@ class Player(Image):
     def takeAction(self, fatigue=1, verbose=True):
         if verbose: output(f"[ACTION {self.max_actions-self.actions+1}] You took {fatigue} fatigue")
         self.actions -= 1
+        if self.activated_bartering:
+            # Player performed an action after bartering - make sure you give them an extra fatigue if they bartered and didn't do 3 transactions
+            fatigue += 1
+            self.activated_bartering = False
         if fatigue > 0: self.takeDamage(0,fatigue)
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
         self.update_mainStatPage()
@@ -1338,6 +969,7 @@ class Player(Image):
     def addItem(self, item, amt):
         if self.item_count >= self.max_capacity:
             output("Cannot add anymore items!",'yellow')
+            self.update_mainStatPage()
             return
         elif (self.item_count + amt) > self.max_capacity:
             output("Could not add all the items!",'yellow')
@@ -1347,6 +979,502 @@ class Player(Image):
             self.items[item] += amt
         else:
             self.items[item] = amt
+        self.update_mainStatPage()
+
+class Table(GridLayout):
+    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, **kwargs):
+        super().__init__(**kwargs)
+        self.cols = len(header)
+        self.wrap_text = wrap_text
+        self.header = header
+        if bkg_color is not None:
+            with self.canvas.before:
+                Color(bkg_color[0],bkg_color[1],bkg_color[2],bkg_color[3],mode='rgba')
+                self.bkg = Rectangle(pos=self.pos, size=self.size)
+            self.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
+        if super_header is not None:
+            super_kwargs = {}
+            if text_color is not None: super_kwargs['color'] = text_color
+            if header_height_hint is not None: super_kwargs['height'] = Window.size[1]*header_height_hint
+            self.super_header = Label(text=super_header, markup=True, valign='bottom', halign='left', bold=True, **super_kwargs)
+            self.add_widget(self.super_header)
+            for i in range(len(header)-1):
+                # Take up some random space to make sure the super header is on left and header starts as normal
+                space_kwargs = {} if header_height_hint is None else {'height': Window.size[1]*header_height_hint}
+                self.add_widget(Widget(**space_kwargs))
+        self.cells = {}
+        for h in header:
+            self.cells[h] = []
+            clr = ['[b]','[/b]'] if header_color is None else [f'[color={get_hexcolor(header_color)}][b]','[/b][/color]']
+            hkwargs = {} if text_color is None else {'color':text_color}
+            L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',**hkwargs)
+            #L.text_size = L.size
+            if wrap_text: L.text_size = L.size
+            self.add_widget(L)
+        # In the case that data is one-dimensional, then make it a matrix of one row.
+        self.input_text_color = text_color
+        self.wrap_text = wrap_text
+        self.update_data_cells(data)
+    def clear_data_cells(self):
+        for h in self.cells:
+            for L in self.cells[h]:
+                L.text=''
+                self.remove_widget(L)
+    def update_data_cells(self, data):
+        self.clear_data_cells()
+        data = np.reshape(data,(1,-1)) if len(np.shape(data))==1 else data
+        for row in data:
+            j = 0
+            for item in row:
+                cell = self.header[j]
+                j += 1
+                L = Label(text=str(item)) if self.input_text_color is None else Label(text=str(item),color=self.input_text_color)
+                if self.wrap_text: L.text_size = L.size
+                self.add_widget(L)
+                self.cells[cell].append(L)
+    def update_bkgSize(self, instance, value):
+        self.bkg.size = self.size
+        self.bkg.pos = self.pos
+        if self.wrap_text:
+            for L in self.children:
+                L.text_size = L.size
+
+class PlayerTrack(GridLayout):
+    def __init__(self, player, **kwargs):
+        super().__init__(**kwargs)
+        self.player = player
+        self.cols=4
+        self.hclr = get_hexcolor((255, 85, 0))
+        #self.Combat = Label(text=f'Combat: [color=self.hclr]{player.Combat}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
+        #self.Knowledge = Label(text=f'Knowledge: [color=self.hclr]{player.Knowledge}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
+        #self.Capital = Label(text=f'Capital: [color=self.hclr]{player.Capital}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
+        #self.Reputation = Label(text=f'Reputation: [color=self.hclr]{player.Reputation}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
+        self.Combat = Table(header=['Attribute','Base','Boost','Current'], data=np.transpose([player.atrorder,player.combat, player.boosts, player.current]), text_color=(0, 0, 0, 1), header_color=(50, 50, 50),
+                            super_header=f'Combat: [color={self.hclr}]{player.Combat}[/color]', header_height_hint=0.05)
+        self.Knowledge = Table(header=['Skill','Level'], data=[[skill, player.skills[skill]] for skill in player.skills], text_color=(0, 0, 0, 1), header_color=(50, 50, 50),
+                               super_header=f'Knowledge: [color={self.hclr}]{player.Knowledge}[/color]', header_height_hint=0.05)
+        self.ItemTable = Table(header=['Item', 'Quantity'], data=[[item, self.player.items[item]] for item in self.player.items], text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
+        
+
+cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
+          'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
+          'demetry':{'Combat Style':'Elemental','Coins':9,'Knowledges':[('Bartering',2)],'Combat Boosts':[]},
+          'enfeir':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Cunning',2)]},
+          'fodker':{'Combat Style':'Trooper','Coins':5,'Knowledges':[('Smithing',1)],'Combat Boosts':[('Stability',2),('Def-Physical',2)]},
+          'glaser':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Survival',1)],'Combat Boosts':[('Def-Trooper',3),('Cunning',1)]},
+          'kubani':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Crafting',1),('Gathering',1)],'Combat Boosts':[('Def-Wizard',3),('Agility',1)]},
+          'pafiz':{'Combat Style':'Wizard','Coins':4,'Knowledges':[('Persuasion',1)],'Combat Boosts':[('Def-Elemental',3)]},
+          'scetcher':{'Combat Style':'Physical','Coins':4,'Knowledges':[],'Combat Boosts':[('Attack',1),('Hit Points',1),('Def-Physical',1),('Def-Wizard',1),('Def-Elemental',1),('Def-Trooper',1)]},
+          'starfex':{'Combat Style':'Elemental','Coins':5,'Knowledges':[('Heating',1),('Gathering',1)],'Combat Boosts':[('Attack',2)]},
+          'tamarania':{'Combat Style':'Physical','Coins':7,'Knowledges':[('Smithing',2)],'Combat Boosts':[('Attack',2)]},
+          'tamariza':{'Combat Style':'Wizard','Coins':5,'Knowledges':[('Critical Thinking',1)],'Combat Boosts':[('Def-Physical',1),('Def-Elemental',2),('Hit Points',1)]},
+          'tutalu':{'Combat Style':'Trooper','Coins':3,'Knowledges':[('Excavating',2)],'Combat Boosts':[('Attack',3)]},
+          'zinzibar':{'Combat Style':'Physical','Coins':2,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Agility',2),('Attack',1)]}}
+sellPrice = {1:0, 2:1, 3:2, 4:2, 5:3, 6:3, 7:4, 8:5, 9:6}
+mrktPrice = {1:1, 2:3, 3:5, 4:6, 5:8, 6:9, 7:10, 8:12, 9:20}
+gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish':1,'cooked fish':2,'well cooked fish':3,'fruit':2},
+             'Crafting':{'string':1,'beads':1,'hide':1,'sand':1,'clay':2,'scales':2,'leather':2,'bark':2,'ceramic':3,'glass':5,'rubber':6,'gems':8},
+             'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
+             'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
+             'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':8},
+             'Quests':{'cooling cubes'}}
+game_launched = [False]
+hovering = [0]
+
+def make_positions(start_y=0):
+    pos = {}
+    for i in range(start_y, ytiles):
+        for j in range(xtiles):
+            tiletype = input(f'({j},{i}): ')
+            if tiletype != '':
+                if tiletype not in pos:
+                    pos[tiletype] = [(j, i)]
+                else:
+                    pos[tiletype].append((j, i))
+    return pos
+
+def merge_positions(pos1, pos2):
+    pos = {}
+    for key in pos1:
+        if key not in pos2:
+            pos[key] = pos1[key]
+        else:
+            seen_tup = set()
+            pos[key] = []
+            for tup in pos1[key]:
+                pos[key].append(tup)
+                seen_tup.add(tup)
+            for tup in pos2[key]:
+                if tup not in seen_tup:
+                    pos[key].append(tup)
+    for key in pos2:
+        if key not in pos:
+            pos[key] = pos2[key]
+    return pos
+
+positions = {'road': [(3, 1),(4, 1),(5, 1),(6, 1),(8, 1),(9, 1),(10, 1),(11, 2),(12, 2),(13, 2),(2, 2),(3, 2),(3, 3),(1, 3),(1, 4),(1, 5),(2, 5),(3, 5),
+                      (4, 6),(8, 2),(7, 3),(14, 3),(5, 4),(6, 4),(7, 4),(9, 4),(10, 4),(11, 4),(12, 4),(15, 4),(6, 5),(10, 5),(12, 5),(14, 5),(6, 6),(11, 6),
+                      (13, 6),(14, 6),(1, 7),(5, 7),(6, 7),(7, 7),(8, 7),(9, 7),(10, 7),(12, 7),(2, 8),(4, 8),(12, 8),(2, 9),(3, 9),(4, 9),(12, 9),(5, 10),
+                      (13, 10),(5, 11),(13, 11),(6, 12),(13, 12)],
+             'randoms': [(4, 2),(5, 2),(6, 2),(2, 3),(9, 2),(10, 2),(11, 1),(5, 3),(6, 3),(9, 3),(13, 3),(2, 4),(13, 4),(14, 4),(5, 5),(9, 5),(11, 5),(13, 5),
+                         (3, 6),(7, 6),(8, 6),(9, 6),(10, 6),(2, 7),(13, 7),(1, 8),(3, 8),(6, 8),(7, 8),(8, 8),(9, 8),(10, 8),(13, 8),(14, 8),(15, 8),(5, 9),
+                         (6, 9),(7, 9),(8, 9),(9, 9),(10, 9),(11, 9),(13, 9),(14, 9),(4, 10),(6, 10),(11, 10),(12, 10),(14, 10),(3, 11),(4, 11),(6, 11),
+                         (11, 11),(12, 11),(4, 12),(7, 12),(12, 12)],
+             'ruins': [(1, 1), (2, 0), (3, 0), (14, 0), (15, 1)],
+             'battle1': [(14, 2)], 'battle2': [(14, 1)],
+             'village1': [(0, 5),(7, 0),(4, 3),(12, 1),(8, 3),(10, 3),(15, 3),(5, 6),(12, 6),(14, 7),(1, 9),(5, 12),(12, 13)],
+             'village2': [(8, 0),(0, 6),(16, 2),(12, 3),(3, 4),(7, 5),(3, 7),(15, 7),(11, 8),(1, 10),(4, 13),(13, 14)],
+             'village3': [(7, 2),(4, 5),(8, 5),(16, 6),(0, 7),(5, 8),(1, 11),(5, 14),(14, 14)],
+             'village4': [(15, 5), (2, 6), (2, 11), (14, 13), (6, 14)],
+             'village5': [(3, 10), (14, 12), (6, 13)],
+             'fodker': [(2, 1)],'kubani': [(7, 1)],'scetcher': [(4, 4)],'pafiz': [(1, 6)],'tamariza': [(4, 7)],'zinzibar': [(15, 2)],'enfeir': [(13, 1)],
+             'tamarania': [(11, 3)],'demetry': [(8, 4)],'starfex': [(15, 6)],'anafola': [(11, 7)],'tutalu': [(2, 10)],'benfriege': [(5, 13)],'glaser': [(13, 13)],
+             'wilderness': [(7, 10),(8, 10),(9, 10),(10, 10),(7, 11),(8, 11),(9, 11),(10, 11),(8, 12),(9, 12),(10, 12),(11, 12),(7, 13),(11, 13)]}
+randoms = ['oldlibrary','outpost','cave','mountain','plains','pond']
+
+def get_dim(dx, dy):
+    return int(xpix*dx), int((ypix * (dy-(dy//2))) + (xpix * (dy//2) / np.sqrt(3)))
+
+xsize, ysize = get_dim(xtiles, ytiles)
+scale = 1
+xprel, yprel = scale * (xpix / xsize), scale * (ypix / ysize)
+
+def get_pos(x, y):
+    if y % 2:
+        xoffset, yoffset = xpix/2, (xpix/np.sqrt(3)) + (ypix/2 - xpix/(2*np.sqrt(3)))
+    else:
+        xoffset, yoffset = 0, 0
+    return (x * xpix) + xoffset, (y // 2) * (ypix + xpix/np.sqrt(3)) + yoffset
+
+def get_posint(x, y):
+    px, py = get_pos(x, y)
+    return int(px), int(py)
+
+def get_relpos(x, y):
+    px, py = get_pos(x, y)
+    return float(px / xsize), float(py / ysize)
+
+def get_hexcolor(rgb):
+    return '%02x%02x%02x' % rgb
+
+class Tile(ButtonBehavior, HoverBehavior, Image):
+    def __init__(self, tile, x, y, **kwargs):
+        super(Tile, self).__init__(**kwargs)
+        self.source = f'images\\tile\\{tile}.png'
+        self.hoveringOver = False
+        self.parentBoard = None
+        self.empty_label = None
+        self.empty_label_rounds = None
+        self.is_empty = False
+        self.trader_label = None
+        self.trader_rounds = 0
+        self.trader_wares = set()
+        self.trader_wares_label = None
+        self.neighbors = set()
+        self.bind(on_press=self.initiate)
+        self.tile = tile
+        self.gridx = x
+        self.gridy = y
+        self.updateView()
+    def empty_tile(self, rounds=6, recvd=False):
+        if not recvd:
+            socket_client.send('[EMPTY]',(self.gridx, self.gridy))
+        self.opacity = 0.4
+        self.empty_label_rounds=rounds
+        self.empty_label = Label(text=str(rounds), bold=True,pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True, font_size=20)
+        self.parentBoard.add_widget(self.empty_label)
+        self.is_empty = True
+    def trader_appears(self, rounds=3, recvd=False):
+        if not recvd:
+            Categories = list(gameItems)
+            Categories.remove('Quests')
+            Categories.remove('Cloth')
+            randomCategories = np.random.choice(Categories, 4)
+            self.trader_wares = set()
+            for c in randomCategories:
+                self.trader_wares.add(np.random.choice(list(gameItems[c])))
+            socket_client.send('[TRADER]',[(self.gridx, self.gridy), self.trader_wares])
+        else:
+            self.trader_wares = recvd
+        self.color = (0.5, 1, 0.5, 1)
+        self.trader_label = Label(text=str(rounds), bold=True, pos_hint=self.pos_hint, size_hint=self.size_hint, color=(0,0,0,1), markup=True, font_size=20)
+        self.trader_rounds = rounds
+        self.parentBoard.add_widget(self.trader_label)
+        self.parentBoard.sendFaceMessage('Trader Appears!','green')
+    def buy_from_trader(self, item, rounds=3, recvd=False):
+        if not recvd:
+            socket_client.send('[TRADER]',[(self.gridx, self.gridy), item])
+        self.trader_rounds = rounds
+        self.trader_label.text = str(rounds)
+        self.trader_wares.remove(item)
+    def update_tile_properties(self):
+        if self.is_empty:
+            self.empty_label_rounds -= 1
+            if self.empty_label_rounds == 0:
+                self.empty_label_rounds = None
+                self.empty_label.text = ''
+                self.parentBoard.remove_widget(self.empty_label)
+                self.empty_label = None
+                self.is_empty = False
+                self.opacity = 1
+            else:
+                self.empty_label.text = str(self.empty_label_rounds)
+        if self.trader_rounds > 0:
+            self.trader_rounds -= 1
+            if self.trader_rounds == 0:
+                self.trader_label.text = ''
+                self.parentBoard.remove_widget(self.trader_label)
+                self.trader_label = None
+                self.color = (1, 1, 1, 1)
+                self.trader_wares = set()
+            else:
+                self.trader_label.text = str(self.trader_rounds)
+    def updateView(self, xshift=0, yshift=0):
+        xpos, ypos = get_relpos(self.gridx, self.gridy)
+        mag_x = 1 if self.parentBoard is None else self.parentBoard.zoom + 1
+        mag_y = 1 if self.parentBoard is None else self.parentBoard.zoom + 1
+        self.size_hint = (xprel * mag_x, yprel * mag_y)
+        xpos, ypos = xpos * mag_x, ypos * mag_x
+        self.pos_hint = {'x': xpos + xshift, 'y': ypos + yshift}
+        if self.empty_label is not None:
+            self.empty_label.pos_hint = self.pos_hint
+            self.empty_label.size_hint = self.size_hint
+        if self.trader_label is not None:
+            self.trader_label.pos_hint = self.pos_hint
+            self.trader_label.size_hint = self.size_hint
+        self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
+    def set_neighbors(self):
+        neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if self.gridy % 2 else -1, 1], [1 if self.gridy % 2 else -1, -1]]
+        self.neighbors, self.neighbortiles = set(), set()
+        for dx, dy in neighbors:
+            x, y = self.gridx + dx, self.gridy + dy
+            if (x, y) in self.parentBoard.gridtiles:
+                self.neighbors.add((x, y))
+                self.neighbortiles.add(self.parentBoard.gridtiles[(x,y)].tile)
+    def is_neighbor(self):
+        return self.parentBoard.localPlayer.currentcoord in self.neighbors
+    def findNearest(self, tiles, T=None, depth=0, checked=set(), queue={}):
+        if T is None: T = self
+        if T.tile in tiles:
+            nextDepth = None
+            return (T.gridx, T.gridy), depth
+        nextinLine = deepcopy(T.neighbors.difference(checked))
+        checked = checked.union(nextinLine)
+        if (depth+1) in queue:
+            queue[depth+1] = queue[depth+1].union(nextinLine)
+        else:
+            queue[depth+1] = nextinLine
+        nextDepth = min(queue.keys())
+        if len(queue[nextDepth]) == 0:
+            queue.pop(nextDepth)
+            nextDepth = min(queue.keys())
+            if len(queue[nextDepth]) == 0:
+                print("Warning: are you sure you are looking for a tile that exists?")
+        nextT = self.parentBoard.gridtiles[queue[nextDepth].pop()]
+        return nextT.findNearest(tiles, nextT, nextDepth, checked, queue)
+    def on_enter(self, *args):
+        hovering[0] += 1
+        self.source = f'images\\selectedtile\\{self.tile}.png'
+        if (self.trader_rounds > 0) and (self.trader_wares_label is None):
+            L = []
+            for item in self.trader_wares:
+                for categ in gameItems:
+                    if item in gameItems[categ]:
+                        L.append(f'{item}: [color=ffff75]{gameItems[categ][item]}[/color]')
+                        break
+            self.trader_wares_label = Button(text='\n'.join(L), color=(1, 1, 1, 1), markup=True, pos=(self.pos[0]+self.size[0]/2,self.pos[1]+self.size[1]/2), size_hint=(self.size_hint[0]*4/(self.parentBoard.zoom+1),self.size_hint[1]*1.5/(self.parentBoard.zoom+1)), background_color=(0.3, 0.3, 0.3, 0.7))
+            self.parentBoard.add_widget(self.trader_wares_label)
+    def on_leave(self, *args):
+        hovering[0] -= 1
+        self.source = f'images\\tile\\{self.tile}.png'
+        if self.trader_wares_label is not None:
+            self.trader_wares_label.text = ''
+            self.parentBoard.remove_widget(self.trader_wares_label)
+            self.trader_wares_label = None
+    def initiate(self, instance):
+        if self.parentBoard.localPlayer.paused:
+            return
+        elif hovering[0] > 1:
+            output("Hovering over too many tiles! No action performed!",'yellow')
+            return
+        # If the tile is a neighbor and the player is not descended in a cave or ontop of a mountain... (tiered)
+        elif self.is_neighbor() and (not self.parentBoard.localPlayer.tiered):
+            self.parentBoard.localPlayer.moveto((self.gridx, self.gridy))
+
+trns_clr = {'red':get_hexcolor((255,0,0)),'green':get_hexcolor((0,255,0)),'yellow':get_hexcolor((147,136,21)),'blue':get_hexcolor((0,0,255))}
+class BoardPage(FloatLayout):
+    def __init__(self, game_page, **kwargs):
+        super().__init__(**kwargs)
+        self.game_page = game_page
+        self.localuser = game_app.connect_page.username.text
+        self.size = get_dim(xtiles, ytiles)
+        self.zoom = 0
+        self.gridtiles = {}
+        self.Players = {}
+        self.localPlayer = None
+        self.startLblMsgs = []
+        self.startLblTimes = []
+        for tiletype in positions:
+            if tiletype == 'randoms':
+                continue
+            for x, y in positions[tiletype]: self.add_tile(tiletype, x, y)
+        np.random.seed(seed)
+        randomChoice = np.random.choice(randoms*int(np.ceil(len(positions['randoms'])/len(randoms))), len(positions['randoms']))
+        for i in range(len(positions['randoms'])):
+            x, y = positions['randoms'][i]
+            self.add_tile(randomChoice[i], x, y)
+        for T in self.gridtiles.values():
+            T.set_neighbors()
+        self.zoomButton = Button(text="Zoom", pos_hint={'x':0,'y':0}, size_hint=(0.06, 0.03))
+        self.zoomButton.bind(on_press=self.updateView)
+        self.add_widget(self.zoomButton)
+    def add_tile(self, tiletype, x, y):
+        T = Tile(tiletype, x, y)
+        self.gridtiles[(x,y)] = T
+        T.parentBoard = self
+        self.add_widget(T)
+    def add_player(self, username, birthcity):
+        self.Players[username] = Player(self, username, birthcity)
+        self.add_widget(self.Players[username])
+        if username == self.localuser:
+            # add local player
+            self.localPlayer = self.Players[username]
+            # So that the start round will appear above the player
+            self.startLabel = Label(text='',bold=True,color=(0.5, 0, 1, 0.7),pos_hint={'x':0,'y':0},size_hint=(1,1),font_size=50,markup=True)
+            self.add_widget(self.startLabel)
+            self.game_page.recover_button.bind(on_press=self.localPlayer.recover)
+            self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
+            self.localPlayer.add_mainStatPage()
+            self.localPlayer.add_PlayerTrack()
+    def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2):
+        timeNow = time()
+        msg = f'[color={trns_clr[clr]}]{msg}[/color]' if clr is not None else msg
+        if clr is not None:
+            self.startLblMsgs.append(msg)
+            self.startLblTimes.append(timeNow)
+        max_i = -1
+        for i in range(len(self.startLblTimes)):
+            if (timeNow - self.startLblTimes[i]) > scheduleTime:
+                max_i = i
+        self.startLblMsgs = self.startLblMsgs[(max_i+1):]
+        self.startLblTimes = self.startLblTimes[(max_i+1):]
+        self.startLabel.text = '\n'.join(self.startLblMsgs)
+        if msg is not None: output(msg, clr)
+        def clear_lbl(_):
+            self.sendFaceMessage()
+        Clock.schedule_once(clear_lbl, scheduleTime)
+    def updateView(self, deltaZoom=0):
+        # Make sure change does not go beyond the bounds of [0,3]
+        if deltaZoom:
+            self.zoom = 0 if self.zoom == 3 else self.zoom+1
+        if (self.zoom == 0) and (type(deltaZoom) is int) and (deltaZoom==0):
+            # We still update the players because of initiation troubles
+            for P in self.Players.values():
+                P.updateView()
+            return
+        lrpx, lrpy = get_relpos(self.localPlayer.currenttile.gridx, self.localPlayer.currenttile.gridy)
+        lrpx *= (self.zoom+1)
+        lrpy *= (self.zoom+1)
+        if self.zoom > 0:
+            shiftx, shifty = (0.5 - (xprel*(self.zoom+1)/2) - lrpx), (0.5 - (yprel*(self.zoom+1)/2) - lrpy)
+        else:
+            shiftx, shifty = 0, 0
+        for T in self.gridtiles.values():
+            T.updateView(shiftx, shifty)
+        for P in self.Players.values():
+            P.updateView()
+            
+class GamePage(GridLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cols = 2
+        self.button_num = 1
+        # Add the Main Screen
+        self.main_screen = ScreenManager()
+        self.board_page = BoardPage(self)
+        screen = Screen(name='Board')
+        screen.add_widget(self.board_page)
+        self.main_screen.add_widget(screen)
+        self.add_widget(self.main_screen)
+        # Add the Side Screen
+        input_y, label_y, stat_y, action_y, output_y = 0.05, 0.4, 0.1, 0.2, 0.25
+        self.stat_ypos, self.stat_ysize = input_y+label_y, stat_y
+        self.right_line = RelativeLayout(size_hint_x=0.25)
+        self.output = Label(text='Action Buttons:',pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y),color=(0.1,0.1,0.1,0.8),valign='bottom',halign='left',markup=True)
+        self.output.text_size = self.output.size
+        with self.output.canvas.before:
+            Color(0.6, 0.6, 0.8, 0.5, mode='rgba')
+            self.outrect=Rectangle(pos=self.output.pos, size=self.output.size)
+        self.output.bind(pos=self.update_bkgSize, size=self.update_bkgSize)
+        self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
+        self.recover_button = Button(text='Rest (2)')
+        self.eat_button = Button(text='Eat')
+        # Button is bound after local player is detected
+        self.actionGrid.add_widget(self.recover_button)
+        self.actionGrid.add_widget(self.eat_button)
+        self.actionButtons = [self.recover_button, self.eat_button]
+        self.statGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y)},size_hint_y=stat_y,cols=4)
+        self.display_page = Label(text='Chat Box (press enter to send message)\n',pos_hint={'x':0,'y':input_y},color=(1,1,1,0.8),size_hint=(1,label_y),markup=True)
+        self.display_page.text_size = self.display_page.size
+        with self.display_page.canvas.before:
+            Color(0, 0, 0, 0.7, mode='rgba')
+            self.rect=Rectangle(pos=self.display_page.pos,size=self.display_page.size)
+        # Make the display background update itself evertime there is a window size change
+        self.display_page.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
+        self.new_message = TextInput(pos_hint={'x':0,'y':0},size_hint=(1,input_y))
+        self.right_line.add_widget(self.output)
+        self.right_line.add_widget(self.actionGrid)
+        self.right_line.add_widget(self.display_page)
+        self.right_line.add_widget(self.new_message)
+        self.add_widget(self.right_line)
+        # Any keyboard press will trigger the event:
+        Window.bind(on_key_down=self.on_key_down)
+    def make_actionGrid(self, funcDict, save_rest=False):
+        self.clear_actionGrid(save_rest)
+        for txt, func in funcDict.items():
+            B = Button(text=txt, markup=True)
+            B.bind(on_press=func)
+            self.actionButtons.append(B)
+            self.actionGrid.add_widget(B)
+    def clear_actionGrid(self, save_rest=False):
+        for B in self.actionButtons:
+            self.actionGrid.remove_widget(B)
+        if save_rest:
+            self.actionButtons = [self.recover_button, self.eat_button]
+            self.actionGrid.add_widget(self.recover_button)
+            self.actionGrid.add_widget(self.eat_button)
+        else:
+            self.actionButtons = []
+    def update_bkgSize(self, instance, value):
+        self.rect.size = self.display_page.size
+        self.rect.pos = self.display_page.pos
+        self.outrect.size = self.output.size
+        self.outrect.pos = self.output.pos
+        self.display_page.text_size = self.display_page.size
+        self.output.text_size = self.output.size
+    def update_output(self, message, color=None):
+        if color is None:
+            message = message
+        elif color in trns_clr:
+            message = '[color='+trns_clr[color]+']'+message+'[/color]'
+        else:
+            hx = get_hexcolor(color)
+            message = '[color='+hx+']'+message+'[/color]'
+        self.output.text += '\n' + message
+    def update_display(self, username, message):
+        if message[0]=='\n':
+            message = message[1:]
+        clr = get_hexcolor((131,215,190)) if username == self.board_page.localuser else get_hexcolor((211, 131, 131))
+        self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
+    def on_key_down(self, instance, keyboard, keycode, text, modifiers):
+        # We want to take an action only when Enter key is being pressed, and send a message
+        if keycode == 40:
+            # Send Message
+            message = self.new_message.text
+            self.new_message.text = ''
+            if message:
+                self.update_display(self.board_page.localuser, message)
+                socket_client.send('[CHAT]',message)
         
 class BirthCityButton(ButtonBehavior, HoverBehavior, Image):
     def __init__(self, parentPage, city, **kwargs):
@@ -1461,10 +1589,15 @@ class LaunchPage(GridLayout):
             def pauseUser(_):
                 game_app.game_page.board_page.Players[username].pause()
             Clock.schedule_once(pauseUser, 0.2)
-        elif (category == '[TRADER]') and (type(message[1]) is set):
+        elif (category == '[TRADER]'):
             def clockedTrader(_):
                 game_app.game_page.board_page.gridtiles[message[0]].trader_appears(recvd=message[1])
-            Clock.schedule_once(clockedTrader, 0.2)
+            def clockedPurchase(_):
+                game_app.game_page.board_page.gridtiles[message[0]].buy_from_trader(message[1], recvd=True)
+            if type(message[1]) is set:
+                Clock.schedule_once(clockedTrader, 0.2)
+            elif type(message[1]) is str:
+                Clock.schedule_once(clockedPurchase, 0.1)
     def update_self(self, _):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready
