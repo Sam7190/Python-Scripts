@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image as pilImage
 import os
 import sys
+from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
 from copy import deepcopy
 import socket_client
 from time import time
@@ -16,6 +17,7 @@ import kivy
 from kivy.app import App
 from kivy.uix.label import Label
 from kivy.uix.relativelayout import RelativeLayout
+from kivy.uix.stacklayout import StackLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.textinput import TextInput
@@ -60,6 +62,7 @@ def isbetween(mn, mx, numb):
 
 def output(message, color=None):
     game_app.game_page.update_output(message, color)
+    print(message)
 def actionGrid(funcDict, save_rest):
     game_app.game_page.make_actionGrid(funcDict, save_rest)
 def check_paralysis():
@@ -81,7 +84,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     P.takeAction(amt)
                     P.road_moves = P.max_road_moves
             elif (consume == 'buy') or (consume == 'bartered'):
-                P.avail_transactions -= 1
+                P.avail_transactions -= amt
                 if consume == 'bartered': P.activated_bartering=True
                 if P.avail_transactions == 0:
                     # If the player makes his max transactions, then it is the same as if he bartered. Otherwise, bartering is handled in the takeAction method.
@@ -109,6 +112,37 @@ def getItem(item, amt=1, consume=None, empty_tile=False, action_amt=1):
         exitActionLoop(consume, action_amt, empty_tile)()
     return getitem
 
+def sellItem(item, to_trader, barter=None, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    print(item)
+    for categ in gameItems:
+        if item in gameItems[categ]:
+            sellprice = sellPrice[gameItems[categ][item]]
+            break
+    if barter is None:
+        output("Would you like to barter?",'blue')
+        actionGrid({'Yes':partial(sellItem, item, to_trader, True), 'No':partial(sellItem, item, to_trader, False)}, False)
+    elif barter == True:
+        bartering = P.activateSkill("Bartering")
+        r = rbtwn(1,12)
+        if r <= bartering:
+            P.useSkill("Bartering")
+            output("You successfully Barter", 'green')
+            if (bartering > 8) and to_trader:
+                P.coins += (sellprice+2)
+            else:
+                P.coins += (sellprice+1)
+            # Its basically inverted getItem
+            getItem(item, -1, 'bartered', False, 1)()
+        else:
+            output("You failed to barter, sell anyway?", 'red')
+            actionGrid({'Yes':partial(sellItem, item, to_trader, False), 'No':exitActionLoop('bartered', 0, False)}, False)
+    else:
+        P.coins += sellprice
+        getItem(item, -1, 'buy', False)()
+
 def buyItem(item, cost, from_trader, amt=1, consume='buy'):
     P = lclPlayer()
     def buyitem(_=None):
@@ -119,7 +153,6 @@ def buyItem(item, cost, from_trader, amt=1, consume='buy'):
         else:
             P.coins -= (cost*amt)
             if from_trader and (item in P.currenttile.trader_wares):
-                # [INCOMPLETE] the buy update is not implemented
                 P.currenttile.buy_from_trader(item)
             getItem(item, amt, consume, False, 1)()
     return buyitem
@@ -741,11 +774,15 @@ class Player(Image):
         self.skills = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
         self.xps = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
         for skl, val in cities[self.birthcity]['Knowledges']:
-            self.skills[skl] += val
+            self.updateSkill(skl, val)
         #Capital
         self.homes = {city: False for city in cities}
         self.markets = {city: False for city in cities}
-        
+        self.bank = {city: 0 for city in cities}
+        self.villages = {city: {} for city in cities}
+        self.awaiting = {city: '' for city in cities}
+        # Reputation
+        self.reputation = np.empty((8, 5),dtype=object)
         # Position Player
         self.currentcoord = positions[birthcity][0]
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
@@ -814,6 +851,7 @@ class Player(Image):
         updated_data = self.get_mainStatUpdate()
         for i in range(len(updated_data)):
             self.mtable.cells[self.mtable.header[i]][0].text = updated_data[i]
+        self.PlayerTrack.updateAll()
     def recover(self, _):
         if not self.paused:
             rest_rate = self.get_recover()
@@ -925,7 +963,7 @@ class Player(Image):
         self.skills[skill] += val
         self.Knowledge += val
     def addXP(self, skill, xp, msg=''):
-        output(f"Gained {xp}xp for {skill}{msg}.",'green')
+        output(f"{msg}Gained {xp}xp for {skill}.",'green')
         self.xps[skill] += xp
         while (self.xps[skill] >= (3 + self.skills[skill])):
             self.xps[skill] -= (3 + self.skills[skill])
@@ -938,11 +976,11 @@ class Player(Image):
             actv_lvl = np.max([0,lvl-self.fatigue])
         else:
             actv_lvl = lvl
-            if lvl <= max_lvl_xp: self.addXP(skill, xp, ' by activation')
+            if lvl <= max_lvl_xp: self.addXP(skill, xp, 'Activation: ')
         return actv_lvl
     def useSkill(self, skill, xp=1, max_lvl_xp=5):
         if self.skills[skill] <= max_lvl_xp:
-            self.addXP(skill, xp)
+            self.addXP(skill, xp, 'Successful: ')
     def updateAttribute(self, attribute, val=1):
         self.combat[self.attributes[attribute]] += val
         self.current[self.attributes[attribute]] += val
@@ -961,11 +999,7 @@ class Player(Image):
         if item not in self.items:
             output(f"Item {item} does not exist in inventory.",'yellow')
         else:
-            self.item_count -= 1
-            if self.items[item] == 1:
-                self.items.pop(item)
-            else:
-                self.items[item] -= 1
+            self.items.pop(item)
     def addItem(self, item, amt):
         if self.item_count >= self.max_capacity:
             output("Cannot add anymore items!",'yellow')
@@ -979,6 +1013,8 @@ class Player(Image):
             self.items[item] += amt
         else:
             self.items[item] = amt
+        if self.items[item]==0:
+            self.rmvItem(item)
         self.update_mainStatPage()
 
 class Table(GridLayout):
@@ -995,12 +1031,14 @@ class Table(GridLayout):
         if super_header is not None:
             super_kwargs = {}
             if text_color is not None: super_kwargs['color'] = text_color
-            if header_height_hint is not None: super_kwargs['height'] = Window.size[1]*header_height_hint
+            if header_height_hint is not None: 
+                super_kwargs['height'] = Window.size[1]*header_height_hint
+                super_kwargs['size_hint_y'] = None
             self.super_header = Label(text=super_header, markup=True, valign='bottom', halign='left', bold=True, **super_kwargs)
             self.add_widget(self.super_header)
             for i in range(len(header)-1):
                 # Take up some random space to make sure the super header is on left and header starts as normal
-                space_kwargs = {} if header_height_hint is None else {'height': Window.size[1]*header_height_hint}
+                space_kwargs = {} if header_height_hint is None else {'height': Window.size[1]*header_height_hint, 'size_hint_y':None}
                 self.add_widget(Widget(**space_kwargs))
         self.cells = {}
         for h in header:
@@ -1028,8 +1066,13 @@ class Table(GridLayout):
             for item in row:
                 cell = self.header[j]
                 j += 1
-                L = Label(text=str(item)) if self.input_text_color is None else Label(text=str(item),color=self.input_text_color)
-                if self.wrap_text: L.text_size = L.size
+                if type(item) is dict:
+                    txt, func = list(item.items())[0]
+                    L = Button(text=txt)
+                    L.bind(on_press=func)
+                else:
+                    L = Label(text=str(item)) if self.input_text_color is None else Label(text=str(item),color=self.input_text_color)
+                    if self.wrap_text: L.text_size = L.size
                 self.add_widget(L)
                 self.cells[cell].append(L)
     def update_bkgSize(self, instance, value):
@@ -1043,17 +1086,72 @@ class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
         super().__init__(**kwargs)
         self.player = player
-        self.cols=4
+        self.cols=1
         self.hclr = get_hexcolor((255, 85, 0))
         #self.Combat = Label(text=f'Combat: [color=self.hclr]{player.Combat}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
         #self.Knowledge = Label(text=f'Knowledge: [color=self.hclr]{player.Knowledge}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
         #self.Capital = Label(text=f'Capital: [color=self.hclr]{player.Capital}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
         #self.Reputation = Label(text=f'Reputation: [color=self.hclr]{player.Reputation}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
-        self.Combat = Table(header=['Attribute','Base','Boost','Current'], data=np.transpose([player.atrorder,player.combat, player.boosts, player.current]), text_color=(0, 0, 0, 1), header_color=(50, 50, 50),
-                            super_header=f'Combat: [color={self.hclr}]{player.Combat}[/color]', header_height_hint=0.05)
-        self.Knowledge = Table(header=['Skill','Level'], data=[[skill, player.skills[skill]] for skill in player.skills], text_color=(0, 0, 0, 1), header_color=(50, 50, 50),
-                               super_header=f'Knowledge: [color={self.hclr}]{player.Knowledge}[/color]', header_height_hint=0.05)
-        self.ItemTable = Table(header=['Item', 'Quantity'], data=[[item, self.player.items[item]] for item in self.player.items], text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
+        self.track_screen = ScreenManager()
+        # Combat Screen
+        self.Combat = Table(header=['Attribute','Base','Boost','Current'], data=self.get_Combat(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
+                            #super_header=f'Combat: [color={self.hclr}]{player.Combat}[/color]', header_height_hint=0.01, wrap_text=True)
+        screen = Screen(name='Combat')
+        screen.add_widget(self.Combat)
+        self.track_screen.add_widget(screen)
+        # Knowledge Screen
+        self.Knowledge = Table(header=['Skill','Level', 'XP'], data=[[skill, player.skills[skill]] for skill in player.skills], text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
+                               #super_header=f'Knowledge: [color={self.hclr}]{player.Knowledge}[/color]', header_height_hint=0.01)
+        screen = Screen(name='Knowledge')
+        screen.add_widget(self.Knowledge)
+        self.track_screen.add_widget(screen)
+        # Capital Screen
+        # Reputation Screen
+        # Item Screen
+        self.Items = Table(header=['Item', 'Quantity', ''], data=self.get_Items(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
+        screen = Screen(name='Items')
+        screen.add_widget(self.Items)
+        self.track_screen.add_widget(screen)
+        # Add header tabs
+        def changeTab(tabName,_):
+            self.track_screen.current = tabName
+        self.tabs = GridLayout(cols=5, height=0.05*Window.size[1], size_hint_y=None)
+        self.tab_color = (0.1, 0.6, 0.5, 1)
+        self.combatTab = Button(text=f"Combat: [color={self.hclr}]{player.Combat}[/color]",markup=True,background_color=self.tab_color)
+        self.combatTab.bind(on_press=partial(changeTab, 'Combat'))
+        self.knowledgeTab = Button(text=f'Knowledge: [color={self.hclr}]{player.Knowledge}[/color]',markup=True,background_color=self.tab_color)
+        self.knowledgeTab.bind(on_press=partial(changeTab, 'Knowledge'))
+        self.itemsTab = Button(text='Items',markup=True,background_color=self.tab_color)
+        self.itemsTab.bind(on_press=partial(changeTab, 'Items'))
+        self.tabs.add_widget(self.combatTab)
+        self.tabs.add_widget(self.knowledgeTab)
+        self.tabs.add_widget(self.itemsTab)
+        # Add widgets in order
+        self.add_widget(self.tabs)
+        self.add_widget(self.track_screen)
+    def get_Combat(self):
+        return np.transpose([self.player.atrorder,self.player.combat,self.player.boosts,self.player.current])
+    def get_Knowledge(self):
+        return [[skill, self.player.skills[skill], self.player.xps[skill]] for skill in self.player.skills]
+    def get_Items(self):
+        if (len(self.player.currenttile.city_wares) + len(self.player.currenttile.trader_wares)) == 0:
+            # No items to sell, so return no buttons
+            data = [[item, self.player.items[item], ''] for item in self.player.items]
+        else:
+            # Ability to sell your items!
+            data = []
+            wares = self.player.currenttile.city_wares.union(self.player.currenttile.trader_wares)
+            for item in self.player.items:
+                if item in wares:
+                    data.append([item, self.player.items[item], ''])
+                else:
+                    # [INCOMPLETE] Sell is not defined and also Table not ready to hand dictionaries
+                    data.append([item, self.player.items[item], {'Sell':partial(sellItem, item, True if self.player.currenttile.trader_rounds>0 else False, None)}])
+        return data
+    def updateAll(self):
+        self.Combat.update_data_cells(self.get_Combat())
+        self.Knowledge.update_data_cells(self.get_Knowledge())
+        self.Items.update_data_cells(self.get_Items())
         
 
 cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
@@ -1170,6 +1268,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.trader_rounds = 0
         self.trader_wares = set()
         self.trader_wares_label = None
+        self.city_wares = set()
         self.neighbors = set()
         self.bind(on_press=self.initiate)
         self.tile = tile
@@ -1397,13 +1496,15 @@ class GamePage(GridLayout):
         self.main_screen.add_widget(screen)
         self.add_widget(self.main_screen)
         # Add the Side Screen
-        input_y, label_y, stat_y, action_y, output_y = 0.05, 0.4, 0.1, 0.2, 0.25
+        input_y, label_y, stat_y, action_y, output_y, toggle_y = 0.05, 0.25, 0.1, 0.2, 0.35, 0.05
         self.stat_ypos, self.stat_ysize = input_y+label_y, stat_y
         self.right_line = RelativeLayout(size_hint_x=0.25)
+        self.toggleView = Button(text="Player Track",pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(1,toggle_y),background_color=(0, 0.4, 0.4, 1))
+        self.toggleView.bind(on_press=self.switchView)
         self.output = Label(text='Action Buttons:',pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y),color=(0.1,0.1,0.1,0.8),valign='bottom',halign='left',markup=True)
         self.output.text_size = self.output.size
         with self.output.canvas.before:
-            Color(0.6, 0.6, 0.8, 0.5, mode='rgba')
+            Color(0.6, 0.6, 0.8, 0.7, mode='rgba')
             self.outrect=Rectangle(pos=self.output.pos, size=self.output.size)
         self.output.bind(pos=self.update_bkgSize, size=self.update_bkgSize)
         self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
@@ -1422,6 +1523,8 @@ class GamePage(GridLayout):
         # Make the display background update itself evertime there is a window size change
         self.display_page.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
         self.new_message = TextInput(pos_hint={'x':0,'y':0},size_hint=(1,input_y))
+        # Append the widgets
+        self.right_line.add_widget(self.toggleView)
         self.right_line.add_widget(self.output)
         self.right_line.add_widget(self.actionGrid)
         self.right_line.add_widget(self.display_page)
@@ -1429,6 +1532,9 @@ class GamePage(GridLayout):
         self.add_widget(self.right_line)
         # Any keyboard press will trigger the event:
         Window.bind(on_key_down=self.on_key_down)
+    def switchView(self, instance):
+        self.main_screen.current = self.toggleView.text
+        self.toggleView.text = "Board" if self.toggleView.text=="Player Track" else "Player Track"
     def make_actionGrid(self, funcDict, save_rest=False):
         self.clear_actionGrid(save_rest)
         for txt, func in funcDict.items():
