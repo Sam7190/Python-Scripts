@@ -91,6 +91,8 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     P.activated_bartering = False
                     P.takeAction(amt)
                     P.avail_transactions = P.max_avail_transactions
+#                else:
+#                    P.update_mainStatPage()
             elif amt>0:
                 P.takeAction(amt)
             if empty_tile: P.currenttile.empty_tile()
@@ -724,6 +726,22 @@ def A_wilderness():
 avail_actions = {'road':A_road,'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}#,'wilderness','village1','village2','village3','village4','village5',
 #                 'anafola','benfriege','demetry','enfeir','fodker','glaser','kubani','pafiz','scetcher','starfex','tamarania','tamariza','tutalu','zinzibar'}
 
+
+capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8},
+                'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3},
+                'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9},
+                'enfeir':{'home':20,'home_cap':4,'capacity':4,'market':9,'return':2,'market_cap':1,'invest':3},
+                'fodker':{'home':24,'home_cap':4,'capacity':4,'market':12,'return':3,'market_cap':1,'invest':None}, # Fodker has no villages to invest in
+                'glaser':{'home':5,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3},
+                'kubani':{'home':37,'home_cap':5,'capacity':4,'market':19,'return':4,'market_cap':2,'invest':7},
+                'pafiz':{'home':27,'home_cap':4,'capacity':4,'market':13,'return':3,'market_cap':1,'invest':5},
+                'scetcher':{'home':42,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8},
+                'starfex':{'home':28,'home_cap':4,'capacity':4,'market':14,'return':3,'market_cap':1,'invest':5},
+                'tamarania':{'home':43,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8},
+                'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8},
+                'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4},
+                'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3}}
+
 class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
         super().__init__(**kwargs)
@@ -776,13 +794,22 @@ class Player(Image):
         for skl, val in cities[self.birthcity]['Knowledges']:
             self.updateSkill(skl, val)
         #Capital
+        self.cityorder = sorted(cities)
         self.homes = {city: False for city in cities}
         self.markets = {city: False for city in cities}
         self.bank = {city: 0 for city in cities}
         self.villages = {city: {} for city in cities}
         self.awaiting = {city: '' for city in cities}
+        # Some helpers of Capital
+        self.already_asset_bartered = False
+        self.training_allowed = {city: False for city in cities}
+        self.training_allowed[self.birthcity] = True
+        self.market_allowed = {city: False for city in cities}
+        self.market_allowed[self.birthcity] = True
         # Reputation
         self.reputation = np.empty((8, 5),dtype=object)
+        self.entry_allowed = {city: False for city in cities}
+        self.entry_allowed[self.birthcity] = True
         # Position Player
         self.currentcoord = positions[birthcity][0]
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
@@ -812,6 +839,10 @@ class Player(Image):
             actionGrid({}, True)
     def moveto(self, coord, trigger_consequence=True, skip_check=False):
         nxt = self.parentBoard.gridtiles[coord]
+        if nxt.tile in cities:
+            if not self.entry_allowed[nxt.tile]:
+                output("The city will not let you enter! (Gain some reputation!)",'red')
+                return
         if (not skip_check) and (self.currenttile.tile != 'road') and (self.currenttile.tile not in cities) and (nxt.tile=='road'):
             output("Move there on same action (+2 Fatigue)?")
             actionGrid({'Yes':(lambda _:self.moveto(coord,trigger_consequence,3)),'No':(lambda _:self.moveto(coord,trigger_consequence,2))}, False)
@@ -955,6 +986,7 @@ class Player(Image):
             self.activated_bartering = False
         if fatigue > 0: self.takeDamage(0,fatigue)
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
+        self.already_asset_bartered = False # If an action is taken, you can try to barter for the asset again.
         self.update_mainStatPage()
         if self.actions <= 0:
             self.pause()
@@ -995,6 +1027,58 @@ class Player(Image):
         if ability in self.skills:
             return self.skills[ability]
         return self.combat[self.attributes[ability]]
+    def purchase(self, asset, city, barter=None, _=None):
+        if self.paused:
+            return
+        cost = capital_info[city][asset]
+        def make_purchase(asset, city, cost, _=None):
+            if self.paused:
+                return
+            if self.coins < cost:
+                output('Insufficient funds!','yellow')
+                exitActionLoop(amt=0)()
+                return
+            if asset == 'home':
+                if self.homes[city]:
+                    output('You already own a home here!','yellow')
+                    exitActionLoop(amt=0)()
+                    return
+                self.homes[city] = True
+                self.max_capacity += capital_info[city]['capacity']
+                self.training_allowed[city] = True
+                self.market_allowed[city] = True
+                self.Capital += capital_info[city]['home_cap']
+            else:
+                if self.markets[city]:
+                    output('You already own a market here!','yellow')
+                    exitActionLoop(amt=0)()
+                    return
+                self.markets[city] = True
+                self.market_allowed[city] = True
+                self.Capital += capital_info[city]['market_cap']
+            exitActionLoop()()
+        if barter is None:
+            output(f"This will cost {cost}. Attempt to Barter (+1 Fatigue)?", 'blue')
+            actions = {'Yes':partial(self.purchase, asset, city, True), 'No':partial(self.purchase, asset, city, False)}
+            actionGrid(actions, False)
+        elif barter and (not self.already_asset_bartered):
+            if self.coins < cost:
+                output("You can't effectively barter when your funds are low!", 'yellow')
+                exitActionLoop(amt=0)
+                return
+            self.already_asset_bartered = True
+            bartering = self.activateSkill("Bartering")
+            # Bartering home is more effective than bartering for market
+            r = min([self.cost-1, rbtwn(0, bartering if asset == 'home' else bartering/2)]) # Has to at least cost a coin!
+            output(f"Your bartering can save you {r} coins. Complete purchase?", 'blue')
+            actions = {'Yes':partial(make_purchase, asset, city, cost-r), 'No':exitActionLoop(amt=0)}
+            actionGrid(actions, False)
+            self.fatigue += 1 # Take a fatigue for bartering
+        elif barter and self.already_asset_bartered:
+            output("You can't barter again this action!", 'yellow')
+            return
+        else:
+            make_purchase(asset, city, cost)
     def rmvItem(self, item):
         if item not in self.items:
             output(f"Item {item} does not exist in inventory.",'yellow')
@@ -1017,12 +1101,21 @@ class Player(Image):
             self.rmvItem(item)
         self.update_mainStatPage()
 
+class HoverButton(Button, HoverBehavior):
+    def __init__(self, display, message, **kwargs):
+        super().__init__(**kwargs)
+        self.display=display
+        self.message=message
+    def on_enter(self, *args):
+        self.display.text = self.message
+
 class Table(GridLayout):
-    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, **kwargs):
+    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, header_as_buttons=False, color_odd_rows=False,**kwargs):
         super().__init__(**kwargs)
         self.cols = len(header)
         self.wrap_text = wrap_text
         self.header = header
+        self.color_odd_rows = (0.3, 1, 1, 0.5) if color_odd_rows and (type(color_odd_rows) is bool) else color_odd_rows
         if bkg_color is not None:
             with self.canvas.before:
                 Color(bkg_color[0],bkg_color[1],bkg_color[2],bkg_color[3],mode='rgba')
@@ -1045,9 +1138,12 @@ class Table(GridLayout):
             self.cells[h] = []
             clr = ['[b]','[/b]'] if header_color is None else [f'[color={get_hexcolor(header_color)}][b]','[/b][/color]']
             hkwargs = {} if text_color is None else {'color':text_color}
-            L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',**hkwargs)
-            #L.text_size = L.size
-            if wrap_text: L.text_size = L.size
+            if header_as_buttons:
+                L = Button(text=clr[0]+h+clr[1],markup=True,background_color=(1,1,1,0),underline=True,**hkwargs)
+            else:
+                L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',**hkwargs)
+                #L.text_size = L.size
+                if wrap_text: L.text_size = L.size
             self.add_widget(L)
         # In the case that data is one-dimensional, then make it a matrix of one row.
         self.input_text_color = text_color
@@ -1058,23 +1154,46 @@ class Table(GridLayout):
             for L in self.cells[h]:
                 L.text=''
                 self.remove_widget(L)
-    def update_data_cells(self, data):
-        self.clear_data_cells()
+    def update_data_cells(self, data, clear=True):
+        if clear: self.clear_data_cells()
         data = np.reshape(data,(1,-1)) if len(np.shape(data))==1 else data
+        i = 0
         for row in data:
             j = 0
             for item in row:
                 cell = self.header[j]
                 j += 1
+                if not clear:
+                    if type(item) is dict:
+                        #print(cell, i, self.cells[cell][i].text, item['txt'])
+                        self.cells[cell][i].text=item['text']
+                    else:
+                        self.cells[cell][i].text=str(item)
+                    continue
                 if type(item) is dict:
-                    txt, func = list(item.items())[0]
-                    L = Button(text=txt)
-                    L.bind(on_press=func)
+                    if (i % 2) and self.color_odd_rows:
+                        old_bkg = item['background_color'] if 'background_color' in item else (1, 1, 1, 1)
+                        item['background_color'] = [old_bkg[clri]*self.color_odd_rows[clri] for clri in range(len(old_bkg))]
+                        if item['background_color'][-1] == 0: item['background_color'][-1] = self.color_odd_rows[-1]
+                        item['background_color'] = tuple(item['background_color'])
+                    func = None
+                    if 'func' in item:
+                        func = item['func']
+                        item.pop('func')
+                    if 'hover' in item:
+                        display, message = item['hover']
+                        item.pop('hover')
+                        L = HoverButton(display, message, **item)
+                    else:
+                        L = Button(**item)
+                    if func is not None:
+                        L.bind(on_press=func)
                 else:
                     L = Label(text=str(item)) if self.input_text_color is None else Label(text=str(item),color=self.input_text_color)
                     if self.wrap_text: L.text_size = L.size
                 self.add_widget(L)
                 self.cells[cell].append(L)
+            i += 1
     def update_bkgSize(self, instance, value):
         self.bkg.size = self.size
         self.bkg.pos = self.pos
@@ -1088,24 +1207,26 @@ class PlayerTrack(GridLayout):
         self.player = player
         self.cols=1
         self.hclr = get_hexcolor((255, 85, 0))
-        #self.Combat = Label(text=f'Combat: [color=self.hclr]{player.Combat}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
-        #self.Knowledge = Label(text=f'Knowledge: [color=self.hclr]{player.Knowledge}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
-        #self.Capital = Label(text=f'Capital: [color=self.hclr]{player.Capital}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
-        #self.Reputation = Label(text=f'Reputation: [color=self.hclr]{player.Reputation}[/color]',height=Window.size[1]*0.05,bold=True,markup=True)
         self.track_screen = ScreenManager()
         # Combat Screen
-        self.Combat = Table(header=['Attribute','Base','Boost','Current'], data=self.get_Combat(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
-                            #super_header=f'Combat: [color={self.hclr}]{player.Combat}[/color]', header_height_hint=0.01, wrap_text=True)
+        self.Combat = Table(header=['Attribute','Base','Boost','Current'], data=self.get_Combat(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
         screen = Screen(name='Combat')
         screen.add_widget(self.Combat)
         self.track_screen.add_widget(screen)
         # Knowledge Screen
-        self.Knowledge = Table(header=['Skill','Level', 'XP'], data=[[skill, player.skills[skill]] for skill in player.skills], text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
-                               #super_header=f'Knowledge: [color={self.hclr}]{player.Knowledge}[/color]', header_height_hint=0.01)
+        self.Knowledge = Table(header=['Skill','Level', 'XP'], data=self.get_Knowledge(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
         screen = Screen(name='Knowledge')
         screen.add_widget(self.Knowledge)
         self.track_screen.add_widget(screen)
         # Capital Screen
+        capGrid = GridLayout(cols=1)
+        self.capitalDisplay = Button(text='',height=Window.size[1]*0.05,size_hint_y=None,color=(0, 0, 0, 1),markup=True,background_color=(1,1,1,0))
+        self.Capital = Table(header=['City','Home'], data=self.get_Capital(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50),header_as_buttons=True)#,'Market','Bank','Village1','Village2','Village3','Village4','Village5','Waiting']
+        capGrid.add_widget(self.Capital)
+        capGrid.add_widget(self.capitalDisplay)
+        screen = Screen(name='Capital')
+        screen.add_widget(capGrid)
+        self.track_screen.add_widget(screen)
         # Reputation Screen
         # Item Screen
         self.Items = Table(header=['Item', 'Quantity', ''], data=self.get_Items(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
@@ -1121,37 +1242,73 @@ class PlayerTrack(GridLayout):
         self.combatTab.bind(on_press=partial(changeTab, 'Combat'))
         self.knowledgeTab = Button(text=f'Knowledge: [color={self.hclr}]{player.Knowledge}[/color]',markup=True,background_color=self.tab_color)
         self.knowledgeTab.bind(on_press=partial(changeTab, 'Knowledge'))
-        self.itemsTab = Button(text='Items',markup=True,background_color=self.tab_color)
+        self.capitalTab = Button(text=f'Capital: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
+        self.capitalTab.bind(on_press=partial(changeTab, "Capital"))
+        self.itemsTab = Button(text='Items: 0/3',markup=True,background_color=self.tab_color)
         self.itemsTab.bind(on_press=partial(changeTab, 'Items'))
         self.tabs.add_widget(self.combatTab)
         self.tabs.add_widget(self.knowledgeTab)
+        self.tabs.add_widget(self.capitalTab)
         self.tabs.add_widget(self.itemsTab)
         # Add widgets in order
         self.add_widget(self.tabs)
         self.add_widget(self.track_screen)
     def get_Combat(self):
-        return np.transpose([self.player.atrorder,self.player.combat,self.player.boosts,self.player.current])
+        data = []
+        for i in range(len(self.player.atrorder)):
+            data.append([{'text':str(self.player.atrorder[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.combat[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.boosts[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.current[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
+        return data
     def get_Knowledge(self):
-        return [[skill, self.player.skills[skill], self.player.xps[skill]] for skill in self.player.skills]
-    def get_Items(self):
-        if (len(self.player.currenttile.city_wares) + len(self.player.currenttile.trader_wares)) == 0:
-            # No items to sell, so return no buttons
-            data = [[item, self.player.items[item], ''] for item in self.player.items]
+        data = []
+        for skill in self.player.skills:
+            data.append([{'text':skill,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.skills[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.xps[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
+        return data
+    def homeDisplay(self, city, _=None):
+        data = {}
+        if self.player.homes[city]:
+            msg = f'Purchased! Capital: [color={self.hclr}]{capital_info[city]["home_cap"]}[/color], Capacity: {capital_info[city]["capacity"]}'
+            data['disabled'] = True
+            data['text'] = 'Owned'
+            data['background_color'] = (1, 10, 1, 0.8)
         else:
-            # Ability to sell your items!
-            data = []
-            wares = self.player.currenttile.city_wares.union(self.player.currenttile.trader_wares)
-            for item in self.player.items:
-                if item in wares:
-                    data.append([item, self.player.items[item], ''])
-                else:
-                    # [INCOMPLETE] Sell is not defined and also Table not ready to hand dictionaries
-                    data.append([item, self.player.items[item], {'Sell':partial(sellItem, item, True if self.player.currenttile.trader_rounds>0 else False, None)}])
+            data['text'] = 'Buy'
+            msg = f'Cost: [color=cfb53b]{capital_info[city]["home"]}[/color] Capital: [color={self.hclr}]{capital_info[city]["home_cap"]}[/color], Capacity: {capital_info[city]["capacity"]}'
+            if self.player.currenttile.tile != city:
+                data['disabled'] = True
+            else:
+                data['background_color'] = (1, 1, 0.2, 1)
+                data['func'] = partial(self.player.purchase, 'home', city, None)
+        data['hover'] = (self.capitalDisplay, msg)
+        return data
+    def get_Capital(self):
+        data = []
+        for city in self.player.cityorder:
+            data.append([{'text':city[0].upper()+city[1:],'background_color':(1,1,1,0),'color':(0,0,0,1)}, self.homeDisplay(city)])
+        return data
+    def get_Items(self):
+        data = []
+        wares = self.player.currenttile.city_wares.union(self.player.currenttile.trader_wares)
+        for item in self.player.items:
+            sellbutton = {'text':'Sell', 'func':partial(sellItem, item, True if self.player.currenttile.trader_rounds>0 else False, None)} if item not in wares else {'text':'','background_color':(1,1,1,0),'disabled':False}
+            data.append([{'text':item, 'background_color':(1,1,1,0), 'disabled':True,'color':(0,0,0,1)},
+                         {'text':str(self.player.items[item]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         sellbutton])
+            # [INCOMPLETE] Add an "invest" button option if player on a village
         return data
     def updateAll(self):
-        self.Combat.update_data_cells(self.get_Combat())
-        self.Knowledge.update_data_cells(self.get_Knowledge())
+        self.Combat.update_data_cells(self.get_Combat(), False)
+        self.combatTab.text=f"Combat: [color={self.hclr}]{self.player.Combat}[/color]"
+        self.Knowledge.update_data_cells(self.get_Knowledge(), False)
+        self.knowledgeTab.text=f'Knowledge: [color={self.hclr}]{self.player.Knowledge}[/color]'
+        self.Capital.update_data_cells(self.get_Capital())
+        self.capitalTab.text=f"Capital [color={self.hclr}]{self.player.Capital}[/color]"
         self.Items.update_data_cells(self.get_Items())
+        self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
         
 
 cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
