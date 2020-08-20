@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image as pilImage
 import os
 import sys
+from collections import Counter
 from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
 from copy import deepcopy
 import socket_client
@@ -67,7 +68,7 @@ def actionGrid(funcDict, save_rest):
     game_app.game_page.make_actionGrid(funcDict, save_rest)
 def check_paralysis():
     P = lclPlayer()
-    if (P.fatigue > 10) or (P.paralyzed_rounds in {1,2}):
+    if (P.fatigue > P.max_fatigue) or (P.paralyzed_rounds in {1,2}):
         P.paralyzed_rounds += 1
         P.actions = 0
         for a in range(P.max_actions):
@@ -83,9 +84,8 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 if P.road_moves == 0:
                     P.takeAction(amt)
                     P.road_moves = P.max_road_moves
-            elif (consume == 'buy') or (consume == 'bartered'):
+            elif consume == 'buy':
                 P.avail_transactions -= amt
-                if consume == 'bartered': P.activated_bartering=True
                 if P.avail_transactions == 0:
                     # If the player makes his max transactions, then it is the same as if he bartered. Otherwise, bartering is handled in the takeAction method.
                     P.activated_bartering = False
@@ -118,31 +118,36 @@ def sellItem(item, to_trader, barter=None, _=None):
     P = lclPlayer()
     if P.paused:
         return
-    print(item)
+    if item in P.unsellable:
+        output("You can't sell this item in the same round!", 'yellow')
+        return
     for categ in gameItems:
         if item in gameItems[categ]:
             sellprice = sellPrice[gameItems[categ][item]]
             break
-    if barter is None:
+    if (barter is None) and (not P.activated_bartering):
         output("Would you like to barter?",'blue')
         actionGrid({'Yes':partial(sellItem, item, to_trader, True), 'No':partial(sellItem, item, to_trader, False)}, False)
     elif barter == True:
+        P.activated_bartering = True
         bartering = P.activateSkill("Bartering")
         r = rbtwn(1,12)
         if r <= bartering:
             P.useSkill("Bartering")
             output("You successfully Barter", 'green')
             if (bartering > 8) and to_trader:
+                P.bartering_mode = 2
                 P.coins += (sellprice+2)
             else:
+                P.bartering_mode = 1
                 P.coins += (sellprice+1)
             # Its basically inverted getItem
-            getItem(item, -1, 'bartered', False, 1)()
+            getItem(item, -1, 'buy', False, 1)()
         else:
             output("You failed to barter, sell anyway?", 'red')
-            actionGrid({'Yes':partial(sellItem, item, to_trader, False), 'No':exitActionLoop('bartered', 0, False)}, False)
+            actionGrid({'Yes':partial(sellItem, item, to_trader, False), 'No':exitActionLoop('buy', 0, False)}, False)
     else:
-        P.coins += sellprice
+        P.coins += sellprice + P.bartering_mode
         getItem(item, -1, 'buy', False)()
 
 def buyItem(item, cost, from_trader, amt=1, consume='buy'):
@@ -153,6 +158,7 @@ def buyItem(item, cost, from_trader, amt=1, consume='buy'):
         if P.coins < (cost*amt):
             output("Insufficient funds!",'yellow')
         else:
+            P.unsellable.add(item)
             P.coins -= (cost*amt)
             if from_trader and (item in P.currenttile.trader_wares):
                 P.currenttile.buy_from_trader(item)
@@ -167,29 +173,33 @@ def Trading(items, trader, barter=False):
     def activate_bartering(_):
         if P.paused:
             return
+        P.activated_bartering = True
         bartering = P.activateSkill('Bartering')
         r = rbtwn(1, 12)
         if r <= bartering:
             P.useSkill('Bartering')
             output("You successfully Barter", 'green')
             if (bartering > 8) and trader:
+                P.bartering_mode = 2
                 Trading(items, trader, 2) # Reduce prices by max of 2
             else:
+                P.bartering_mode = 1
                 Trading(items, trader, 1)
         else:
+            P.bartering_mode = 0
             Trading(items, trader, None) # Not given the opportunity to barter again unless performs a different action first
     actions = {}
     for item in items:
         for categ in gameItems:
             if item in gameItems[categ]:
                 cost = gameItems[categ][item] if trader else mrktPrice[gameItems[categ][item]]
-                cost = cost if (barter is None) or (not barter) else cost-barter
-                clr = 'ffff75' if (barter is None) or (not barter) else '00ff75'
-                actions[f'{item}:[color={clr}]{cost}[/color]'] = buyItem(item, cost, trader, consume='buy' if barter==False else 'bartered')
+                cost = cost - P.bartering_mode
+                clr = 'ffff75' if P.bartering_mode == 0 else '00ff75'
+                actions[f'{item}:[color={clr}]{cost}[/color]'] = buyItem(item, cost, trader, consume='buy')
                 # Give the player the option to go back to regular action menu of the tile
                 actions['Back'] = exitActionLoop(None, 0)
     # If the player has not activated bartering already, give them a chance to do so
-    if (barter == False) and (P.activated_bartering==False): actions['Barter'] = activate_bartering
+    if (P.bartering_mode == 0) and (P.activated_bartering==False): actions['Barter'] = activate_bartering
     actionGrid(actions, False)
     
 def await_trading(items, trader, barter=False):
@@ -726,7 +736,9 @@ def A_wilderness():
 avail_actions = {'road':A_road,'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}#,'wilderness','village1','village2','village3','village4','village5',
 #                 'anafola','benfriege','demetry','enfeir','fodker','glaser','kubani','pafiz','scetcher','starfex','tamarania','tamariza','tutalu','zinzibar'}
 
-
+food_restore = {'raw meat':(1,0),'cooked meat':(2,0),'well cooked meat':(3,0),
+                'raw fish':(0,1),'cooked fish':(0,2),'well cooked fish':(0,3),
+                'fruit':(1,1)}
 capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8},
                 'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3},
                 'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9},
@@ -741,6 +753,21 @@ capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'retu
                 'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8},
                 'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4},
                 'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3}}
+village_invest = {'village1':'Food', 'village2':'Crafting', 'village3':'Cloth', 'village4':'Food', 'village5':'Crafting'}
+connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
+                         [ 0, 0, 6,10, 7,10, 7, 5, 5, 9, 8, 3, 4,11],
+                         [ 0, 0, 0, 4, 4, 6, 2, 4, 2, 4, 2, 3, 5, 6],
+                         [ 0, 0, 0, 0, 7, 7, 4, 8, 6, 5, 2, 7, 9, 6],
+                         [ 0, 0, 0, 0, 0,10, 3, 3, 2, 8, 6, 4, 5,10],
+                         [12, 0, 0, 0, 0, 0, 8,10, 9, 5, 5, 7, 9, 6],
+                         [ 0, 0,10, 0, 0, 0, 0, 5, 3, 6, 3, 4, 6, 7],
+                         [ 0, 0, 0, 0, 8, 0, 0, 0, 2, 8, 6, 3, 2,10],
+                         [ 0, 0, 6, 0, 6, 0,10, 7, 0, 6, 4, 2, 4, 8],
+                         [ 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 6, 8, 2],
+                         [ 5, 0, 3, 6, 0, 0, 6, 0, 0, 9, 0, 5, 7, 4],
+                         [10,10, 8, 0, 0, 0, 0, 3, 6, 0, 0, 0, 2, 8],
+                         [ 0,12, 0, 0, 0, 0, 0, 7, 0, 0, 0, 6, 0,10],
+                         [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
 
 class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
@@ -759,6 +786,8 @@ class Player(Image):
         
         # Constraints
         self.paused = False
+        self.ate = 0
+        self.max_eating = 2
         self.max_road_moves = 2
         self.max_actions = 2
         self.max_avail_transactions = 3
@@ -772,6 +801,8 @@ class Player(Image):
         self.item_count = 0
         self.items = {}
         self.activated_bartering = False
+        self.bartering_mode = 0
+        self.unsellable = set()
         self.avail_transactions = 3
         self.fatigue = 0
         
@@ -797,9 +828,10 @@ class Player(Image):
         self.cityorder = sorted(cities)
         self.homes = {city: False for city in cities}
         self.markets = {city: False for city in cities}
+        self.workers = {city: False for city in cities}
         self.bank = {city: 0 for city in cities}
         self.villages = {city: {} for city in cities}
-        self.awaiting = {city: '' for city in cities}
+        self.awaiting = {city: [] for city in cities}
         # Some helpers of Capital
         self.already_asset_bartered = False
         self.training_allowed = {city: False for city in cities}
@@ -851,6 +883,10 @@ class Player(Image):
                 socket_client.send('[MOVE]',coord)
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
+            # Collect any money waiting at bank
+            if (self.currenttile.tile in cities):
+                self.coins += self.bank[self.currenttile.tile]
+                self.bank[self.currenttile.tile] = 0
             game_app.game_page.recover_button.text = f'Rest ({self.get_recover()})'
             self.parentBoard.updateView()
             self.pos_hint = {'center_x':self.currenttile.centx, 'center_y':self.currenttile.centy}
@@ -891,42 +927,59 @@ class Player(Image):
             self.current[hp_idx] = min([self.combat[hp_idx]+self.boosts[hp_idx], self.current[hp_idx]+rest_rate])
             output(f'[ACTION {self.max_actions-self.actions+1}] You rested {rest_rate} fatigue/HP')
             self.takeAction(0, False)
-    def eat(self, food=None, ftg=0, hp=0):
-        def eat_food(_):
-            # Prevent eating when game is paused just in case they are in a fight
-            if not self.paused:
-                restoring_list = []
-                if ftg>0: restoring_list.append(f'fatigue by {ftg}')
-                if hp>0: restoring_list.append(f'HP by {hp}')
-                output(f'Ate {food} restoring {", ".join(restoring_list)}')
-                self.rmvItem(food)
-                self.fatigue = max([0, self.fatigue - ftg])
-                hp_idx = self.attributes['Hit Points']
-                self.current[hp_idx] = min([self.combat[hp_idx]+self.boosts[hp_idx], self.current[hp_idx]+hp])
-                self.update_mainStatPage()
-                # Then restore back to original action list
-                self.go2action()
-        if food is None:
-            def choose_food(_):
-                # Prevent eating when game is paused just in case they are in a fight
-                if not self.paused:
-                    food_func = {'raw meat':self.eat('raw meat',1,0),'cooked meat':self.eat('cooked meat',2,0),'well cooked meat':self.eat('well cooked meat',3,0),
-                                 'raw fish':self.eat('raw fish',0,1),'cooked fish':self.eat('cooked fish',0,2),'well cooked fish':self.eat('well cooked fish',0,3),
-                                 'fruit':self.eat('fruit',1,1)}
-                    try_to_eat = {}
-                    for food in food_func:
-                        if food in self.items:
-                            try_to_eat[food] = food_func[food]
-                    if len(try_to_eat)==0:
-                        output('You have no food to eat!','yellow')
-                    elif len(try_to_eat)==1:
-                        for func in try_to_eat.values():
-                            func(None)
-                    else:
-                        actionGrid(try_to_eat, False)
-            return choose_food
-        else:
-            return eat_food
+    def eat(self, food, _=None):
+        if self.paused:
+            return
+        if self.ate >= self.max_eating:
+            output("You can't eat anymore this action!",'yellow')
+            return
+        self.ate += 1
+        ftg, hp = food_restore[food]
+        restoring_list = []
+        if ftg>0: restoring_list.append(f'FTG by {ftg}')
+        if hp>0: restoring_list.append(f'HP by {hp}')
+        output(f'Restored {", ".join(restoring_list)}','green')
+        self.rmvItem(food)
+        self.fatigue = max([0, self.fatigue - ftg])
+        hp_idx = self.attributes['Hit Points']
+        self.current[hp_idx] = min([self.combat[hp_idx]+self.boosts[hp_idx], self.current[hp_idx]+hp])
+        self.update_mainStatPage()
+#    def eat(self, food=None, ftg=0, hp=0):
+#        def eat_food(_):
+#            # Prevent eating when game is paused just in case they are in a fight
+#            if not self.paused:
+#                restoring_list = []
+#                if ftg>0: restoring_list.append(f'fatigue by {ftg}')
+#                if hp>0: restoring_list.append(f'HP by {hp}')
+#                output(f'Ate {food} restoring {", ".join(restoring_list)}')
+#                self.rmvItem(food)
+#                self.fatigue = max([0, self.fatigue - ftg])
+#                hp_idx = self.attributes['Hit Points']
+#                self.current[hp_idx] = min([self.combat[hp_idx]+self.boosts[hp_idx], self.current[hp_idx]+hp])
+#                self.update_mainStatPage()
+#                # Then restore back to original action list
+#                self.go2action()
+#        if food is None:
+#            def choose_food(_):
+#                # Prevent eating when game is paused just in case they are in a fight
+#                if not self.paused:
+#                    food_func = {'raw meat':self.eat('raw meat',1,0),'cooked meat':self.eat('cooked meat',2,0),'well cooked meat':self.eat('well cooked meat',3,0),
+#                                 'raw fish':self.eat('raw fish',0,1),'cooked fish':self.eat('cooked fish',0,2),'well cooked fish':self.eat('well cooked fish',0,3),
+#                                 'fruit':self.eat('fruit',1,1)}
+#                    try_to_eat = {}
+#                    for food in food_func:
+#                        if food in self.items:
+#                            try_to_eat[food] = food_func[food]
+#                    if len(try_to_eat)==0:
+#                        output('You have no food to eat!','yellow')
+#                    elif len(try_to_eat)==1:
+#                        for func in try_to_eat.values():
+#                            func(None)
+#                    else:
+#                        actionGrid(try_to_eat, False)
+#            return choose_food
+#        else:
+#            return eat_food
     def pause(self):
         self.paused = True
         if self == self.parentBoard.localPlayer:
@@ -943,6 +996,7 @@ class Player(Image):
     def startRound(self):
         for P in self.parentBoard.Players.values():
             P.paused = False
+        self.unsellable = set()
         self.parentBoard.localPlayer.actions = self.max_actions
         self.parentBoard.sendFaceMessage('Start Round!')
         for T in self.parentBoard.gridtiles.values():
@@ -969,12 +1023,12 @@ class Player(Image):
             # Move to nearest city
             coord, distance = self.currenttile.findNearest(cities)
             self.moveto(coord)
-            # Artificially paralyze the player by setting fatigue to 11
-            self.fatigue = 11
+            # Artificially paralyze the player by setting fatigue 1 greater than max
+            self.fatigue = self.max_fatigue + 1
             fainted = True
         if not fainted:
             self.fatigue = self.fatigue + ftg_amt if add else ftg_amt
-        paralyzed = True if self.fatigue>10 else False
+        paralyzed = True if self.fatigue>self.max_fatigue else False
         check_paralysis()
         return (fainted or paralyzed)
     def takeAction(self, fatigue=1, verbose=True):
@@ -984,7 +1038,9 @@ class Player(Image):
             # Player performed an action after bartering - make sure you give them an extra fatigue if they bartered and didn't do 3 transactions
             fatigue += 1
             self.activated_bartering = False
+            self.bartering_mode = 0
         if fatigue > 0: self.takeDamage(0,fatigue)
+        self.ate = 0 # Refresh how much one can eat
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
         self.already_asset_bartered = False # If an action is taken, you can try to barter for the asset again.
         self.update_mainStatPage()
@@ -1003,7 +1059,7 @@ class Player(Image):
             output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
     def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
-        if rbtwn(1,10) <= self.fatigue:
+        if rbtwn(1,self.max_fatigue) <= self.fatigue:
             output(f"Fatigue impacted your {skill} skill.",'yellow')
             actv_lvl = np.max([0,lvl-self.fatigue])
         else:
@@ -1064,7 +1120,7 @@ class Player(Image):
         elif barter and (not self.already_asset_bartered):
             if self.coins < cost:
                 output("You can't effectively barter when your funds are low!", 'yellow')
-                exitActionLoop(amt=0)
+                exitActionLoop(amt=0)()
                 return
             self.already_asset_bartered = True
             bartering = self.activateSkill("Bartering")
@@ -1079,6 +1135,44 @@ class Player(Image):
             return
         else:
             make_purchase(asset, city, cost)
+    def get_worker(self, city, _=None):
+        if self.paused:
+            return
+        elif not self.markets[city]:
+            output("You need to purchase a market first!","yellow")
+            return
+        elif self.workers[city]:
+            output("You already manage a worker here!","yellow")
+            return
+        excavating = self.activateSkill("Excavating")
+        r = rbtwn(0, 6)
+        if r <= excavating:
+            self.useSkill("Excavating")
+            output("You found a potential worker")
+            persuasion = self.activateSkill("Persuasion")
+            r = rbtwn(0, 6)
+            if r <= persuasion:
+                self.useSkill("Persuasion")
+                output("You convinced them to work for you!", 'green')
+                self.workers[city] = True
+            else:
+                output("You were unable to convince the worker", 'red')
+        else:
+            output("You were unable to find a worker", 'red')
+        exitActionLoop()()
+    def getIncome(self, skirmishes, _=None):
+        notwaring = notAtWar(skirmishes)
+        for city in notwaring:
+            # If you have the city
+            if self.markets[city]:
+                # And you are on the city
+                if self.currenttile.tile == city:
+                    # Check if bartering will give you extra coins - does not count as an activation!
+                    r = rbtwn(0, self.skills["Bartering"])
+                    self.coins += capital_info[city]['return'] + r # Get the income plus the bartering effort
+                # Otherwise check if you have automated the city
+                elif self.workers[city]:
+                    self.bank[city] += capital_info[city]['return'] - 1 # 1 coin goes to the worker and money sent to bank
     def rmvItem(self, item):
         if item not in self.items:
             output(f"Item {item} does not exist in inventory.",'yellow')
@@ -1221,7 +1315,7 @@ class PlayerTrack(GridLayout):
         # Capital Screen
         capGrid = GridLayout(cols=1)
         self.capitalDisplay = Button(text='',height=Window.size[1]*0.05,size_hint_y=None,color=(0, 0, 0, 1),markup=True,background_color=(1,1,1,0))
-        self.Capital = Table(header=['City','Home'], data=self.get_Capital(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50),header_as_buttons=True)#,'Market','Bank','Village1','Village2','Village3','Village4','Village5','Waiting']
+        self.Capital = Table(header=['City','Home','Market','Bank','Villages Invested','Waiting'], data=self.get_Capital(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
         capGrid.add_widget(self.Capital)
         capGrid.add_widget(self.capitalDisplay)
         screen = Screen(name='Capital')
@@ -1229,7 +1323,7 @@ class PlayerTrack(GridLayout):
         self.track_screen.add_widget(screen)
         # Reputation Screen
         # Item Screen
-        self.Items = Table(header=['Item', 'Quantity', ''], data=self.get_Items(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50))
+        self.Items = Table(header=['Item', 'Quantity', '', ''], data=self.get_Items(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), color_odd_rows=True)
         screen = Screen(name='Items')
         screen.add_widget(self.Items)
         self.track_screen.add_widget(screen)
@@ -1270,34 +1364,104 @@ class PlayerTrack(GridLayout):
         return data
     def homeDisplay(self, city, _=None):
         data = {}
+        msg = f' Capital: [color={self.hclr}]{capital_info[city]["home_cap"]}[/color], Capacity: {capital_info[city]["capacity"]}'
         if self.player.homes[city]:
-            msg = f'Purchased! Capital: [color={self.hclr}]{capital_info[city]["home_cap"]}[/color], Capacity: {capital_info[city]["capacity"]}'
+            msg = 'Purchased! '+ msg
             data['disabled'] = True
-            data['text'] = 'Owned'
+            data['text'] = 'Owned!'
             data['background_color'] = (1, 10, 1, 0.8)
         else:
+            msg = f'Cost: [color=cfb53b]{capital_info[city]["home"]}[/color]' + msg
             data['text'] = 'Buy'
-            msg = f'Cost: [color=cfb53b]{capital_info[city]["home"]}[/color] Capital: [color={self.hclr}]{capital_info[city]["home_cap"]}[/color], Capacity: {capital_info[city]["capacity"]}'
             if self.player.currenttile.tile != city:
                 data['disabled'] = True
             else:
-                data['background_color'] = (1, 1, 0.2, 1)
+                data['background_color'] = (2, 2, 0.2, 1)
                 data['func'] = partial(self.player.purchase, 'home', city, None)
-        data['hover'] = (self.capitalDisplay, msg)
+        data['hover'] = (self.capitalDisplay, city[0].upper()+city[1:]+' Home | '+msg)
+        return data
+    def marketDisplay(self, city, _=None):
+        data = {}
+        msg = f' Capital: [color={self.hclr}]{capital_info[city]["market_cap"]}[/color], Income: [color=00d900]{capital_info[city]["return"]}[/color]'
+        if self.player.markets[city]:
+            if self.player.workers[city]:
+                msg = 'Owned and Automated!' + msg
+                data['disabled'] = True
+                data['text'] = 'Automated'
+                data['background_color'] = (1, 10, 1, 0.8)
+            else:
+                msg = 'Owned!' + msg
+                data['text'] = 'Automate'
+                if self.player.currenttile.tile != city:
+                    data['disabled'] = True
+                else:
+                    data['background_color'] = (2, 2, 0.2, 1)
+                    data['func'] = partial(self.player.get_worker, city)
+        else:
+            msg = f'Cost: [color=cfb53b]{capital_info[city]["market"]}[/color]' + msg
+            data['text'] = 'Buy'
+            if self.player.currenttile.tile != city:
+                data['disabled'] = True
+            else:
+                data['background_color'] = (2, 2, 0.2, 1)
+                data['func'] = partial(self.player.purchase, 'market', city, None)
+        data['hover'] = (self.capitalDisplay, city[0].upper()+city[1:]+' Market | '+msg)
+        return data
+    def villageDisplay(self, city, _=None):
+        data = {}
+        msg = f'Capital: [color={self.hclr}]1ea[/color], '+', '.join([v[0].upper()+v[1:]+': '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else self.player.villages[city]+f' ([color=bf004b]{self.player.villages[city][v]}[/color])') for v in city_villages[city]])
+        data['disabled'] = True
+        data['text']='-' if city=='fodker' else str(len(self.player.villages[city]))
+        data['background_color'] = (1, 1, 1, 0)
+        data['color'] = (0, 0, 0, 1)
+        data['hover'] = (self.capitalDisplay, city[0].upper()+city[1:]+' Villages | '+('None' if city=='fodker' else msg))
+        return data
+    def villageAwaitingDisplay(self, city, _=None):
+        data = {}
+        data['text'] = '' if len(self.player.villages[city])==0 else str(len(self.player.awaiting[city]))
+        data['disabled'] = True
+        data['background_color'] = (1, 1, 1, 0)
+        data['color'] = (0, 0, 0, 1)
+        awt = Counter(self.player.awaiting[city]) 
+        data['hover'] = (self.capitalDisplay, city[0].upper()+city[1:]+' Awaiting Items | '+('None' if city=='fodker' else ', '.join([f'{a[0]}: [color=009e33]{a[1]}[/color]' for a in list(awt.items())])))
         return data
     def get_Capital(self):
         data = []
         for city in self.player.cityorder:
-            data.append([{'text':city[0].upper()+city[1:],'background_color':(1,1,1,0),'color':(0,0,0,1)}, self.homeDisplay(city)])
+            data.append([{'text':city[0].upper()+city[1:],'background_color':(1,1,1,0),'color':(0,0,0,1), 'disabled':True},
+                         self.homeDisplay(city),
+                         self.marketDisplay(city),
+                         {'text':str(self.player.bank[city]) if self.player.bank[city] > 0 else '','background_color':(1,1,1,0),'color':(0,0,0,1), 'disabled':True},
+                         self.villageDisplay(city),
+                         self.villageAwaitingDisplay(city)])
         return data
     def get_Items(self):
         data = []
         wares = self.player.currenttile.city_wares.union(self.player.currenttile.trader_wares)
         for item in self.player.items:
-            sellbutton = {'text':'Sell', 'func':partial(sellItem, item, True if self.player.currenttile.trader_rounds>0 else False, None)} if item not in wares else {'text':'','background_color':(1,1,1,0),'disabled':False}
+            for categ in gameItems:
+                if item in gameItems[categ]:
+                    if categ == 'Cloth':
+                        sellprice = gameItems[categ][item]*(2 if self.player.currenttile.tile in clothSpecials[item] else 1) + self.player.bartering_mode
+                    else:
+                        sellprice = sellPrice[gameItems[categ][item]] + self.player.bartering_mode
+                    break
+            clr = 'ffff75' if self.player.bartering_mode == 0 else '00ff75'
+            if (self.player.currenttile.trader_round>0) or (self.player.currenttile.tile in cities) and (item not in wares):
+                # Sell if the player is on a (city or trader) and the item is not in the wares
+                sellbutton = {'text':f'Sell: [color={clr}]{sellprice}[/color]', 'markup':True, 'func':partial(sellItem, item, True if self.player.currenttile.trader_rounds>0 else False, None)}
+            elif (self.player.currenttile.tile in {'village1','village2','village3','village4','village5'}) and (categ == village_invest[self.player.currenttile.tile]):
+                # Invest if a player is on a village and the item is investable in the village
+                city = self.player.currenttile.neighbortiles.intersection(set(cities)).pop()
+                sellbutton = {'text':'Invest: [color=ffff75]{capital_info[city]["invest"]}[/color]', 'markup':True, 'func':partial(self.player.invest, item)}
+            else:
+                # Empty
+                sellbutton = {'text':'','background_color':(1,1,1,0),'disabled':False}
+            eatbutton = {'text':'Eat', 'func':partial(self.player.eat, item)} if categ=='Food' else {'text':'','background_color':(1,1,1,0),'disabled':False}
             data.append([{'text':item, 'background_color':(1,1,1,0), 'disabled':True,'color':(0,0,0,1)},
                          {'text':str(self.player.items[item]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
-                         sellbutton])
+                         sellbutton,
+                         eatbutton])
             # [INCOMPLETE] Add an "invest" button option if player on a village
         return data
     def updateAll(self):
@@ -1325,6 +1489,7 @@ cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavat
           'tamariza':{'Combat Style':'Wizard','Coins':5,'Knowledges':[('Critical Thinking',1)],'Combat Boosts':[('Def-Physical',1),('Def-Elemental',2),('Hit Points',1)]},
           'tutalu':{'Combat Style':'Trooper','Coins':3,'Knowledges':[('Excavating',2)],'Combat Boosts':[('Attack',3)]},
           'zinzibar':{'Combat Style':'Physical','Coins':2,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Agility',2),('Attack',1)]}}
+city_villages = {city: [] for city in cities} # Updated once the neighbors are defined
 sellPrice = {1:0, 2:1, 3:2, 4:2, 5:3, 6:3, 7:4, 8:5, 9:6}
 mrktPrice = {1:1, 2:3, 3:5, 4:6, 5:8, 6:9, 7:10, 8:12, 9:20}
 gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish':1,'cooked fish':2,'well cooked fish':3,'fruit':2},
@@ -1332,7 +1497,18 @@ gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish
              'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
              'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
              'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':8},
-             'Quests':{'cooling cubes'}}
+             'Quests':{'cooling cubes':1}}
+clothSpecials = {'benfriege cloth':{'zinzibar','glaser','enfeir','starfex'},
+                 'enfeir cloth':{'benfriege','tutalu','pafiz'},
+                 'glaser cloth':{'pafiz','fodker','benfriege','tutalu','scetcher'},
+                 'pafiz cloth':{'zinzibar','glaser'},
+                 'scetcher cloth':{'glaser'},
+                 'starfex cloth':{'benfriege','tutalu','pafiz'},
+                 'tutalu cloth':{'zinzibar','glaser','enfeir'},
+                 'zinzibar cloth':{'benfriege','tutalu','pafiz','fodker'},
+                 'old fodker cloth':{'zinzibar','glaser'},
+                 'old zinzibar cloth':{'benfriege','tutalu','pafiz','fodker'},
+                 'luxurious cloth':{}}
 game_launched = [False]
 hovering = [0]
 
@@ -1507,6 +1683,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             if (x, y) in self.parentBoard.gridtiles:
                 self.neighbors.add((x, y))
                 self.neighbortiles.add(self.parentBoard.gridtiles[(x,y)].tile)
+        if self.tile in cities:
+            city_villages[self.tile] = sorted(self.neighbortiles.intersection({'village1','village2','village3','village4','village5'}))
     def is_neighbor(self):
         return self.parentBoard.localPlayer.currentcoord in self.neighbors
     def findNearest(self, tiles, T=None, depth=0, checked=set(), queue={}):
@@ -1599,13 +1777,13 @@ class BoardPage(FloatLayout):
             self.startLabel = Label(text='',bold=True,color=(0.5, 0, 1, 0.7),pos_hint={'x':0,'y':0},size_hint=(1,1),font_size=50,markup=True)
             self.add_widget(self.startLabel)
             self.game_page.recover_button.bind(on_press=self.localPlayer.recover)
-            self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
+            #self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
             self.localPlayer.add_mainStatPage()
             self.localPlayer.add_PlayerTrack()
     def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2):
         timeNow = time()
         msg = f'[color={trns_clr[clr]}]{msg}[/color]' if clr is not None else msg
-        if clr is not None:
+        if msg is not None:
             self.startLblMsgs.append(msg)
             self.startLblTimes.append(timeNow)
         max_i = -1
@@ -1615,7 +1793,9 @@ class BoardPage(FloatLayout):
         self.startLblMsgs = self.startLblMsgs[(max_i+1):]
         self.startLblTimes = self.startLblTimes[(max_i+1):]
         self.startLabel.text = '\n'.join(self.startLblMsgs)
-        if msg is not None: output(msg, clr)
+        if msg is not None: 
+            if msg == 'Start Round!': msg = '\n'+msg
+            output(msg, clr)
         def clear_lbl(_):
             self.sendFaceMessage()
         Clock.schedule_once(clear_lbl, scheduleTime)
@@ -1666,11 +1846,11 @@ class GamePage(GridLayout):
         self.output.bind(pos=self.update_bkgSize, size=self.update_bkgSize)
         self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
         self.recover_button = Button(text='Rest (2)')
-        self.eat_button = Button(text='Eat')
+        #self.eat_button = Button(text='Eat')
         # Button is bound after local player is detected
         self.actionGrid.add_widget(self.recover_button)
-        self.actionGrid.add_widget(self.eat_button)
-        self.actionButtons = [self.recover_button, self.eat_button]
+        #self.actionGrid.add_widget(self.eat_button)
+        self.actionButtons = [self.recover_button]#, self.eat_button]
         self.statGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y)},size_hint_y=stat_y,cols=4)
         self.display_page = Label(text='Chat Box (press enter to send message)\n',pos_hint={'x':0,'y':input_y},color=(1,1,1,0.8),size_hint=(1,label_y),markup=True)
         self.display_page.text_size = self.display_page.size
@@ -1703,9 +1883,9 @@ class GamePage(GridLayout):
         for B in self.actionButtons:
             self.actionGrid.remove_widget(B)
         if save_rest:
-            self.actionButtons = [self.recover_button, self.eat_button]
+            self.actionButtons = [self.recover_button]#, self.eat_button]
             self.actionGrid.add_widget(self.recover_button)
-            self.actionGrid.add_widget(self.eat_button)
+            #self.actionGrid.add_widget(self.eat_button)
         else:
             self.actionButtons = []
     def update_bkgSize(self, instance, value):
@@ -1792,6 +1972,13 @@ class BirthCityPage(GridLayout):
         self.bcbs[city].make_claim()
         game_app.game_page.board_page.add_player(username, city)
         
+def notAtWar(skrm):
+    s = set()
+    for S in skrm:
+        for city in S:
+            s.add(city)
+    return set(cities).difference(s)
+
 class LaunchPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1861,6 +2048,8 @@ class LaunchPage(GridLayout):
                 Clock.schedule_once(clockedTrader, 0.2)
             elif type(message[1]) is str:
                 Clock.schedule_once(clockedPurchase, 0.1)
+        elif category == '[SKIRMISH]':
+            output(f"Cities not at war: {notAtWar(message)}")
     def update_self(self, _):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready

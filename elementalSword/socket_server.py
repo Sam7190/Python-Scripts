@@ -8,6 +8,7 @@ python socket_server.py
 import socket
 import select
 import pickle
+import numpy as np
 
 HEADER_LENGTH = 10
 PORT = 1234
@@ -101,10 +102,49 @@ def decoded_message(user, message):
         msg = pickle.loads(message["data"])
     return username, category, msg
 
+cities = ['anafola','benfriege','demetry','enfeir','fodker','glaser','kubani','pafiz','scetcher','starfex','tamarania','tamariza','tutalu','zinzibar']
+connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
+                         [ 0, 0, 6,10, 7,10, 7, 5, 5, 9, 8, 3, 4,11],
+                         [ 0, 0, 0, 4, 4, 6, 2, 4, 2, 4, 2, 3, 5, 6],
+                         [ 0, 0, 0, 0, 7, 7, 4, 8, 6, 5, 2, 7, 9, 6],
+                         [ 0, 0, 0, 0, 0,10, 3, 3, 2, 8, 6, 4, 5,10],
+                         [12, 0, 0, 0, 0, 0, 8,10, 9, 5, 5, 7, 9, 6],
+                         [ 0, 0,10, 0, 0, 0, 0, 5, 3, 6, 3, 4, 6, 7],
+                         [ 0, 0, 0, 0, 8, 0, 0, 0, 2, 8, 6, 3, 2,10],
+                         [ 0, 0, 6, 0, 6, 0,10, 7, 0, 6, 4, 2, 4, 8],
+                         [ 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 6, 8, 2],
+                         [ 5, 0, 3, 6, 0, 0, 6, 0, 0, 9, 0, 5, 7, 4],
+                         [10,10, 8, 0, 0, 0, 0, 3, 6, 0, 0, 0, 2, 8],
+                         [ 0,12, 0, 0, 0, 0, 0, 7, 0, 0, 0, 6, 0,10],
+                         [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
+Skirmishes = [None, {}]
+def conn2set():
+    P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
+    S = {}
+    for i in range(len(P)):
+        for j in range(len(P[i])):
+            if P[i][j] > 0:
+                S[frozenset([cities[i], cities[j]])] = P[i][j]
+    return S
+def getSkirmish():
+    for S in Skirmishes[0]:
+        if S in Skirmishes[1]:
+            continue
+        if np.random.rand() < (1 / (Skirmishes[0][S] + 1)):
+            Skirmishes[1][S] = 3
+    popS = []
+    for S in Skirmishes[1]:
+        Skirmishes[1][S] -= 1
+        if Skirmishes[1][S] <= 0:
+            popS.append(S)
+    for S in popS:
+        Skirmishes[1].pop(S)
+
 def updateServer(username, category, msg):
     if category == '[LAUNCH]':
         if msg == 'Listening':
             client_gameStatus[username]['ready'] = False
+            client_gameStatus[username]['round end'] = False
             for other_username in client_gameStatus:
                 if other_username != username:
                     send_msg = 'Ready' if client_gameStatus[other_username]['ready'] else 'Not Ready'
@@ -118,11 +158,26 @@ def updateServer(username, category, msg):
                     break
             if all_ready:
                 game_launched[0] = True
+                Skirmishes[0] = conn2set()
         elif msg == 'Not Ready':
             client_gameStatus[username]['ready'] = False
     elif category == '[CLAIM]':
         client_gameStatus[username]['birth city'] = msg
-            
+    elif (category == '[ROUND]') and (msg == 'end'):
+        client_gameStatus[username]['round end'] = True
+        all_ended = True
+        for D in client_gameStatus.values():
+            if ('round end' in D) and (D['round end'] == False):
+                all_ended = False
+                break
+        if all_ended:
+            all_ended = False
+            getSkirmish()
+            for username in client_gameStatus:
+                if 'round end' in client_gameStatus[username]: 
+                    client_gameStatus[username]['round end'] = False
+                sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
+
 def close_socket(notified_socket):
     closed_username = clients[notified_socket]['data'].decode('utf-8')
     print('Closed connection from: {}'.format(closed_username))
