@@ -118,6 +118,21 @@ connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
                          [ 0,12, 0, 0, 0, 0, 0, 7, 0, 0, 0, 6, 0,10],
                          [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
 Skirmishes = [None, {}]
+city_sell = {'anafola':['raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'],
+             'benfriege':['raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'],
+             'demetry':['raw meat', 'cooked meat', 'fruit', 'string', 'beads', 'hide', 'sand', 'clay', 'leather', 'ceramic', 'glass', 'gems', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'tungsten', 'bartering book', 'crafting book'],
+             'enfeir':['raw meat', 'cooked meat', 'string', 'hide', 'tin', 'copper', 'aluminum', 'kevlium'],
+             'fodker':['raw meat', 'cooked meat', 'string', 'hide', 'sand', 'lead', 'tin', 'copper', 'iron', 'excavating book'],
+             'glaser':['raw fish', 'cooked fish', 'string', 'beads', 'scales', 'bark', 'lead', 'tin', 'critical thinking book', 'survival book', 'gathering book'],
+             'kubani':['raw meat', 'string', 'beads', 'sand', 'clay', 'glass', 'lead', 'copper', 'iron', 'tantalum', 'titanium', 'survival book'],
+             'pafiz':['cooked meat', 'cooked fish', 'fruit', 'string', 'beads', 'hide', 'scales', 'iron', 'nickel', 'persuasion book'],
+             'scetcher':['raw meat', 'raw fish', 'string', 'sand', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel'],
+             'starfex':['raw fish', 'cooked fish', 'fruit', 'string', 'beads', 'scales', 'lead', 'tantalum', 'tungsten', 'heating book'],
+             'tamarania':['raw meat', 'cooked meat', 'well cooked meat', 'string', 'beads', 'hide', 'clay', 'leather', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel', 'titanium', 'diamond', 'smithing book'],
+             'tamariza':['fruit', 'string', 'beads', 'bark', 'rubber', 'iron', 'nickel', 'chromium', 'heating book'],
+             'tutalu':['raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'],
+             'zinzibar':['raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum']}
+
 def conn2set():
     P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
     S = {}
@@ -139,6 +154,11 @@ def getSkirmish():
             popS.append(S)
     for S in popS:
         Skirmishes[1].pop(S)
+def getTodaysMarket(max_items=6):
+    city_markets = {}
+    for city in city_sell:
+        city_markets[city] = set(np.random.choice(city_sell[city], max_items))
+    return city_markets
 
 def updateServer(username, category, msg):
     if category == '[LAUNCH]':
@@ -151,6 +171,7 @@ def updateServer(username, category, msg):
                     sendMessage(other_username, username, '[LAUNCH]', send_msg)
         elif msg == 'Ready':
             client_gameStatus[username]['ready'] = True
+            client_gameStatus[username]['round end'] = False
             all_ready = True
             for D in client_gameStatus.values():
                 if D['ready'] == False:
@@ -177,6 +198,7 @@ def updateServer(username, category, msg):
                 if 'round end' in client_gameStatus[username]: 
                     client_gameStatus[username]['round end'] = False
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
+                sendMessage('[SERVER]', username, '[MARKET]', getTodaysMarket())
 
 def close_socket(notified_socket):
     closed_username = clients[notified_socket]['data'].decode('utf-8')
@@ -193,8 +215,12 @@ def close_socket(notified_socket):
     _ = client_gameStatus.pop(closed_username)
     del _
     
-    for username in client_code:
-        sendMessage(closed_username, username, '[CONNECTION]', 'Closed') 
+    if len(client_code) == 0:
+        game_launched[0] = False
+        print("All connections closed. Resetting Stats.")
+    else:
+        for username in client_code:
+            sendMessage(closed_username, username, '[CONNECTION]', 'Closed') 
     
 
 while True:
