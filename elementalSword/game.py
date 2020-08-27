@@ -27,7 +27,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 from kivy.uix.button import Button
 from kivy.uix.image import Image
-from kivy.graphics import Color,Rectangle,Ellipse
+from kivy.graphics import Color,Rectangle,Ellipse,InstructionGroup
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.behaviors import HoverBehavior
 from kivy.uix.screenmanager import ScreenManager, Screen
@@ -53,17 +53,24 @@ class HitBox(Button):
         super().__init__(**kwargs)
         self.fpage = fpage
         self.xposScale = 1 + self.fpage.P.parentBoard.game_page.right_line_x
-        self.xs = [self.pos_hint['center_x'] - (self.size_hint[0]/2), self.pos_hint['center_x'] + (self.size_hint[0]/2)]
-        self.ys = [self.pos_hint['center_y'] - (self.size_hint[1]/2), self.pos_hint['center_y'] + (self.size_hint[1]/2)]
-        self.timeLapseAllowed = 0.5 #+ 0.25 * self.fpage.pstats[self.fpage.P.attributes["Agility"]]
-        self.cunning = 12 #self.fpage.pstats[self.fpage.P.attributes['Cunning']]
+        #self.xs = [self.pos_hint['center_x'] - (self.size_hint[0]/2), self.pos_hint['center_x'] + (self.size_hint[0]/2)]
+        #self.ys = [self.pos_hint['center_y'] - (self.size_hint[1]/2), self.pos_hint['center_y'] + (self.size_hint[1]/2)]
+
+        self.xs = [self.pos[0], self.pos[0]+self.size[0]]
+        self.ys = [self.pos[1], self.pos[1]+self.size[1]]
+        self.timeLapseAllowed = 0.5 + 0.25 * self.fpage.pstats[self.fpage.P.attributes["Agility"]]
+        self.cunning = self.fpage.pstats[self.fpage.P.attributes['Cunning']]
         self.appliedCunning = 0
-        self.boxMaxScale = 0.08
+        #self.boxMaxScale = 0.08
+        #self.bxAdj = self.boxMaxScale/2
+        #self.cunningScale = 0.0065
+        #self.boxMinScale = self.boxMaxScale - self.cunningScale*self.cunning
+        self.boxMaxScale = self.fpage.size[0]*0.04 # The approximate game_board_x times an arbitrary max ratio
         self.bxAdj = self.boxMaxScale/2
-        self.cunningScale = 0.0065
+        self.cunningScale = self.fpage.size[0]*0.00325
         self.boxMinScale = self.boxMaxScale - self.cunningScale*self.cunning
         self.boxes = []
-        self.max_boxes = 12 #self.fpage.curAtk
+        self.max_boxes = self.fpage.curAtk
         self.TimeRemaining = self.timeLapseAllowed * self.max_boxes + 2 # Add a 1 second buffer just in case.
         self.TimeRemainingIter = 0.1
         self.curBox = None
@@ -75,34 +82,44 @@ class HitBox(Button):
         Clock.schedule_interval(self.countDown, self.TimeRemainingIter)
     def on_touch_down(self, touch):
         if (len(self.boxes) < self.max_boxes) and (not self.attackEnded):
-            self.curxs = [touch.spos[0]*self.xposScale - self.bxAdj, touch.spos[0]*self.xposScale + self.bxAdj] # We need to account for the widgets on the screen, so scale the x position.
-            self.curys = [touch.spos[1] - self.bxAdj, touch.spos[1] + self.bxAdj]
-            if (self.curxs[0] >= self.xs[0]) and (self.curxs[1] <= self.xs[1]) and (self.curys[0] >= self.ys[0]) and (self.curys[1] <= self.ys[1]):
-                print(self.pos, self.size)
+            #self.curxs = [touch.spos[0]*self.xposScale - self.bxAdj, touch.spos[0]*self.xposScale + self.bxAdj] # We need to account for the widgets on the screen, so scale the x position.
+            #self.curys = [touch.spos[1] - self.bxAdj, touch.spos[1] + self.bxAdj]
+            self.curxs = [touch.pos[0] - self.bxAdj, touch.pos[0] + self.bxAdj]
+            self.curys = [touch.pos[1] - self.bxAdj, touch.pos[1] + self.bxAdj]
+            if (self.curxs[0] >= self.pos[0]) and (self.curxs[1] <= (self.pos[0]+self.size[0])) and (self.curys[0] >= self.pos[1]) and (self.curys[1] <= (self.pos[1]+self.size[1])):
+                self.touchpos = touch.pos
                 #self.curBox = Button(text='', pos_hint={'center_x':touch.spos[0]*self.xposScale, 'center_y':touch.spos[1]}, size_hint = (self.boxMaxScale, self.boxMaxScale), color=(1, 1, 1, 1), bold=True, font_size=10)
                 #self.fpage.add_widget(self.curBox)
                 #self.minBox = Button(text='', pos_hint=self.curBox.pos_hint, size_hint=(self.boxMinScale, self.boxMinScale), background_color=(0, 0.8, 0.1, 1), background_normal='')
                 #self.fpage.add_widget(self.minBox)
-                size = self.size[0]*self.boxMaxScale/0.3, self.size[1]*self.boxMaxScale/0.7
+                size = self.boxMaxScale, self.boxMaxScale
                 with self.fpage.canvas.after:
-                    Color(0.3, 0.3, 0.3, 1)
+                    self.curBoxClr = Color(0.3, 0.3, 0.3, 1)
                     self.curBox = Rectangle(pos=(touch.pos[0]-size[0]/2, touch.pos[1]-size[1]/2), size=size)
+                    self.minBoxClr = Color(0, 1, 0.2, 1)
+                    self.minBox = Rectangle(pos=(touch.pos[0]-self.boxMinScale/2, touch.pos[1]-self.boxMinScale/2), size=(self.boxMinScale, self.boxMinScale))
                 Clock.schedule_interval(self.applyCunning, 0.1)
                 #Clock.schedule_once(partial(self.stopBox, self.curBox), self.timeLapseAllowed)
     def on_touch_move(self, touch):
         if (self.curBox is not None):# and (not self.curBox.disabled):
-            self.curxs = [touch.spos[0]*self.xposScale - self.curBox.size_hint[0]/2, touch.spos[0]*self.xposScale + self.curBox.size_hint[0]/2] # We need to account for the widgets on the screen, so scale the x position.
-            self.curys = [touch.spos[1] - self.curBox.size_hint[1]/2, touch.spos[1] + self.curBox.size_hint[1]/2]
-            if (self.curxs[0] >= self.xs[0]) and (self.curxs[1] <= self.xs[1]) and (self.curys[0] >= self.ys[0]) and (self.curys[1] <= self.ys[1]):
+            #self.curxs = [touch.spos[0]*self.xposScale - self.curBox.size_hint[0]/2, touch.spos[0]*self.xposScale + self.curBox.size_hint[0]/2] # We need to account for the widgets on the screen, so scale the x position.
+            #self.curys = [touch.spos[1] - self.curBox.size_hint[1]/2, touch.spos[1] + self.curBox.size_hint[1]/2]
+            self.curxs = [touch.pos[0] - self.curBox.size[0]/2, touch.pos[0] + self.curBox.size[0]/2]
+            self.curys = [touch.pos[1] - self.curBox.size[1]/2, touch.pos[1] + self.curBox.size[1]/2]
+            if (self.curxs[0] >= self.pos[0]) and (self.curxs[1] <= (self.pos[0]+self.size[0])) and (self.curys[0] >= self.pos[1]) and (self.curys[1] <= (self.pos[1]+self.size[1])):
+                self.touchpos = touch.pos
                 #self.curBox.pos_hint = {'center_x':touch.spos[0]*self.xposScale, 'center_y':touch.spos[1]}
                 #self.minBox.pos_hint = self.curBox.pos_hint
                 self.curBox.pos = (touch.pos[0] - self.curBox.size[0]/2, touch.pos[1] - self.curBox.size[1]/2)
+                self.minBox.pos = (touch.pos[0] - self.boxMinScale/2, touch.pos[1] - self.boxMinScale/2)
     def addCurBox(self):
-        self.curBox.disabled = True
-        self.fpage.remove_widget(self.minBox)
+        #self.curBox.disabled = True
+        self.curBoxClr.rgba = (0.8, 0, 0.8, 0.6)
+        self.fpage.canvas.after.remove(self.minBox)
         self.boxes.append(self.curBox)
-        self.curBox.text = str(len(self.boxes))
+        #self.curBox.text = str(len(self.boxes))
         self.curBox = None
+        self.minBox = None
         if len(self.boxes) >= self.max_boxes:
             self.endAttack()
     def on_touch_up(self, touch):
@@ -111,12 +128,13 @@ class HitBox(Button):
     def applyCunning(self, instance=None):
         if self.curBox is not None:
             if self.appliedCunning < self.cunning:
-                newsize = self.curBox.size[0] - self.cunningScale*self.size[0], self.curBox.size[1] - self.cunningScale*self.size[1]
+                newsize = self.curBox.size[0] - self.cunningScale, self.curBox.size[1] - self.cunningScale
                 self.appliedCunning += 1
             else:
-                newsize = self.size[0]*self.boxMaxScale, self.size[1]*self.boxMaxScale
+                newsize = self.boxMaxScale, self.boxMaxScale
                 self.appliedCunning = 0
             self.curBox.size = newsize
+            self.curBox.pos = (self.touchpos[0] - newsize[0]/2, self.touchpos[1] - newsize[1]/2)
             #newSize = self.curBox.size_hint[0]-self.cunningScale, self.curBox.size_hint[1]-self.cunningScale
             #if (newSize[0] < self.boxMinScale) and (not np.isclose(newSize[0], self.boxMinScale)):
             #    newSize = (self.boxMaxScale, self.boxMaxScale)
@@ -130,7 +148,6 @@ class HitBox(Button):
             if self.curBox is not None:
                 self.addCurBox()
             self.fpage.remove_widget(self.TimeRemainingDisplay)
-            print(len(self.boxes))
     def countDown(self, instance=None):
         if self.attackEnded:
             return False
