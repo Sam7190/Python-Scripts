@@ -4,10 +4,12 @@ python game.py
 
 """
 
+import buildAI as AI
 import numpy as np
 from PIL import Image as pilImage
 import os
 import sys
+import csv
 from collections import Counter
 from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
 from copy import deepcopy
@@ -35,7 +37,8 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 
 # Tile Resolution and number of tiles in gameboard.
-seed = 234
+seed = None
+auto_resize = False
 xpix = 343
 ypix = 396
 xtiles = 17
@@ -43,103 +46,115 @@ ytiles = 15
 
 def lclPlayer():
     return game_app.game_page.board_page.localPlayer
-def rbtwn(mn, mx, size=None):
-    return np.random.choice(np.arange(mn, mx+1), size)
+def rbtwn(mn, mx, size=None, chance=None, msg=''):
+    r = np.random.choice(np.arange(mn, mx+1), size)
+    if (chance is not None):
+        if chance < mn:
+            chance = 0
+        elif chance > mx:
+            chance = 1
+        else:
+            chance = chance - mn + 1
+        output(f'{msg}Success chance is {chance} in {mx-mn+1}')
+    return r
 def randofsum(s, n):
     return np.random.multinomial(s,np.ones(n)/n,size=1)[0]
+def euc(a, b): 
+    return np.linalg.norm(a-b)
 
 class HitBox(Button):
     def __init__(self, fpage, **kwargs):
         super().__init__(**kwargs)
         self.fpage = fpage
         self.xposScale = 1 + self.fpage.P.parentBoard.game_page.right_line_x
-        #self.xs = [self.pos_hint['center_x'] - (self.size_hint[0]/2), self.pos_hint['center_x'] + (self.size_hint[0]/2)]
-        #self.ys = [self.pos_hint['center_y'] - (self.size_hint[1]/2), self.pos_hint['center_y'] + (self.size_hint[1]/2)]
-
-        self.xs = [self.pos[0], self.pos[0]+self.size[0]]
-        self.ys = [self.pos[1], self.pos[1]+self.size[1]]
-        self.timeLapseAllowed = 0.5 + 0.25 * self.fpage.pstats[self.fpage.P.attributes["Agility"]]
-        self.cunning = self.fpage.pstats[self.fpage.P.attributes['Cunning']]
-        self.appliedCunning = 0
-        #self.boxMaxScale = 0.08
-        #self.bxAdj = self.boxMaxScale/2
-        #self.cunningScale = 0.0065
-        #self.boxMinScale = self.boxMaxScale - self.cunningScale*self.cunning
+        self.timeLapseRestrained = 1.5 - 0.1*self.fpage.foestats[self.fpage.P.attributes['Agility']]
+        self.timeLapseAllowed = self.fpage.pstats[self.fpage.P.attributes["Agility"]] + 1#0.5 + 0.25 * self.fpage.pstats[self.fpage.P.attributes["Agility"]]
+        self.technique = self.fpage.pstats[self.fpage.P.attributes['Technique']]
+        self.fakesRemaining = self.fpage.pstats[self.fpage.P.attributes['Cunning']]
+        self.appliedTechnique = 0
+        # The next four lines are defined again in transformBoxes function of FightPage!
         self.boxMaxScale = self.fpage.size[0]*0.04 # The approximate game_board_x times an arbitrary max ratio
         self.bxAdj = self.boxMaxScale/2
-        self.cunningScale = self.fpage.size[0]*0.00325
-        self.boxMinScale = self.boxMaxScale - self.cunningScale*self.cunning
+        self.techniqueScale = self.fpage.size[0]*0.00304
+        self.boxMinScale = self.boxMaxScale - self.techniqueScale*self.technique
         self.boxes = []
+        self.fakes = []
+        self.clrs = []
+        self.cleared = []
+        #self.lbls = []
         self.max_boxes = self.fpage.curAtk
-        self.TimeRemaining = self.timeLapseAllowed * self.max_boxes + 2 # Add a 1 second buffer just in case.
+        self.TimeRemaining = 1.5 + np.mean([self.max_boxes, self.timeLapseAllowed]) * self.timeLapseRestrained #self.max_boxes # Add a 1.5 second buffer just in case.
         self.TimeRemainingIter = 0.1
         self.curBox = None
         self.minBox = None
         self.attackEnded = False
+        self.nextisFake = False
         self.TimeRemainingDisplay = Button(text=f"Time Remaining:\n{np.round(self.TimeRemaining,1)} seconds", pos_hint={'right':1, 'top':1}, size_hint=(0.2, 0.1), disabled=True, background_color=(1, 1, 3, 20))
         self.fpage.add_widget(self.TimeRemainingDisplay)
+        Window.bind(on_key_down=self.on_key_down)
         Clock.schedule_once(self.endAttack, self.TimeRemaining)
         Clock.schedule_interval(self.countDown, self.TimeRemainingIter)
+    def on_key_down(self, instance, keyboard, keycode, text, modifiers):
+        if (text == 'f') and (len(self.fakes) > 0) and (not self.fakes[-1]) and (self.fakesRemaining > 0):
+            self.fakes[-1] = True
+            self.clrs[-1].rgba = (0.9, 0.9, 0.9, 0.6)
+            self.fakesRemaining -= 1
+        elif (text == 'f') and (not self.attackEnded) and (self.fakesRemaining > 0):
+            self.nextisFake = True
     def on_touch_down(self, touch):
-        if (len(self.boxes) < self.max_boxes) and (not self.attackEnded):
-            #self.curxs = [touch.spos[0]*self.xposScale - self.bxAdj, touch.spos[0]*self.xposScale + self.bxAdj] # We need to account for the widgets on the screen, so scale the x position.
-            #self.curys = [touch.spos[1] - self.bxAdj, touch.spos[1] + self.bxAdj]
+        if ((len(self.boxes) - np.sum(self.fakes)) < self.max_boxes) and (not self.attackEnded):
             self.curxs = [touch.pos[0] - self.bxAdj, touch.pos[0] + self.bxAdj]
             self.curys = [touch.pos[1] - self.bxAdj, touch.pos[1] + self.bxAdj]
             if (self.curxs[0] >= self.pos[0]) and (self.curxs[1] <= (self.pos[0]+self.size[0])) and (self.curys[0] >= self.pos[1]) and (self.curys[1] <= (self.pos[1]+self.size[1])):
                 self.touchpos = touch.pos
-                #self.curBox = Button(text='', pos_hint={'center_x':touch.spos[0]*self.xposScale, 'center_y':touch.spos[1]}, size_hint = (self.boxMaxScale, self.boxMaxScale), color=(1, 1, 1, 1), bold=True, font_size=10)
-                #self.fpage.add_widget(self.curBox)
-                #self.minBox = Button(text='', pos_hint=self.curBox.pos_hint, size_hint=(self.boxMinScale, self.boxMinScale), background_color=(0, 0.8, 0.1, 1), background_normal='')
-                #self.fpage.add_widget(self.minBox)
                 size = self.boxMaxScale, self.boxMaxScale
                 with self.fpage.canvas.after:
                     self.curBoxClr = Color(0.3, 0.3, 0.3, 1)
                     self.curBox = Rectangle(pos=(touch.pos[0]-size[0]/2, touch.pos[1]-size[1]/2), size=size)
                     self.minBoxClr = Color(0, 1, 0.2, 1)
                     self.minBox = Rectangle(pos=(touch.pos[0]-self.boxMinScale/2, touch.pos[1]-self.boxMinScale/2), size=(self.boxMinScale, self.boxMinScale))
-                Clock.schedule_interval(self.applyCunning, 0.1)
-                #Clock.schedule_once(partial(self.stopBox, self.curBox), self.timeLapseAllowed)
+                Clock.schedule_interval(self.applyTechnique, 0.1)
     def on_touch_move(self, touch):
         if (self.curBox is not None):# and (not self.curBox.disabled):
-            #self.curxs = [touch.spos[0]*self.xposScale - self.curBox.size_hint[0]/2, touch.spos[0]*self.xposScale + self.curBox.size_hint[0]/2] # We need to account for the widgets on the screen, so scale the x position.
-            #self.curys = [touch.spos[1] - self.curBox.size_hint[1]/2, touch.spos[1] + self.curBox.size_hint[1]/2]
             self.curxs = [touch.pos[0] - self.curBox.size[0]/2, touch.pos[0] + self.curBox.size[0]/2]
             self.curys = [touch.pos[1] - self.curBox.size[1]/2, touch.pos[1] + self.curBox.size[1]/2]
             if (self.curxs[0] >= self.pos[0]) and (self.curxs[1] <= (self.pos[0]+self.size[0])) and (self.curys[0] >= self.pos[1]) and (self.curys[1] <= (self.pos[1]+self.size[1])):
                 self.touchpos = touch.pos
-                #self.curBox.pos_hint = {'center_x':touch.spos[0]*self.xposScale, 'center_y':touch.spos[1]}
-                #self.minBox.pos_hint = self.curBox.pos_hint
                 self.curBox.pos = (touch.pos[0] - self.curBox.size[0]/2, touch.pos[1] - self.curBox.size[1]/2)
                 self.minBox.pos = (touch.pos[0] - self.boxMinScale/2, touch.pos[1] - self.boxMinScale/2)
     def addCurBox(self):
-        #self.curBox.disabled = True
-        self.curBoxClr.rgba = (0.8, 0, 0.8, 0.6)
+        if self.nextisFake:
+            self.curBoxClr.rgba = (0.9, 0.9, 0.9, 0.6)
+            self.fakes.append(True)
+            self.nextisFake = False
+            self.fakesRemaining -= 1
+        else:
+            self.curBoxClr.rgba = (0.8, 0, 0.8, 0.6)
+            self.fakes.append(False)
         self.fpage.canvas.after.remove(self.minBox)
         self.boxes.append(self.curBox)
-        #self.curBox.text = str(len(self.boxes))
+        self.clrs.append(self.curBoxClr)
+        self.cleared.append(False)
+        #B = Button(text=str(len(self.boxes)), font_size=10, bold=True, background_color=(1,1,1,0), background_disabled_normal='', disabled=True, color=(0, 0.3, 0, 1), pos=self.curBox.pos, size=self.curBox.size)
+        #self.lbls.append(B)
+        #self.fpage.add_widget(B)
         self.curBox = None
         self.minBox = None
-        if len(self.boxes) >= self.max_boxes:
+        if (len(self.boxes) - np.sum(self.fakes)) >= self.max_boxes:
             self.endAttack()
     def on_touch_up(self, touch):
         if self.curBox is not None:
             self.addCurBox()
-    def applyCunning(self, instance=None):
+    def applyTechnique(self, instance=None):
         if self.curBox is not None:
-            if self.appliedCunning < self.cunning:
-                newsize = self.curBox.size[0] - self.cunningScale, self.curBox.size[1] - self.cunningScale
-                self.appliedCunning += 1
+            if self.appliedTechnique < self.technique:
+                newsize = self.curBox.size[0] - self.techniqueScale, self.curBox.size[1] - self.techniqueScale
+                self.appliedTechnique += 1
             else:
                 newsize = self.boxMaxScale, self.boxMaxScale
-                self.appliedCunning = 0
+                self.appliedTechnique = 0
             self.curBox.size = newsize
             self.curBox.pos = (self.touchpos[0] - newsize[0]/2, self.touchpos[1] - newsize[1]/2)
-            #newSize = self.curBox.size_hint[0]-self.cunningScale, self.curBox.size_hint[1]-self.cunningScale
-            #if (newSize[0] < self.boxMinScale) and (not np.isclose(newSize[0], self.boxMinScale)):
-            #    newSize = (self.boxMaxScale, self.boxMaxScale)
-            #print(newSize, self.minBox.size_hint)
-            #self.curBox.size_hint = newSize
         else:
             return False
     def endAttack(self, instance=None):
@@ -148,27 +163,346 @@ class HitBox(Button):
             if self.curBox is not None:
                 self.addCurBox()
             self.fpage.remove_widget(self.TimeRemainingDisplay)
+            Window.unbind(on_key_down=self.on_key_down)
+            if self.fpage.foeisNPC:
+                self.fpage.msgBoard.text = "NPC Defending"
+                Clock.schedule_once(self.npcDefends, 1)
+            else:
+                # [INCOMPLETE] Send attack data to the defending user
+                pass
+    def getNormalizedPosition(self, pos):
+        xMin, xMax, yMin, yMax = self.fpage.size[0]*0.02, self.fpage.size[0]*0.32, self.fpage.size[1]*0.02, self.fpage.size[1]*0.72
+        return np.array([(pos[0] - xMin)/(xMax - xMin), (pos[1] - yMin)/(yMax - yMin)])
+    def npcDefends(self, _=None):
+        blocksLeft = self.fpage.foestats[self.fpage.P.attributes[f"Def-{self.fpage.P.combatstyle}"]]
+        foeAgility = self.fpage.pstats[self.fpage.P.attributes["Agility"]]
+        cunning = self.fpage.foestats[self.fpage.P.attributes["Cunning"]]
+        stability = self.fpage.foestats[self.fpage.P.attributes["Stability"]]
+        dodging = self.fpage.foestats[self.fpage.P.attributes["Agility"]]
+        group2boxes, boxes2group, volley = {}, [], 0
+        for i in range(len(self.boxes)):
+            boxes2group.append(volley)
+            if volley in group2boxes:
+                group2boxes[volley].append(i)
+            else:
+                group2boxes[volley] = [i]
+            if not self.fakes[i]:
+                volley += 1
+        for i in range(len(self.boxes)):
+            tApplied = int(-(self.boxes[i].size[0] - self.boxMaxScale)/self.techniqueScale)
+            vgID = boxes2group[i]
+            gSize = len(group2boxes[vgID])
+            nrmPos = self.getNormalizedPosition(self.boxes[i].pos)
+            dis2cent = euc(nrmPos, np.array([0.5, 0.5]))
+            if vgID > 0:
+                for gi in group2boxes[vgID-1]:
+                    if not self.fakes[gi]:
+                        dis2last = euc(nrmPos, self.getNormalizedPosition(self.boxes[gi].pos))
+                        break
+            else:
+                dis2last = dis2cent
+            total, dis2group = 0, 0
+            for gi in group2boxes[vgID]:
+                if gi == i:
+                    continue
+                total += 1
+                dis2group += euc(nrmPos, self.getNormalizedPosition(self.rects[gi].pos))
+            if total > 0: dis2group /= total
+            opacity = 0.96 if self.fakes[i] else (0.92 - cunning*0.013)
+            data = [[foeAgility, cunning, stability, dodging, vgID, gSize, tApplied, dis2last, dis2cent, dis2group, opacity]]
+            # Allow for a 1% bias correction to the model to avoid 100% click rates.
+            click_prob = AI.cmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, 0.05*(self.fpage.order_refresh_count // 3)]))
+            print("Click Probability", click_prob)
+            clickType = None
+            if np.random.rand() <= click_prob:
+                # This means the AI "clicked" the box - now check to see if they would have "dodged" the box
+                dodge_prob = AI.dmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, 0.05*(self.fpage.order_refresh_count // 3)]))
+                print("Clicked", "Dodge Probability", dodge_prob)
+                if np.random.rand() <= dodge_prob:
+                    # AI dodges the box -- pass because nothing happens
+                    clickType = 'dodge'
+                elif blocksLeft > 0:
+                    # AI blocks the box
+                    blocksLeft -= 1
+                    clickType = 'block'
+                elif not self.fakes[i]:
+                    # NPC takes damage because they have no blocks left, and the box is not a fake
+                    clickType = 'hit'
+            elif not self.fakes[i]:
+                # NPC takes damage because the box is not a fake
+                clickType = 'hit'
+            self.npcClickBox(i, clickType, 0.3 + 0.3*vgID, 0.3)
+            #Clock.schedule_once(partial(self.removeBox, i, damageNPC), 0.3 + 0.3*vgID)
+        Clock.schedule_once(self.fpage.nextAttack, 0.9 + 0.3*vgID)
     def countDown(self, instance=None):
         if self.attackEnded:
             return False
         self.TimeRemaining = max([0, self.TimeRemaining-self.TimeRemainingIter])
         self.TimeRemainingDisplay.text = f'Time Remaining:\n{np.round(self.TimeRemaining,1)} seconds'
-    def stopBox(self, thisBox, _=None):
-        if self.curBox == thisBox:
-            self.addCurBox()
+    def npcClickBox(self, i, clickType, delay, rmvTime):
+        def clk(_=None):
+            dmg = False
+            if clickType is None:
+                self.clrs[i].rgba = (1, 1, 1, 1)
+            elif clickType == 'dodge':
+                self.clrs[i].rgba = (0, 1, 0, 1)
+            elif clickType == 'block':
+                self.clrs[i].rgba = (0, 0, 1, 1)
+            elif clickType == 'hit':
+                self.clrs[i].rgba = (1, 0, 0, 1)
+                dmg = True
+            Clock.schedule_once(partial(self.removeBox, i, dmg), rmvTime)
+        Clock.schedule_once(clk, delay)
+    def removeBox(self, i, damageFoe=False, _=None):
+        if not self.cleared[i]:
+            self.fpage.canvas.after.remove(self.boxes[i])
+            self.cleared[i] = True
+        if damageFoe:
+            self.fpage.foeTakesDamage()
+    def clearAll(self):
+        for i in range(len(self.boxes)):
+            self.removeBox(i)
+        #for B in self.lbls:
+        #    self.fpage.remove_widget(B)
+        self.fpage.remove_widget(self)
+            
+class DefBox(Button):
+    def __init__(self, fpage, **kwargs):
+        super().__init__(**kwargs)
+        self.fpage = fpage
+        # The following two lines are also defined in HitBox!
+        self.boxMaxScale = self.fpage.size[0]*0.04
+        self.techniqueScale = self.fpage.size[0]*0.00304
+        self.blocksRemaining = 50 if self.fpage.logDef else self.fpage.pstats[self.fpage.P.attributes[f'Def-{self.fpage.foestyle}']]
+        self.dodging = self.fpage.pstats[self.fpage.P.attributes['Agility']] // 2
+        self.cunning = self.fpage.pstats[self.fpage.P.attributes['Cunning']]
+        self.mxOpacity, self.dOpacity = 0.92, 0.013
+        self.stability = self.fpage.pstats[self.fpage.P.attributes['Stability']]
+        self.foeagility = self.fpage.foestats[self.fpage.P.attributes['Agility']]
+        self.fpage.msgBoard.text = ''
+        self.totalTime = 1.5 + 0.15 * self.cunning
+        # Every 3 rounds the amount of time you have to defend decreases by 10 percent, min being 0.2
+        self.totalTime *= max([0.2, (1 - 0.1 * (self.fpage.order_refresh_count // 3))])
+        self.dodgeTime = self.totalTime * (0.25 + 0.025*self.dodging) #0.5 + 0.2 * self.dodging
+        self.blockTime = self.totalTime - self.dodgeTime #2 + 0.15 * self.cunning
+        self.initState = 'dodge' if self.dodgeTime > 0 else 'block'
+        self.strikeDelay = max([0.2, 2.3 - 0.14 * self.foeagility])
+        self.fpage.msgBoard.text += f'Dodge Time: {round(self.dodgeTime,2)}\nBlock Time: {round(self.blockTime,2)}\nStrike Time: {round(self.strikeDelay,2)}'
+        self.addExampleDisplay()
+    def addExampleDisplay(self):
+        x, y, size, buffer = float(self.fpage.size[0]*0.15), float(self.fpage.size[1]*0.8), (self.boxMaxScale, self.boxMaxScale), self.boxMaxScale*1.1
+        with self.fpage.canvas.after:
+            Color(0.2, 0.2, 0.6, 0.96)
+            self.realBlock = Rectangle(pos=(x, y), size=size)
+            Color(0.2, 0.2, 0.6, (self.mxOpacity-self.dOpacity*self.cunning))
+            self.fakeBlock = Rectangle(pos=(x+buffer, y), size=size)
+            Color(0.1, 0.8, 0.1, 0.96)
+            self.realDodge = Rectangle(pos=(x, y+buffer), size=size)
+            Color(0.1, 0.8, 0.1, (self.mxOpacity-self.dOpacity*self.cunning))
+            self.fakeDodge = Rectangle(pos=(x+buffer, y+buffer), size=size)
+        self.RT = Button(text='Real', pos=(x, y+2*buffer), size_hint=(0.04, 0.04), background_disabled_normal='', background_color=(1, 1, 1, 0.5), color=(0, 0, 0, 1), disabled=True)
+        self.FT = Button(text='Fake', pos=(x+buffer, y+2*buffer), size_hint=(0.04, 0.04), background_disabled_normal='', background_color=(1, 1, 1, 0.5), color=(0, 0, 0, 1), disabled=True)
+        self.fpage.add_widget(self.RT)
+        self.fpage.add_widget(self.FT)
+    def npcAttacks(self):
+        Atk = np.max(rbtwn(0, self.fpage.foestats[self.fpage.P.attributes['Attack']])) # Attack chosen technique amt of times, then max is chosen
+        if Atk > self.fpage.foestats[self.fpage.P.attributes['Stability']]:
+            if rbtwn(0,2)==0:
+                # Lack of stability effected foe's attack
+                Atk = self.fpage.foestats[self.fpage.P.attributes['Stability']]
+        if self.fpage.logDef:
+            Atk = max([2, Atk])
+        if Atk > 0:
+            pagility = self.fpage.pstats[self.fpage.P.attributes['Agility']]
+            hitBoxScale = (1 - 0.055*self.fpage.pstats[self.fpage.P.attributes['Stability']])
+            hitBox_x, hitBox_y = 0.3*hitBoxScale*self.fpage.size[0], 0.7*hitBoxScale*self.fpage.size[1]
+            xshift, yshift = (0.02 + (0.3 - 0.3*hitBoxScale)/2), (0.02 + (0.7 - 0.7*hitBoxScale)/2)
+            cunning = max([0, self.fpage.foestats[self.fpage.P.attributes['Cunning']] - rbtwn(0, pagility//2)])
+            normalizedCoords = np.random.rand(Atk+cunning, 2) # Random box coordinates are produced length of fakes and reals
+            fakes = np.zeros((len(normalizedCoords),),dtype=bool)
+            if len(normalizedCoords) > 1:
+                # Randomly assign some as fakes with the last being a hit
+                fakes[np.random.choice(np.arange(len(normalizedCoords)-1), cunning, False)] = True
+            positions, sizes = [], []
+            technique = self.fpage.foestats[self.fpage.P.attributes['Technique']]
+            for coord in normalizedCoords:
+                shiftedCoord = [coord[0]**0.5 if coord[0]>=0.5 else (1 - (1 - coord[0])**0.5),
+                                coord[1]**0.5 if coord[1]>=0.5 else (1 - (1 - coord[1])**0.5)]
+                # Arbitrarily give technique 3 chances to take effect and pick largest outcome
+                tApplied = np.max(rbtwn(0, technique, max([2, technique//2])))
+                size = (self.boxMaxScale - tApplied*self.techniqueScale, self.boxMaxScale - tApplied*self.techniqueScale)
+                rawpos = [shiftedCoord[0]*hitBox_x - size[0]/2, shiftedCoord[1]*hitBox_y - size[1]/2] # This will be shifted by 0.02 once technique size is applied
+                positions.append((float(rawpos[0])+xshift*self.fpage.size[0], float(rawpos[1])+yshift*self.fpage.size[1]))
+                sizes.append(size)
+            self.conductDefense(positions, sizes, fakes)
+        else:
+            # [INCOMPLETE] Display that NPC missed his attack
+            self.clearAll()
+            self.fpage.msgBoard.text = 'Foe missed!'
+            self.fpage.nextAttack()
+    def getNormalizedPosition(self, pos):
+        xMin, xMax, yMin, yMax = self.fpage.size[0]*0.02, self.fpage.size[0]*0.32, self.fpage.size[1]*0.02, self.fpage.size[1]*0.72
+        return np.array([(pos[0] - xMin)/(xMax - xMin), (pos[1] - yMin)/(yMax - yMin)])
+    def conductDefense(self, positions, sizes, fakes):
+        self.volleys = []
+        self.volley_group = {}
+        volleys = []
+        self.positions = np.zeros((len(positions), 4))
+        self.posids = np.arange(len(positions))
+        for i in range(len(positions)):
+            volleys.append([positions[i], sizes[i], fakes[i], i, len(self.volleys)])
+            if not fakes[i]:
+                self.volley_group[len(self.volleys)] = [v[3] for v in volleys]
+                self.volleys.append(volleys)
+                volleys = []
+        self.current_volley = 0
+        self.live_rects = {}
+        Clock.schedule_interval(self.defendVolley, self.strikeDelay)
+    def add2Log(self, i):
+        R = self.live_rects[i]['rect']
+        tApplied = int(-(R.size[0] - self.boxMaxScale)/self.techniqueScale)
+        vg = self.live_rects[i]['volley group']
+        npos = self.live_rects[i]['nrmpos']
+        d2c = euc(npos, np.array([0.5, 0.5]))
+        if vg > 0:
+            for gi in self.volley_group[vg-1]:
+                if not self.live_rects[gi]['fake']:
+                    d2p = euc(npos, self.live_rects[gi]['nrmpos'])
+                    break
+        else:
+            d2p = d2c
+        d2g, total = 0, 0
+        for gi in self.volley_group[vg]:
+            if gi == i:
+                continue
+            d2g += euc(npos, self.live_rects[gi]['nrmpos'])
+            total += 1
+        if total > 0: d2g /= total
+        clicked = 1 if self.live_rects[i]['state'] in {'blocked', 'dodged'} else 0
+        dodged = 1 if self.live_rects[i]['state'] == 'dodged' else 0
+        with open('log\\DefenseLog.csv', 'a', newline='') as f:
+            fcsv = csv.writer(f)
+            fcsv.writerow([self.foeagility, self.stability, self.dodging, vg, len(self.volley_group[vg]), tApplied, d2p, d2c, d2g, 0.96 if self.live_rects[i]['fake'] else (self.mxOpacity-self.dOpacity*self.cunning), clicked, dodged])
+    def defendVolley(self, instance=None):
+        # Make sure we haven't reached the limit of volleys and that the player has not run.
+        if (self.current_volley < len(self.volleys)) and (self.fpage.fighting):
+            for volley in self.volleys[self.current_volley]:
+                with self.fpage.canvas.after:
+                    C = Color(0.1, 0.8, 0.1, (self.mxOpacity-self.dOpacity*self.cunning) if volley[2] else 0.96) if self.initState == 'dodge' else Color(0.2, 0.2, 0.6, (self.mxOpacity-self.dOpacity*self.cunning) if volley[2] else 0.96)
+                    R = Rectangle(pos=volley[0], size=volley[1])
+                self.live_rects[volley[3]] = {'rect':R, 'color':C, 'fake':volley[2], 'state':'dodge' if self.initState == 'dodge' else 'block', 'removed':False, 'volley group':volley[4], 'nrmpos':self.getNormalizedPosition(R.pos)}
+                self.positions[volley[3]] = [volley[0][0], volley[0][0]+volley[1][0], volley[0][1], volley[0][1]+volley[1][1]]
+                self.transitionBox(volley[3], self.live_rects[volley[3]]['state'])
+            self.current_volley += 1
+        else:
+            self.clearAll()
+            self.fpage.nextAttack()
+            return False
+    def transitionBox(self, i, prevState):
+        def transition(_=None):
+            if (self.live_rects[i]['state'] == prevState) and (not self.live_rects[i]['removed']):
+                if prevState == 'dodge':
+                    self.live_rects[i]['state'] = 'block'
+                    self.live_rects[i]['color'].rgba = (0.2, 0.2, 0.6, (self.mxOpacity-self.dOpacity*self.cunning) if self.live_rects[i]['fake'] else 0.96)
+                    self.transitionBox(i, 'block')
+                elif prevState == 'block':
+                    self.hitBox(i)
+        Clock.schedule_once(transition, self.dodgeTime if prevState=='dodge' else self.blockTime)
+    def removeBox(self, i, _=None):
+        def rmvBox(_=None):
+            self.live_rects[i]['removed'] = True
+            self.fpage.canvas.after.remove(self.live_rects[i]['rect'])
+            if self.fpage.logDef:
+                self.add2Log(i)
+        if not self.live_rects[i]['removed']:
+            Clock.schedule_once(rmvBox, 0.1)
+        if not self.live_rects[i]['fake']:
+            for group_i in self.volley_group[self.live_rects[i]['volley group']]:
+                if i == group_i:
+                    continue
+                self.revealFake(group_i)
+    def revealFake(self, i):
+        if self.live_rects[i]['fake']:
+            self.live_rects[i]['color'].rgba = (0.9, 0.9, 0.9, 0.6)
+            self.removeBox(i)
+            return True
+        return False
+    def dodgeBox(self, i):
+        self.live_rects[i]['state'] = 'dodged'
+        if not self.revealFake(i):
+            self.live_rects[i]['color'].rgba = (0.05, 0.5, 0.05, 1)
+            self.removeBox(i)
+    def blockBox(self, i):
+        self.live_rects[i]['state'] = 'blocked'
+        if not self.revealFake(i):
+            self.live_rects[i]['color'].rgba = (0.05, 0.05, 0.5, 1)
+            self.removeBox(i)
+    def hitBox(self, i):
+        self.live_rects[i]['state'] = 'hit'
+        if not self.revealFake(i):
+            self.live_rects[i]['color'].rgba = (0.8, 0.05, 0.05, 1)
+            self.removeBox(i)
+            self.fpage.pTakesDamage()
+    def on_touch_down(self, touch=None):
+        if (touch is not None):
+            x0 = touch.pos[0] >= self.positions[:,0]
+            x1 = touch.pos[0] <= self.positions[:,1]
+            y0 = touch.pos[1] >= self.positions[:,2]
+            y1 = touch.pos[1] <= self.positions[:,3]
+            idsTouched = self.posids[np.all([x0, x1, y0, y1], 0)]
+            blockStates = []
+            for i in idsTouched:
+                if self.live_rects[i]['state'] == 'block':
+                    blockStates.append(i)
+                elif self.live_rects[i]['state'] == 'dodge':
+                    self.dodgeBox(i)
+            if (len(blockStates) > 0):
+                if (self.blocksRemaining>0):
+                    self.blocksRemaining -= 1
+                    for i in blockStates:
+                        self.blockBox(i)
+                else:
+                    for i in blockStates:
+                        self.hitBox(i)
+    def clearAll(self):
+        self.fpage.remove_widget(self.RT)
+        self.fpage.remove_widget(self.FT)
+        self.fpage.canvas.after.remove(self.realBlock)
+        self.fpage.canvas.after.remove(self.fakeBlock)
+        self.fpage.canvas.after.remove(self.realDodge)
+        self.fpage.canvas.after.remove(self.fakeDodge)
+        self.fpage.remove_widget(self)
 
 class FightPage(FloatLayout):
-    def __init__(self, name, style, lvl, stats, encountered=True, **kwargs):
+    def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, **kwargs):
         super().__init__(**kwargs)
-        # Player stats
+        self.logDef = logDef
+        self.consume = consume
+        self.action_amt = action_amt
+        self.reward = reward
+        self.check_attributes = ['Agility', 'Cunning', 'Hit Points', 'Attack', 'Stability', f'Def-{style}']
+        self.foeisNPC = foeisNPC
+        self.order_refresh_count = 0
+        self.attack_count = 0
+        
+        # Player objects
         self.P = lclPlayer()
         self.P.paused = True
-        self.pstats = deepcopy(self.P.current)
-        # Foe Stats
+        self.fighting = True
+        
+        # Stats
+        if self.logDef:
+            self.pstats = npc_stats(rbtwn(3, 120))
+            self.foestats = npc_stats(rbtwn(3, 120))
+            output(f"Activating Logged Def, Player Lv.{np.sum(self.pstats)}, NPC Lv.{np.sum(self.foestats)}")
+        else:
+            self.pstats = deepcopy(self.P.current)
+            self.foestats = stats
+        
+        # Foe objects
         self.foename = name
         self.foelvl = lvl
         self.foestyle = style
-        self.foestats = stats
         self.foecateg = self.foeCategory()
         self.enc = encountered # enc of -1 means the player is triggering the encounter
         # Calculate Disadvantages
@@ -187,41 +521,52 @@ class FightPage(FloatLayout):
                 self.foestats[agil_i] = max([0, self.foestats[agil_i]-2])
                 if self.foestats[agil_i] != prior: self.f_affected_stats.add('Agility')
         # First add background based on tile encounter
-        bkgSource = f'images\\resized\\background\\{self.P.currenttile.tile}.png' if (self.P.currenttile.tile+'.png') in os.listdir('images\\background') else f'images\\resized\\background\\{self.P.currenttile.tile[:-1]}.png'
+        if name == 'Sparring Partner':
+            bkgSource = f'images\\resized\\background\\sparringground.png'
+        elif background_img is None:
+            bkgSource = f'images\\resized\\background\\{self.P.currenttile.tile}.png' if (self.P.currenttile.tile+'.png') in os.listdir('images\\background') else f'images\\resized\\background\\{self.P.currenttile.tile[:-1]}.png'
+        else:
+            bkgSource = background_img
         self.add_widget(Image(source=bkgSource, pos=(0,0), size_hint=(1,1)))
         
         # Ideally the ratio will be determined by the ratio of the image with fixed width
         psource = f'images\\resized\\origsize\\{self.P.birthcity}.png'
         x_max, y_max = 0.3, 0.7 # These ratios are also used in resize_images!
-        x_hint, y_hint = self.get_size_hint(x_max, y_max, psource)
+        #x_hint, y_hint = self.get_size_hint(x_max, y_max, psource)
+        x_hint, y_hint = x_max, y_max
         
         # Plot Player
         self.pimg = Image(source=psource, pos_hint={'x':0.02, 'y':0.02}, size_hint=(x_hint, y_hint))
         self.add_widget(self.pimg)
         # Plot Foe
-        fsource = f'images\\resized\\npc\\{name}\\{style}.png'
+        style_num = str(rbtwn(1,3)) if name == 'Duelist' else ''
+        fsource = f'images\\resized\\npc\\{name}\\{style}{style_num}.png'
         x_hint, y_hint = self.get_size_hint(x_max, y_max, fsource)
         self.fimg = Image(source=fsource, pos_hint={'right':0.98, 'y':0.02}, size_hint=(x_hint, y_hint))
         self.add_widget(self.fimg)
         # Generate Table
-        statTable = self.get_table()
-        statTable.pos_hint = {'x':0.32, 'y':0.1}
-        statTable.size_hint = (0.36, 0.7)
-        self.add_widget(statTable)
+        self.statTable = self.get_table()
+        self.statTable.pos_hint = {'x':0.32, 'y':0.1}
+        self.statTable.size_hint = (0.36, 0.7)
+        self.add_widget(self.statTable)
         # Message Board
-        self.msgBoard = Button(text='Run or Fight?' if encountered else '', background_color=(1,1,1,0.6), color=(0.3, 0.3, 0.7, 1), background_disabled_normal='', disabled=True, pos_hint={'x':0.32, 'y':0.8}, size_hint=(0.36, 0.1))
+        self.initiateFightOrder()
+        p1 = int(np.sum(self.fightorder==self.fightorder[0]))
+        p2 = int(np.sum(self.fightorder==self.fightorder[-1]))
+        fightorder = f"Fight Order: {p1} time{'s' if p1>1 else ''} {self.fightorder[0]} then {p2} time{'s' if p2>1 else ''} {self.fightorder[-1]}\n"
+        msg = f'You are encountered by {self.foename}\n' if encountered else ''
+        msg = msg+f"{fightorder}You can't faint but leveling up probability is reduced.\nRun or Fight?" if self.foename == 'Sparring Partner' else msg+f'{fightorder}Run or Fight?'
+        self.msgBoard = Button(text=msg, background_color=(1,1,1,0.6), color=(0.3, 0.3, 0.7, 1), background_disabled_normal='', disabled=True, pos_hint={'x':0.32, 'y':0.8}, size_hint=(0.36, 0.1))#, markup=True)
         self.add_widget(self.msgBoard)
         # Run or Fight
-        if encountered:
-            self.runButton = Button(text=f"Run (+{self.foecateg} FTG)", background_color=(1, 1, 0, 1), background_normal='', color=(0,0,0,1), pos_hint={'x':0.32, 'y':0}, size_hint=(0.17, 0.09))
-            self.runButton.bind(on_press=self.run)
-            category = ['Very Weak', 'Weak', 'Match', 'Strong', 'Very Strong']
-            self.fightButton = Button(text=f'Fight ({category[self.foecateg]})', background_color=(0.6, 0, 0, 1), background_normal='', color=(1,1,1,1), pos_hint={'x':0.51, 'y':0}, size_hint=(0.17, 0.09))
-            self.fightButton.bind(on_press=self.startBattle)
-            self.add_widget(self.runButton)
-            self.add_widget(self.fightButton)
-        else:
-            self.startBattle()
+        self.runButton = Button(text=f"", background_color=(1, 1, 0, 1), background_normal='', color=(0,0,0,1), pos_hint={'x':0.32, 'y':0}, size_hint=(0.17, 0.09))
+        self.set_runFTG(self.foecateg)
+        self.runButton.bind(on_press=self.run)
+        category = ['Very Weak', 'Weak', 'Match', 'Strong', 'Very Strong']
+        self.fightButton = Button(text=f'Fight ({category[self.foecateg]})', background_color=(0.6, 0, 0, 1), background_normal='', color=(1,1,1,1), pos_hint={'x':0.51, 'y':0}, size_hint=(0.17, 0.09))
+        self.fightButton.bind(on_press=self.startBattle)
+        self.add_widget(self.runButton)
+        self.add_widget(self.fightButton)
     def foeCategory(self):
         differential = np.sum(self.foestats) - np.sum(self.pstats)
         if differential >= 12:
@@ -234,16 +579,12 @@ class FightPage(FloatLayout):
             return 1
         else:
             return 0
+    def set_runFTG(self, ftg):
+        self.runFTG = ftg
+        self.runButton.text = f'Run (+{ftg} FTG)'
     def run(self, instance=None):
-        self.P.parentBoard.game_page.main_screen.current = 'Board'
-        self.P.parentBoard.game_page.main_screen.remove_widget(self.P.parentBoard.game_page.fightscreen)
-        self.P.takeDamage(0, self.foecateg) 
-        self.P.paused = False
-        exitActionLoop(amt=0) # [INCOMPLETE] This coding should be dependent on the type of tile they are on, also if fighting player then should be moved randomly
-    def startBattle(self, instance=None):
-        self.msgBoard.text = ''
-        self.remove_widget(self.runButton)
-        self.remove_widget(self.fightButton)
+        self.endFight(True)
+    def initiateFightOrder(self):
         agility = self.foestats[self.P.attributes["Agility"]], self.pstats[self.P.attributes["Agility"]]
         playeragil = agility[1]+2 if self.enc==-1 else agility[1] # In the case that the player was the one triggering the encounter
         startagil = agility[0]+2 if self.enc else agility[0]
@@ -256,19 +597,55 @@ class FightPage(FloatLayout):
             f = np.random.choice(np.arange(2))
             order = [f]*max([1,int(agility[f]/max([1,agility[1-f]]))]) + [1-f]*max([1,int(agility[1-f]/max([1,agility[f]]))])
         fighters = np.array([self.foename, self.P.username])
-        output("Order of Attack: "+str(list(fighters[order])))
+        #output("Order of Attack: "+str(list(fighters[order])))
         self.fightorder = fighters[order]
-        self.order_idx = 0
-        # [INCOMPLETE] for now make the player strike first, otherwise it should be whosever turn it actually is.
-        self.playerAttacks()
+        self.order_idx = -1
+    def startBattle(self, instance=None):
+        self.msgBoard.text = ''
+        #self.remove_widget(self.runButton)
+        self.remove_widget(self.fightButton)
+        self.nextAttack(0)
+    def nextAttack(self, delay=1.2, _=None):
+        if hasattr(self, 'atkButton'):
+            self.remove_widget(self.atkButton)
+        def trigger(_=None):
+            if self.fighting:
+                self.attack_count += 1
+                self.order_idx += 1
+                if self.order_idx >= len(self.fightorder):
+                    # This means a full round was completed, each player loses stability as long as 2 refreshes have been completed (only applied to this fight)
+                    self.order_refresh_count += 1
+                    if not (self.order_refresh_count % 2):
+                        s_i = self.P.attributes['Stability']
+                        oldpstat = self.pstats[s_i]
+                        self.pstats[s_i] = max([0, self.pstats[s_i] - 1])
+                        if oldpstat != self.pstats[s_i]:
+                            self.statTable.cells[self.P.username][s_i].background_color = (1, 1, 0.2, 0.6)
+                            self.statTable.cells[self.P.username][s_i].text = str(self.pstats[s_i])
+                        oldfstat = self.foestats[s_i]
+                        self.foestats[s_i] = max([0, self.foestats[s_i] - 1])
+                        if oldfstat != self.foestats[s_i]:
+                            self.statTable.cells[self.foename][s_i].background_color = (1, 1, 0.2, 0.6)
+                            self.statTable.cells[self.foename][s_i].text = str(self.foestats[s_i])
+                    # Recycle order index
+                    self.order_idx = 0
+                self.msgBoard.text = f"{self.fightorder[self.order_idx]} is Attacking Next"
+                Clock.schedule_once(self.triggerNext, delay)
+        Clock.schedule_once(trigger, delay)
+    def triggerNext(self, _=None):
+        if self.fightorder[self.order_idx] == self.P.username:
+            self.playerAttacks()
+        else:
+            self.playerDefends()
     def playerAttacks(self):
+        self.set_runFTG(self.foecateg)
         self.msgBoard.text = 'Choose Attack'
         self.curAtk, self.maxAtk = 0, self.pstats[self.P.attributes["Attack"]]
         self.atkButton = Button(text='0', background_color=(2, 1, 1, 1), color=(1,1,1,1), pos_hint={'x':0.02, 'y':0.8}, size_hint=(0.05, 0.05))
         self.atkButton.bind(on_press=self.exitClickLoop)
         self.add_widget(self.atkButton)
         self.unclicked = True
-        timeBetween = 0.07 + 0.04 * self.pstats[self.P.attributes["Technique"]] # [INCOMPLETE] Make this a function of technique
+        timeBetween = 0.07 + 0.04 * self.pstats[self.P.attributes["Technique"]]
         Clock.schedule_interval(self.atkSwitchLoop, timeBetween)
     def atkSwitchLoop(self, _=None):
         if self.unclicked:
@@ -282,11 +659,36 @@ class FightPage(FloatLayout):
             return False
     def exitClickLoop(self, instance):
         self.unclicked = False
-        self.msgBoard.text = f"You attempt to strike with {self.P.combatstyle} attack of {self.curAtk}!"
-        hitBoxScale = (1 - 0.055*self.foestats[self.P.attributes["Agility"]])
+        stability = self.pstats[self.P.attributes['Stability']]
+        if self.curAtk > stability:
+            if rbtwn(0,self.P.stability_impact):
+                self.msgBoard.text = f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!' 
+            else:
+                self.curAtk = stability
+                strike = 'You missed.' if self.curAtk == 0 else f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!'
+                self.msgBoard.text = f'Your attack was unstable!\n{strike}'
+        else:
+            self.msgBoard.text = 'You missed.' if self.curAtk == 0 else f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!' 
+        if self.curAtk > 0:
+            hitBoxScale = (1 - 0.055*self.foestats[self.P.attributes["Stability"]])
+            hitBox_x, hitBox_y = 0.3*hitBoxScale, 0.7*hitBoxScale
+            self.hitBox = HitBox(self, text='', background_color=(1,0.4,0,0.2), disabled=True, background_disabled_normal='', pos_hint={'center_x':0.83, 'center_y':0.37}, size_hint=(float(hitBox_x), float(hitBox_y)))
+            self.add_widget(self.hitBox)
+        else:
+            self.nextAttack()
+    def playerDefends(self):
+        self.set_runFTG(self.foecateg + 2)
+        if hasattr(self, 'hitBox'):
+            self.hitBox.clearAll()
+        hitBoxScale = (1 - 0.055*self.pstats[self.P.attributes['Stability']])
         hitBox_x, hitBox_y = 0.3*hitBoxScale, 0.7*hitBoxScale
-        self.hitBox = HitBox(self, text='', background_color=(1,0.4,0,0.2), disabled=True, background_disabled_normal='', pos_hint={'center_x':0.83, 'center_y':0.37}, size_hint=(float(hitBox_x), float(hitBox_y)))
-        self.add_widget(self.hitBox)
+        self.defBox = DefBox(self, text='', background_color=(0.7,0.7,0.7,0.4), disabled=True, background_disabled_normal='', pos_hint={'center_x':0.17, 'center_y':0.37}, size_hint=(float(hitBox_x), float(hitBox_y)))
+        self.add_widget(self.defBox) # May want to move this to within defBox if the attack is greater than 0
+        if self.foeisNPC:
+            self.defBox.npcAttacks()
+        else:
+            # [INCOMPLETE] Listen for attack
+            pass
     def get_table(self, opacity=0.6):
         header = [self.P.username, "Attributes", self.foename]
         data = []
@@ -315,11 +717,102 @@ class FightPage(FloatLayout):
         else:
             x_hint = x_max
         return x_hint, y_hint
+    def endFight(self, ran=False):
+        self.fighting = False
+        self.P.parentBoard.game_page.main_screen.current = 'Board'
+        self.P.parentBoard.game_page.main_screen.remove_widget(self.P.parentBoard.game_page.fightscreen)
+        self.P.paused = False
+        hp_dmg = self.P.current[self.P.attributes['Hit Points']] - self.pstats[self.P.attributes['Hit Points']]
+        if (self.foename == 'Sparring Partner') and (hp_dmg == self.P.current[self.P.attributes['Hit Points']]):
+            # You can't faint when practicing, so make the leftover HP = 1
+            output("You lost the sparring match!", 'yellow')
+            hp_dmg -= 1
+        if not ran:
+            output("You take an extra fatigue for fighting")
+        fainted_or_paralyzed = self.P.takeDamage(hp_dmg, self.runFTG if ran else 1) # Take damage equal to the amount you took
+        action_amt = 0 if fainted_or_paralyzed else self.action_amt # We want to make sure that the actions are at least listed even if they are paralyzed or fainted.
+        if not fainted_or_paralyzed: exitActionLoop(consume=self.consume, amt=action_amt)() # [INCOMPLETE] This coding should be dependent on the type of tile they are on, also if fighting player then should be moved randomly
+    def foeTakesDamage(self):
+        if (self.foestats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
+            self.foestats[self.P.attributes['Hit Points']] -= 1
+            cell = self.statTable.cells[self.foename][self.P.attributes['Hit Points']]
+            cell.text = str(self.foestats[self.P.attributes['Hit Points']])
+            cell.background_color = (1, 1, 0.2, 0.6)
+            if self.foestats[self.P.attributes['Hit Points']] == 0:
+                # Get reward
+                for rwd, amt in self.reward.items():
+                    if rwd == 'coins':
+                        output("Rewarded {int(amt)} coin!", 'green')
+                        self.P.coins += int(amt)
+                    else:
+                        # Assumption: If not coins, then must be an item
+                        output("Rewarded {int(amt)} {rwd}!", 'green')
+                        self.P.addItem(rwd, int(amt))
+                # Training with Sparring partner does not gaurantee you a level increase like with others.
+                levelsup = (self.foecateg/2) ** 2
+                if self.foename == 'Sparring Partner': levelsup *= 0.6
+                if (levelsup > 0) and (levelsup < 1):
+                    # Take care of "probabilistic" leveling up
+                    output(f"Level up chance is: {round(levelsup*100)}%")
+                    levelsup = 1 if np.random.rand() <= levelsup else 0
+                self.levelsup = int(levelsup)
+                if self.levelsup > 0:
+                    critthink = self.P.activateSkill('Critical Thinking')
+                    r = rbtwn(1, 12, None, critthink, 'Critical Thinking ')
+                    if r <= critthink:
+                        self.P.useSkill('Critical Thinking')
+                        self.prompt_levelup()
+                        # prompt_levelup should end the fight once attributes are chosen.
+                    else:
+                        for i in range(self.levelsup):
+                            self.check_valid_levelup()
+                            if len(self.valid_attributes) == 0:
+                                continue
+                            random_atr = list(self.valid_attributes.keys())[rbtwn(0, len(self.valid_attributes)-1)]
+                            output(f"Leveling up {random_atr}!", 'green')
+                            self.P.updateAttribute(random_atr)
+                        self.endFight()
+                else:
+                    output("You don't level up", 'yellow')
+                    self.endFight()
+    def levelup(self, atr, _=None):
+        if self.levelsup > 0:
+            output(f"Leveling up {atr}!", 'green')
+            self.P.updateAttribute(atr)
+            self.levelsup -= 1
+            if self.levelsup > 0:
+                self.prompt_levelup()
+            else:
+                self.endFight()
+        else:
+            self.endFight()
+    def check_valid_levelup(self):
+        self.valid_attributes = {}
+        for atr in self.check_attributes:
+            if self.P.combat[self.P.attributes[atr]] < 8:
+                self.valid_attributes[atr] = partial(self.levelup, atr)
+    def prompt_levelup(self):
+        self.check_valid_levelup()
+        if (len(self.valid_attributes) > 0) and (self.levelsup > 0):
+            output(f"Choose your level up attributes! ({self.levelsup} Remaining)", 'blue')
+            actionGrid(self.valid_attributes, False)
+        else:
+            self.endFight()
+    def pTakesDamage(self):
+        if (self.pstats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
+            self.pstats[self.P.attributes['Hit Points']] -= 1
+            cell = self.statTable.cells[self.P.username][self.P.attributes['Hit Points']]
+            cell.text = str(self.pstats[self.P.attributes['Hit Points']])
+            cell.background_color = (1, 1, 0.2, 0.6)
+            if self.pstats[self.P.attributes['Hit Points']] == 0:
+                if self.foename == 'Duelist':
+                    self.P.dueling_hiatus = 3 # Losing makes it harder to go back into arena
+                self.endFight()
 
-def npc_stats(lvl, fixed=None):
+def npc_stats(lvl, fixed=None, maxAtr=None):
     P = lclPlayer()
     lbls = P.atrorder
-    conditions = [None, None, None]
+    conditions = [None, None, None, None]
     n = len(lbls)
     if ('Hit Points' in lbls):
         hi = lbls.index('Hit Points')
@@ -330,6 +823,16 @@ def npc_stats(lvl, fixed=None):
     if ('Attack' in lbls):
         ai = lbls.index('Attack')
         conditions[2] = 'a[ai]==0'
+    if ('Technique' in lbls):
+        ti = lbls.index('Technique')
+        conditions[3] = 'a[ti]>12'
+    if fixed is not None:
+        for atr, fixedlvl in fixed.items():
+            if atr != 'Stealth':
+                conditions.append(f'a[{P.attributes[atr]}]=={fixedlvl}')
+            else:
+                # [INCOMPLETE] Add a stat for stealth?
+                pass
     while True:
         a = randofsum(lvl, n)
         breakout = True
@@ -340,19 +843,24 @@ def npc_stats(lvl, fixed=None):
         if breakout: break
     return a
 
-def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=None, action_amt=1, empty_tile=False):
+def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=None, action_amt=1, empty_tile=False, lvlBalance=6, enc=1):
     P = lclPlayer()
-    # [INCOMPLETE] Conduct Fight
-    lvl = rbtwn(lvlrange[0],lvlrange[1])
+    possibleLvls = rbtwn(lvlrange[0],lvlrange[1],max([1, round((lvlrange[1]-lvlrange[0])/lvlBalance)]))
+    lvl = possibleLvls[np.argsort(np.abs(possibleLvls-np.sum(P.current)))[0]]
+    # For rewards go through the dictionary and if value is a list then choose a random result biased toward the level chosen of opponent
+    new_reward = {}
+    for rwd, val in reward.items():
+        if type(val) is list:
+            lvlpct = (lvl - lvlrange[0])/(lvlrange[1] - lvlrange[0])
+            val = round(lvlpct * (val[1] - val[0]))
+        new_reward[rwd] = val
     cbstyle = styles[rbtwn(0,len(styles)-1)]
     output(f'Encounter Lv{lvl} {name} using {cbstyle}','yellow')
     screen = Screen(name="Battle")
-    screen.add_widget(FightPage(name, cbstyle, lvl, npc_stats(lvl, fixed), True))
+    screen.add_widget(FightPage(name, cbstyle, lvl, npc_stats(lvl, fixed), enc, reward=new_reward, consume=consume, action_amt=action_amt, foeisNPC=True))
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
-    # For now exit the action loop - but we will want this to be different depending on circumstances
-    exitActionLoop(consume, action_amt, empty_tile)()
 
 def resize_img(source, scale=3, saveto=None, overwrite=False):
     saveto = os.path.dirname(os.path.dirname(source))+'\\resized\\'+'\\'.join(source.split('\\')[-2:]) if saveto is None else saveto
@@ -404,7 +912,7 @@ def check_paralysis():
             paralyzed = False
             P.paralyzed_rounds = 0
             # If the player is in a city they are not allowed in then move away onto a random road after healed.
-            if not P.entry_allowed[P.currenttile.tile]:
+            if (P.currenttile.tile in P.entry_allowed) and (not P.entry_allowed[P.currenttile.tile]):
                 output("You are kicked out of the city after recovery.",'yellow')
                 roadtiles = []
                 for coord in P.currenttile.neighbors:
@@ -423,7 +931,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 else:
                     # Otherwise the player must be descended into a cave or ontop of a mountain
                     tier = int(consume[-1])
-                    P.tiered = True if tier > 1 else False
+                    P.tiered = tier if tier > 1 else False
                     P.go2action(tier)
                 P.started_round = False
             else:
@@ -431,16 +939,13 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     P.road_moves -= amt
                     if P.road_moves == 0:
                         P.takeAction(amt)
-                        P.road_moves = P.max_road_moves
                     else:
                         P.update_mainStatPage()
                 elif consume == 'minor':
                     P.minor_actions -= amt
                     if P.minor_actions == 0:
                         # If the player makes his max transactions, then it is the same as if he bartered. Otherwise, bartering is handled in the takeAction method.
-                        P.activated_bartering = False
                         P.takeAction(amt)
-                        P.minor_actions = P.max_minor_actions
                     else:
                         P.update_mainStatPage()
                 elif amt>0:
@@ -451,7 +956,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 else:
                     # Otherwise the player must be descended into a cave or ontop of a mountain
                     tier = int(consume[-1])
-                    P.tiered = True if tier > 1 else False
+                    P.tiered = tier if tier > 1 else False
                     P.go2action(tier)
     return exit_loop
 
@@ -486,7 +991,7 @@ def sellItem(item, to_trader, barter=None, _=None):
     elif barter == True:
         P.activated_bartering = True
         bartering = P.activateSkill("Bartering")
-        r = rbtwn(1,12)
+        r = rbtwn(1, 12, None, bartering, 'Bartering ')
         if r <= bartering:
             P.useSkill("Bartering")
             output("You successfully Barter", 'green')
@@ -517,9 +1022,11 @@ def buyItem(item, cost, from_trader, amt=1, consume='minor'):
             return
         if P.coins < (cost*amt):
             output("Insufficient funds!",'yellow')
+        elif P.item_count >= P.max_capacity:
+            output("Cannot add anymore items!", 'yellow')
         else:
             P.unsellable.add(item)
-            P.coins -= (cost*amt)
+            P.coins -= int(cost*amt)
             if amt == 1:
                 output(f"Bought {item} for {cost}")
             else:
@@ -529,34 +1036,37 @@ def buyItem(item, cost, from_trader, amt=1, consume='minor'):
             getItem(item, amt, consume, False, 1)()
     return buyitem
 
-def Trading(items, trader, barter=False):
+def Trading(trader, _=None):
     P = lclPlayer()
     if P.paused:
         return
+    items = P.currenttile.trader_wares if trader else P.currenttile.city_wares
     def activate_bartering(_):
         if P.paused:
             return
         P.activated_bartering = True
         bartering = P.activateSkill('Bartering')
-        r = rbtwn(1, 12)
+        r = rbtwn(1, 12, None, bartering, 'Bartering ')
         if r <= bartering:
             P.useSkill('Bartering')
             output("You successfully Barter", 'green')
             if (bartering > 8) and trader:
                 P.bartering_mode = 2
-                Trading(items, trader, 2) # Reduce prices by max of 2
+                Trading(trader) # Reduce prices by max of 2
             else:
                 P.bartering_mode = 1
-                Trading(items, trader, 1)
+                Trading(trader)
         else:
             output("You fail to Barter", 'yellow')
             P.bartering_mode = 0
-            Trading(items, trader, None) # Not given the opportunity to barter again unless performs a different action first
+            Trading(trader) # Not given the opportunity to barter again unless performs a different action first
     actions = {}
     for item in items:
         categ, price = getItemInfo(item)
         cost = price if trader else mrktPrice[price]
-        cost = cost - P.bartering_mode
+        # Reduce cost depending on trader and bartering mode, but min cost must be 1.
+        reduce = P.bartering_mode if trader else min([1, P.bartering_mode])
+        cost = max([cost - reduce, 1])
         clr = 'ffff75' if P.bartering_mode == 0 else '00ff75'
         actions[f'{item}:[color={clr}]{cost}[/color]'] = buyItem(item, cost, trader, consume='minor')
         # Give the player the option to go back to regular action menu of the tile
@@ -564,11 +1074,6 @@ def Trading(items, trader, barter=False):
     # If the player has not activated bartering already, give them a chance to do so
     if (P.bartering_mode == 0) and (P.activated_bartering==False): actions['Barter'] = activate_bartering
     actionGrid(actions, False)
-    
-def await_trading(items, trader, barter=False):
-    def trade(_):
-        Trading(items, trader, barter)
-    return trade
 
 heatableItems = {'raw meat':0, 'raw fish':0, 'hide':5, 'clay':6, 'sand':9, 'bark':12}
 noncraftableItems = {'hide', 'clay', 'sand'}
@@ -644,7 +1149,7 @@ def readbook(book, _=None):
         output("You don't own this book to read it!", 'yellow')
         return
     critthink = P.activateSkill("Critical Thinking")
-    r = rbtwn(0, 8)
+    r = rbtwn(0, 8, None, critthink, 'Critical Thinking ')
     if r <= critthink:
         P.useSkill("Critical Thinking")
         output(f"You successfully read the {book}!", 'green')
@@ -755,9 +1260,18 @@ def C_road(action=1):
     coord, depth = P.currenttile.findNearest(cities)
     r = np.random.rand()
     if r <= (depth/6):
-        encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume='road', action_amt=action)
+        # [INCOMPLETE] Have trader run away
+        stealth = P.activateSkill("Stealth")
+        r = rbtwn(1, 12, None, stealth, 'Stealth ')
+        if r <= stealth:
+            P.useSkill('Stealth')
+            output("Successfully avoided robber!", 'green')
+            exitActionLoop('road')()
+        else:
+            output("Unable to avoid robber!", 'yellow')
+            encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action)
     elif P.currenttile.trader_rounds == 0:
-        r = rbtwn(1,6)
+        r = rbtwn(1, 6)
         if r == 1:
             # Trader appears with 1/6 chance
             P.currenttile.trader_appears()
@@ -768,7 +1282,7 @@ def C_road(action=1):
 def C_plains():
     P = lclPlayer()
     survival = P.activateSkill("Survival")
-    r = rbtwn(0,8)
+    r = rbtwn(0, 8, None, survival, 'Survival ')
     if r <= survival:
         P.useSkill('Survival')
         output('Successfully avoided traps','green')
@@ -776,14 +1290,16 @@ def C_plains():
     else:
         output('Trap hits you, +1 fatigue', 'red')
         paralyzed = P.takeDamage(0,1)
-        if not paralyzed: exitActionLoop()()
+        # If the player is paralyzed then they should still get the actions listed.
+        action_amt = 0 if paralyzed else 1
+        exitActionLoop(amt=action_amt)()
     
     
 def C_cave(tier=1, skip=False):
     P = lclPlayer()
     def enemy_approach(_=None):
         stealth = P.activateSkill('Stealth')
-        r = rbtwn(0,4*tier)
+        r = rbtwn(0, 4*tier, None, stealth, 'Stealth ')
         if r <= stealth:
             P.useSkill('Stealth',1,2*tier-1)
             output('Successfully avoided monster','green')
@@ -794,7 +1310,7 @@ def C_cave(tier=1, skip=False):
     if not skip:
         fainted = False
         survival = P.activateSkill('Survival')
-        r = rbtwn(0,2**tier)
+        r = rbtwn(0, 2**tier, None, survival, 'Survival ')
         if r <= survival:
             P.useSkill('Survival',1,2*tier-1)
             output('Successfully evaded the sharp rocks','green')
@@ -810,7 +1326,7 @@ def C_outpost(skip=False):
     def enemy_approach(_=None):
         P = lclPlayer()
         stealth = P.activateSkill('Stealth')
-        r = rbtwn(0,12)
+        r = rbtwn(0, 12, None, stealth, 'Stealth ')
         if r <= stealth:
             P.useSkill('Stealth')
             output('Successfully avoided bandit','green')
@@ -829,7 +1345,7 @@ def C_outpost(skip=False):
 def C_mountain(tier=1):
     P = lclPlayer()
     survival = P.activateSkill('Survival')
-    r = rbtwn(0,2**tier)
+    r = rbtwn(0, 2**tier, None, survival, 'Survival ')
     fainted_or_paralyzed = False
     if r <= survival:
         P.useSkill('Survival',1,2*tier-1)
@@ -837,13 +1353,14 @@ def C_mountain(tier=1):
     else:
         output(f'Buffeted by harsh environment: -{tier} HP, -{tier} fatigue','red')
         fainted_or_paralyzed = P.takeDamage(tier, tier)
-    if (not fainted_or_paralyzed): exitActionLoop(f'tiered {tier}')()
+    action_amt = 0 if fainted_or_paralyzed else 1
+    exitActionLoop(f'tiered {tier}', amt=action_amt)()
     
 def C_oldlibrary(skip=False):
     def hermit_approach(_=None):
         P = lclPlayer()
         persuasion = P.activateSkill('Persuasion')
-        r = rbtwn(1,12)
+        r = rbtwn(1, 12, None, persuasion, 'Persuasion ')
         if r <= persuasion:
             P.useSkill('Persuasion')
             output('Successfully persuaded the hermit to teach you!','green')
@@ -852,7 +1369,7 @@ def C_oldlibrary(skip=False):
             output('Unsuccessful in persuasion','red')
             encounter('Hermit',[55,75],['Wizard','Elemental'],{'coins':[5, 9]},{'Hit Points':12})
     if not skip:
-        r = rbtwn(1,4)
+        r = rbtwn(1, 4)
         if r == 1:
             hermit_approach()
         else:
@@ -867,7 +1384,7 @@ def C_ruins(skip=False, ret_func=False):
             return
         fainted = False
         survival = P.activateSkill('Survival')
-        r = rbtwn(1,12)
+        r = rbtwn(1, 12, None, survival, 'Survival ')
         if r <= survival:
             P.useSkill('Survival')
             output('Successfully avoided traps','green')
@@ -887,7 +1404,7 @@ def C_ruins(skip=False, ret_func=False):
         if P.paused:
             return
         persuasion = P.activateSkill('Persuasion')
-        r = rbtwn(1,12)
+        r = rbtwn(1, 12, None, persuasion, 'Persuasion ')
         if r <= persuasion:
             P.useSkill('Persuasion')
             output("Successfully persuaded ancient wizard to teach you",'green')
@@ -909,7 +1426,7 @@ def C_ruins(skip=False, ret_func=False):
 def C_battlezone(skip=False):
     P = lclPlayer()
     def ninja_encounter(_=None):
-        r = rbtwn(1,4)
+        r = rbtwn(1, 4)
         if r == 1:
             encounter('Ninja',[65,90],['Physical'],{'coins':[7,11]},{'Stealth':[6,8]})
         elif r == 2:
@@ -920,7 +1437,7 @@ def C_battlezone(skip=False):
             encounter('Ninja',[25,50],['Physical'],{'coins':[6,17]},{'Stealth':3},3)
     if not skip:
         stealth = P.activateSkill('Stealth')
-        r = rbtwn(1,16)
+        r = rbtwn(1, 16, None, stealth, 'Stealth ')
         if r <= stealth:
             P.useSkill('Stealth',2,7)
             output("Avoided ninjas.",'green')
@@ -933,7 +1450,7 @@ def C_battlezone(skip=False):
 def C_wilderness():
     P = lclPlayer()
     survival = P.activateSkill("Survival")
-    r = rbtwn(1,14)
+    r = rbtwn(1, 14, None, survival, 'Survival ')
     if r <= survival:
         P.useSkill("Survival",2,7)
         output("Survived difficult terrain",'green')
@@ -943,13 +1460,15 @@ def C_wilderness():
         fainted_or_paralyzed = P.takeDamage(2, 3)
         if not fainted_or_paralyzed:
             stealth = P.activateSkill("Stealth")
-            r = rbtwn(1,14)
+            r = rbtwn(1, 14, None, stealth, 'Stealth ')
             if r <= stealth:
                 P.useSkill("Stealth",2,7)
                 output("Avoided dangerous wilderness monster",'green')
                 exitActionLoop()()
             else:
                 encounter('Wild Vine Monster',[95,120],['Elemental'],{'bark':4})
+        else:
+            exitActionLoop(amt=0)()
 
 consequences = {'road':C_road, 'plains':C_plains, 'cave':C_cave, 'outpost':C_outpost, 'mountain':C_mountain, 'oldlibrary':C_oldlibrary, 'ruins':C_ruins, 'battle1':C_battlezone, 'battle2':C_battlezone, 'wilderness':C_wilderness}
 
@@ -1038,7 +1557,7 @@ def A_road(inspect=False):
         return {}, None
     P = lclPlayer()
     if P.currenttile.trader_rounds > 0:
-        actions = {'Trader': await_trading(P.currenttile.trader_wares, True, False)}
+        actions = {'Trader': partial(Trading, True)}
         actionGrid(actions, True)
     else:
         # Otherwise clear the action grid except rest stuff
@@ -1133,7 +1652,7 @@ def A_ruins(inspect=False):
         skill = book2skill(book)
         if P.skills[skill] < 8:
             critthink = P.activateSkill('Critical Thinking')
-            r = rbtwn(1,12)
+            r = rbtwn(1, 12, None, critthink, 'Critical Thinking ')
             if r <= critthink:
                 output(f"Understood teachings from old {book}.",'green')
                 P.updateSkill(skill)
@@ -1156,7 +1675,7 @@ def A_ruins(inspect=False):
     
 def A_battlezone(inspect=False):
     def rare_find(_):
-        r = rbtwn(1,4)
+        r = rbtwn(1, 4)
         if r==1:
             getItem('shinopsis')()
         elif r==2:
@@ -1184,7 +1703,7 @@ def A_battlezone(inspect=False):
     
 def A_wilderness(inspect=False):
     def rare_find(_):
-        r = rbtwn(1,6)
+        r = rbtwn(1, 6)
         if r==1:
             getItem('shinopsis', empty_tile=True)()
         elif r==2:
@@ -1238,20 +1757,20 @@ capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'retu
                 'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4},
                 'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3}}
 
-city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Summoner':12, 'Persuasion':8, 'Excavating':12, 'Smithing':4, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'}},
-             'benfriege':{'Hit Points':8, 'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':8, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':12, 'Survival':8, 'Smithing':4, 'sell':{'raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'}},
-             'demetry':{'Elemental':8, 'Def-Trooper':8, 'Bartering':12, 'Crafting':8, 'Smithing':4, 'sell':{'raw meat', 'cooked meat', 'fruit', 'string', 'beads', 'hide', 'sand', 'clay', 'leather', 'ceramic', 'glass', 'gems', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'tungsten', 'bartering book', 'crafting book'}},
-             'enfeir':{'Agility':8, 'Cunning':12, 'Physical':8, 'Def-Wizard':8, 'Critical Thinking':8, 'Heating':8, 'Smithing':8, 'Stealth':12, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'tin', 'copper', 'aluminum', 'kevlium'}},
-             'fodker':{'Stability':12, 'Trooper':8, 'Def-Physical':12, 'Bartering':8, 'Smithing':8, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'sand', 'lead', 'tin', 'copper', 'iron', 'excavating book'}},
-             'glaser':{'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':12, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':8, 'Survival':8, 'Excavating':8, 'Smithing':4, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'scales', 'bark', 'lead', 'tin', 'critical thinking book', 'survival book', 'gathering book'}},
-             'kubani':{'Agility':8, 'Physical':8, 'Def-Wizard':12, 'Critical Thinking':8, 'Bartering':8, 'Crafting':8, 'Gathering':8, 'Smithing':4, 'sell':{'raw meat', 'string', 'beads', 'sand', 'clay', 'glass', 'lead', 'copper', 'iron', 'tantalum', 'titanium', 'survival book'}},
-             'pafiz':{'Hit Points':8, 'Wizard':8, 'Def-Elemental':12, 'Persuasion':12, 'Crafting':8, 'Heating':8, 'Gathering':8, 'Smithing':4, 'sell':{'cooked meat', 'cooked fish', 'fruit', 'string', 'beads', 'hide', 'scales', 'iron', 'nickel', 'persuasion book'}},
-             'scetcher':{'Hit Points':8, 'Agility':8, 'Stability':8, 'Summoner':8, 'Physical':8, 'Wizard':8, 'Elemental':8, 'Trooper':8, 'Def-Physical':8, 'Def-Wizard':8, 'Def-Elemental':8, 'Def-Trooper':8, 'Smithing':8, 'Stealth':8, 'sell':{'raw meat', 'raw fish', 'string', 'sand', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel'}},
-             'starfex':{'Hit Points':8, 'Elemental':12, 'Def-Trooper':8, 'Heating':8, 'Gathering':8, 'Excavating':8, 'Smithing':4, 'sell':{'raw fish', 'cooked fish', 'fruit', 'string', 'beads', 'scales', 'lead', 'tantalum', 'tungsten', 'heating book'}},
-             'tamarania':{'Hit Points':8, 'Stability':8, 'Physical':12, 'Def-Wizard':8, 'Smithing':12, 'sell':{'raw meat', 'cooked meat', 'well cooked meat', 'string', 'beads', 'hide', 'clay', 'leather', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel', 'titanium', 'diamond', 'smithing book'}},
-             'tamariza':{'Hit Points':8, 'Cunning':8, 'Wizard':12, 'Def-Elemental':8, 'Critical Thinking':8, 'Persuasion':8, 'Heating':8, 'Smithing':4, 'sell':{'fruit', 'string', 'beads', 'bark', 'rubber', 'iron', 'nickel', 'chromium', 'heating book'}},
-             'tutalu':{'Hit Points':8, 'Trooper':12, 'Def-Physical':8, 'Smtihing':8, 'Excavating':8, 'sell':{'raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'}},
-             'zinzibar':{'Agility':12, 'Physical':8, 'Def-Wizard':8, 'Persuasion':8, 'Smithing':8, 'Survival':12, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum'}}}
+city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':8, 'Excavating':12, 'Smithing':4, 'entry':12, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'}},
+             'benfriege':{'Hit Points':8, 'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':8, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':12, 'Survival':8, 'Smithing':4, 'entry':4, 'sell':{'raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'}},
+             'demetry':{'Elemental':8, 'Def-Trooper':8, 'Bartering':12, 'Crafting':8, 'Smithing':4, 'entry':13, 'sell':{'raw meat', 'cooked meat', 'fruit', 'string', 'beads', 'hide', 'sand', 'clay', 'leather', 'ceramic', 'glass', 'gems', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'tungsten', 'bartering book', 'crafting book'}},
+             'enfeir':{'Agility':8, 'Cunning':12, 'Physical':8, 'Def-Wizard':8, 'Critical Thinking':8, 'Heating':8, 'Smithing':8, 'Stealth':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'tin', 'copper', 'aluminum', 'kevlium'}},
+             'fodker':{'Stability':12, 'Trooper':8, 'Def-Physical':12, 'Bartering':8, 'Smithing':8, 'entry':6, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'sand', 'lead', 'tin', 'copper', 'iron', 'excavating book'}},
+             'glaser':{'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':12, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':8, 'Survival':8, 'entry':4, 'Excavating':8, 'Smithing':4, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'scales', 'bark', 'lead', 'tin', 'critical thinking book', 'survival book', 'gathering book'}},
+             'kubani':{'Agility':8, 'Physical':8, 'Def-Wizard':12, 'Critical Thinking':8, 'Bartering':8, 'Crafting':8, 'Gathering':8, 'Smithing':4, 'entry':6, 'sell':{'raw meat', 'string', 'beads', 'sand', 'clay', 'glass', 'lead', 'copper', 'iron', 'tantalum', 'titanium', 'survival book'}},
+             'pafiz':{'Hit Points':8, 'Wizard':8, 'Def-Elemental':12, 'Persuasion':12, 'Crafting':8, 'Heating':8, 'Gathering':8, 'Smithing':4, 'entry':6, 'sell':{'cooked meat', 'cooked fish', 'fruit', 'string', 'beads', 'hide', 'scales', 'iron', 'nickel', 'persuasion book'}},
+             'scetcher':{'Hit Points':8, 'Agility':8, 'Stability':8, 'Physical':8, 'Wizard':8, 'Elemental':8, 'Trooper':8, 'Def-Physical':8, 'Def-Wizard':8, 'Def-Elemental':8, 'Def-Trooper':8, 'Smithing':8, 'Stealth':8, 'entry':1, 'sell':{'raw meat', 'raw fish', 'string', 'sand', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel'}},
+             'starfex':{'Hit Points':8, 'Elemental':12, 'Def-Trooper':8, 'Heating':8, 'Gathering':8, 'Excavating':8, 'Smithing':4, 'entry':8, 'sell':{'raw fish', 'cooked fish', 'fruit', 'string', 'beads', 'scales', 'lead', 'tantalum', 'tungsten', 'heating book'}},
+             'tamarania':{'Hit Points':8, 'Stability':8, 'Physical':12, 'Def-Wizard':8, 'Smithing':12, 'entry':14, 'sell':{'raw meat', 'cooked meat', 'well cooked meat', 'string', 'beads', 'hide', 'clay', 'leather', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel', 'titanium', 'diamond', 'smithing book'}},
+             'tamariza':{'Hit Points':8, 'Cunning':8, 'Wizard':12, 'Def-Elemental':8, 'Critical Thinking':8, 'Persuasion':8, 'Heating':8, 'Smithing':4, 'entry':15, 'sell':{'fruit', 'string', 'beads', 'bark', 'rubber', 'iron', 'nickel', 'chromium', 'heating book'}},
+             'tutalu':{'Hit Points':8, 'Trooper':12, 'Def-Physical':8, 'Smtihing':8, 'Excavating':8, 'entry':8, 'sell':{'raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'}},
+             'zinzibar':{'Agility':12, 'Physical':8, 'Def-Wizard':8, 'Persuasion':8, 'Smithing':8, 'Survival':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum'}}}
 
 village_invest = {'village1':'Food', 'village2':'Crafting', 'village3':'Cloth', 'village4':'Food', 'village5':'Crafting'}
 
@@ -1283,7 +1802,7 @@ def get_inverse_city_info():
     adept, master = {}, {}
     for city, D in city_info.items():
         for ability, lvl in D.items():
-            if ability == 'sell':
+            if ability in {'sell', 'entry'}:
                 continue
             if lvl >= 8:
                 if ability in adept:
@@ -1332,6 +1851,7 @@ class Player(Image):
         self.max_minor_actions = 3
         self.max_capacity = 3
         self.max_fatigue = 10
+        self.stability_impact = 2
         self.combatstyle = cities[self.birthcity]['Combat Style']
         
         # Current Stats
@@ -1344,6 +1864,7 @@ class Player(Image):
         self.bartering_mode = 0
         self.unsellable = set()
         self.fatigue = 0
+        self.dueling_hiatus = 0
         
         self.coins = cities[self.birthcity]['Coins']
         self.paralyzed_rounds = 0
@@ -1397,7 +1918,11 @@ class Player(Image):
         return 1
     def go2consequence(self, amt=1):
         if self.currenttile.tile in consequences:
-            consequences[self.currenttile.tile]()
+            if self.tiered:
+                # In the case that they are in the mountain or cave, then make sure they go to the right tier.
+                consequences[self.currenttile.tile](self.tiered)
+            else:
+                consequences[self.currenttile.tile]()
         else:
             exitActionLoop(None,amt)()
     def go2action(self, param=None):
@@ -1415,7 +1940,7 @@ class Player(Image):
         if nxt.tile in cities:
             # Can't enter the city unless was fainted and rushed to the hospital"
             if (not self.entry_allowed[nxt.tile]) and (self.current[self.attributes["Hit Points"]] > 0):
-                output("The city will not let you enter! (Gain some reputation!)",'red')
+                output(f"The city will not let you enter! (Need {city_info[nxt.tile]['entry']}+ Reputation!)",'red')
                 return
         if (not skip_check) and (self.currenttile.tile != 'road') and (self.currenttile.tile not in cities) and (nxt.tile=='road'):
             output("Move there on same action (+2 Fatigue)?", 'blue')
@@ -1472,9 +1997,9 @@ class Player(Image):
         for i in range(len(updated_data)):
             self.mtable.cells[self.mtable.header[i]][0].text = updated_data[i]
         self.PlayerTrack.updateAll()
-    def recover(self, _):
+    def recover(self, rest_rate=None, _=None):
         if not self.paused:
-            rest_rate = self.get_recover()
+            rest_rate = rest_rate if type(rest_rate) is int else self.get_recover()
             if self.activated_bartering:
                 # If bartered, account for the fatigue here and then specify in takeAction to overlook
                 output("Take an extra fatigue for bartering this turn", 'yellow')
@@ -1493,7 +2018,7 @@ class Player(Image):
         self.ate += 1
         ftg, hp = food_restore[food]
         survival = self.skills["Survival"]
-        r = rbtwn(1,12)
+        r = rbtwn(1, 12, None, survival, 'Survival ')
         if r <= survival:
             if rbtwn(0,1):
                 output("Your Survival skill restored +1HP!",'green')
@@ -1523,21 +2048,7 @@ class Player(Image):
                 # If someone has not ended the round yet, then wait.
                 return
         # Otherwise start the round
-        self.startRound()
-    def startRound(self):
-        for P in self.parentBoard.Players.values():
-            P.paused = False
-        self.unsellable = set()
-        self.parentBoard.localPlayer.actions = self.max_actions
-        self.parentBoard.sendFaceMessage('Start Round!')
-        for T in self.parentBoard.gridtiles.values():
-            T.update_tile_properties()
-        self.receiveInvestments() # Receive village investments (or at least update)
-        self.update_mainStatPage()
-        paralyzed = check_paralysis()
-        if not paralyzed: 
-            self.started_round = True
-            self.go2consequence(0)
+        self.parentBoard.startRound()
     def takeDamage(self, hp_amt, ftg_amt, add=True):
         hp_idx = self.attributes['Hit Points']
         self.current[hp_idx] = max([0, self.current[hp_idx]-hp_amt])
@@ -1546,16 +2057,16 @@ class Player(Image):
             self.parentBoard.sendFaceMessage('You Fainted!','red')
             if (self.Combat > 2):
                 survival = self.activateSkill("Survival")
-                r = rbtwn(1,12)
+                r = rbtwn(1, 12, None, survival, 'Survival ')
                 # Survival is activated and may save you from losing attributes
                 if r <= survival:
                     output("Your survival skill enabled you to save your attributes!")
                 else:
-                    CL = list(self.attributes)
                     while True:
-                        Ratr = np.random.choice(CL)
-                        if ((Ratr=='Attack') or (Ratr=='Hit Points')) and (self.combat[self.attributes[Ratr]]>1):
-                            break
+                        Ratr = np.random.choice(self.atrorder)
+                        if ((Ratr=='Attack') or (Ratr=='Hit Points')):
+                            if (self.combat[self.attributes[Ratr]]>1):
+                                break
                         elif self.combat[self.attributes[Ratr]] > 0:
                             break
                     self.updateAttribute(Ratr, -1)
@@ -1575,7 +2086,7 @@ class Player(Image):
         check_paralysis()
         return (fainted or paralyzed)
     def takeAction(self, fatigue=1, verbose=True, from_recovery=False):
-        if verbose: output(f"[ACTION {self.max_actions-self.actions+1}] You took {fatigue} fatigue")
+        if verbose: output(f"[ACTION {self.max_actions-self.actions+1}] You may take {fatigue} fatigue:")
         self.actions -= 1
         if self.activated_bartering:
             # Player performed an action after bartering - make sure you give them an extra fatigue if they bartered and didn't do 3 transactions except if rested
@@ -1587,13 +2098,15 @@ class Player(Image):
         if (fatigue > 0) and (self.paralyzed_rounds == 0):
             # Not activated, but can be used.
             survival = self.skills["Survival"]
-            r = rbtwn(1, 16) # Adept survival gives 0.5 chance of no fatigue, while masters have 0.75 chance of no fatigue.
+            r = rbtwn(1, 16, None, survival, 'Survival ') # Adept survival gives 0.5 chance of no fatigue, while masters have 0.75 chance of no fatigue.
             if r <= survival:
                 self.useSkill("Survival")
                 fatigue -= 1
                 output("Your survival skill saved you a fatigue!", 'green')
             if fatigue > 0:
+                output("Took normal fatigue this action")
                 self.takeDamage(0,fatigue)
+        self.minor_actions = self.max_minor_actions # Refresh minor actions
         self.ate = 0 # Refresh how much one can eat
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
         self.already_asset_bartered = False # If an action is taken, you can try to barter for the asset again.
@@ -1630,6 +2143,11 @@ class Player(Image):
         self.current[self.attributes[attribute]] += val
         self.Combat += val
         self.update_mainStatPage()
+    def applyBoost(self, attribute, val=1, update_stats=True):
+        index = self.attributes[attribute]
+        self.boosts[index] += val
+        self.current[index] += val
+        if update_stats: self.update_mainStatPage()
     def levelup(self, ability, val=1):
         if ability in self.skills:
             self.updateSkill(ability, val)
@@ -1701,12 +2219,12 @@ class Player(Image):
             output("You already manage a worker here!","yellow")
             return
         excavating = self.activateSkill("Excavating")
-        r = rbtwn(0, 6)
+        r = rbtwn(0, 6, None, excavating, 'Excavating ')
         if r <= excavating:
             self.useSkill("Excavating")
             output("You found a potential worker")
             persuasion = self.activateSkill("Persuasion")
-            r = rbtwn(0, 6)
+            r = rbtwn(0, 6, None, persuasion, 'Persuasion ')
             if r <= persuasion:
                 self.useSkill("Persuasion")
                 output("You convinced them to work for you!", 'green')
@@ -1826,7 +2344,6 @@ class Player(Image):
             self.items[item] = amt
         if self.items[item]==0:
             self.items.pop(item)
-        print(self.items)
         self.update_mainStatPage()
 
 class HoverButton(Button, HoverBehavior):
@@ -1946,8 +2463,8 @@ class ArmoryTable(GridLayout):
             if space == 0:
                 B = Button(text=f"{self.P.combatstyle}\nWeapon", font_size=fsize-2, disabled=True, bold=True, background_color=(0.6, 0.6, 0.6, 1), color=(0.2, 0.2, 0.2, 1))
             else:
-                txt, dsbld, clr = ("Primary",True,(0,0,0,1)) if space==1 else ("Secondary",False,(1,1,1,1))
-                B = Button(text=f"{txt}\nArmor", disabled=dsbld, font_size=fsize-1, color=clr)#, background_color=(1.3,1.3,1.3,1))
+                txt, dsbld, clr = ("Equipped",True,(0,0,0,1)) if space==1 else ("",False,(1,1,1,1))
+                B = Button(text=txt, disabled=dsbld, font_size=fsize-1, color=clr)#, background_color=(1.3,1.3,1.3,1))
                 B.bind(on_press=partial(self.change_primary))
             self.aspace[space].append(B)
             R = 2 if space == 0 else 4
@@ -1965,15 +2482,26 @@ class ArmoryTable(GridLayout):
                 rowGrid.add_widget(self.aspace[space][slot])
             self.add_widget(rowGrid)
     def change_primary(self, _=None):
-        self.primary = 1 if self.primary==2 else 2
-        self.secondary = 1 if self.secondary==2 else 2
-        self.aspace[self.secondary][0].disabled=False
-        self.aspace[self.secondary][0].text = "Secondary\nArmor"
-        self.aspace[self.secondary][0].color = (1,1,1,1)
-        self.aspace[self.primary][0].disabled=True
-        self.aspace[self.primary][0].text="Primary\nArmor"
-        self.aspace[self.primary][0].color = (0, 0, 0, 1)
-        # [INCOMPLETE] adjust boosts accordingly
+        if self.P.currenttile.tile in cities:
+            self.primary = 1 if self.primary==2 else 2
+            self.secondary = 1 if self.secondary==2 else 2
+            self.aspace[self.secondary][0].disabled=False
+            self.aspace[self.secondary][0].text = ""
+            self.aspace[self.secondary][0].color = (1,1,1,1)
+            self.aspace[self.primary][0].disabled=True
+            self.aspace[self.primary][0].text="Equipped"
+            self.aspace[self.primary][0].color = (0, 0, 0, 1)
+            for B in self.aspace[self.secondary][1:-1]:
+                if B.text in ore_properties:
+                    atr, amt = ore_properties[B.text]
+                    self.P.applyBoost(f'Def-{atr}', -amt, False)
+            for B in self.aspace[self.primary][1:-1]:
+                if B.text in ore_properties:
+                    atr, amt = ore_properties[B.text]
+                    self.P.applyBoost(f'Def-{atr}', amt, False)
+            self.P.update_mainStatPage()
+        else:
+            output("You can only change equipped armor in a city!", 'yellow')
     def enable_selling(self):
         for space in range(len(self.aspace)):
             if self.aspace[space][-1].text == '':
@@ -1989,7 +2517,7 @@ class ArmoryTable(GridLayout):
         for slot in range(1, 3 if space==0 else 5):
             if self.aspace[space][slot].text in gameItems["Smithing"]:
                 categ, price = getItemInfo(self.aspace[space][slot].text)
-                ttl.add(self.aspace[space][slot].txt) # Total unique
+                ttl.add(self.aspace[space][slot].text) # Total unique
                 sm += sellPrice[price]
         # Smithing price calculator
         if space == 0:
@@ -2007,9 +2535,20 @@ class ArmoryTable(GridLayout):
             self.aspace[space][-1].text = f'Sell: [color={clr}]{sellprice+self.P.bartering_mode}[/color]' 
             if (self.P.currenttile.tile in cities) or (self.P.currenttile.trader_rounds > 0):
                 self.enable_selling()
-    def reassign_lbl(self, space, slot):
+    def reassign_lbl(self, space, slot, update_stat=False):
         smithing = self.P.skills["Smithing"]
         def adjustment(txt, clr=(1,1,1,1), bkg=(1,1,1,1)):
+            if self.aspace[space][slot].text in ore_properties:
+                atr, amt = ore_properties[self.aspace[space][slot].text]
+                if space == 0:
+                    # Remove attack boost
+                    if atr == self.P.combatstyle:
+                        self.P.applyBoost('Attack', -amt, update_stat)
+                    else:
+                        # Somehow an invalid ore got into player's weapon?
+                        output(f"Invalid ore: {self.aspace[space][slot].text} found in weapon slot", 'red')
+                else:
+                    self.P.applyBoost(f'Def-{atr}', -amt, update_stat)
             self.aspace[space][slot].text = txt
             self.aspace[space][slot].color = clr
             self.aspace[space][slot].background_color = bkg
@@ -2035,19 +2574,22 @@ class ArmoryTable(GridLayout):
                 adjustment('Locked', (1, 0, 0, 1), (0.2, 0.2, 0.2, 1))
         self.aspace[space][slot].disabled = True
     def update_lbls(self):
+        # This function is not called by anything as of yet
         for space in range(len(self.aspace)):
             for slot in range(1, 3 if space==0 else 5):
                 if self.aspace[space][slot].text in gameItems['Smithing']:
-                    self.reassing_lbl(space, slot)
-    def rmv_craft(self, space, take_action=False):
+                    self.reassign_lbl(space, slot)
+        self.P.update_mainStatPage()
+    def rmv(self, space, take_minor_action=False):
         for slot in range(1, 3 if space==0 else 5):
             if self.aspace[space][slot].text in gameItems['Smithing']:
                 self.P.item_count -= 1
             self.reassign_lbl(space, slot)
+        self.P.update_mainStatPage()
         self.space_items[space] = 0
         self.assign_sell_value(space)
-        if take_action:
-            exitActionLoop(None, 1)()
+        if take_minor_action:
+            exitActionLoop('minor', 1)()
     def rmv_slot(self, space, slot, confirmed=False, _=None):
         if self.P.paused:
             return
@@ -2072,6 +2614,7 @@ class ArmoryTable(GridLayout):
             self.space_items[space] -= 1
             self.P.item_count -= 1
             self.assign_sell_value(space)
+            self.P.update_mainStatPage()
     def add_slot(self, item, space=None, cost=None, barter=None, _=None):
         if self.P.paused:
             return
@@ -2082,20 +2625,33 @@ class ArmoryTable(GridLayout):
         categ, price = getItemInfo(item)
         reqlvl = price2smithlvl[price]
         # 2 is the base rental cost -- can be reduced by quest
-        rentalcost = max([2 - self.P.bartering_mode>0, 0]) # Can't barter more than 1 coin (because smith is not a trader)
-        fullcost = (price*reqlvl) + 4 - self.P.bartering_mode>0
+        rentalcost = max([2 - int(self.P.bartering_mode>0), 0]) # Can't barter more than 1 coin (because smith is not a trader)
+        fullcost = (price*reqlvl) + 4 - int(self.P.bartering_mode>0)
         if categ != 'Smithing':
             output("You cannot smelt that item.", 'yellow')
             return
         def attempt_smith(success, slot, smithing_on_own):
             if success:
+                atr, amt = ore_properties[item]
+                if space == 0:
+                    # Assign Attack Boost
+                    if atr != self.P.combatstyle:
+                        output(f"This ore is for {atr} while your attack style is {self.P.combatstyle}!", 'yellow')
+                        exitActionLoop(amt=0)()
+                        return
+                    else:
+                        self.P.applyBoost('Attack', amt, False)
+                        output(f"Smithing successful! Attack boosted by {amt}", 'green')
+                else:
+                    # Assign Defense Boost
+                    self.P.applyBoost(f'Def-{atr}', amt, False)
+                    output(f"Smithing successful! Def-{atr} boosted by {amt}", 'green')
                 self.aspace[space][slot].text = item
                 self.aspace[space][slot].color = (0, 0.6, 0, 1)
                 self.aspace[space][slot].disabled = False
                 self.space_items[space] += 1
                 self.P.addItem(item, -1)
                 self.P.item_count += 1
-                # [INCOMPLETE] Assign boosted stat
                 if smithing_on_own:
                     exitActionLoop()()
                 else:
@@ -2110,16 +2666,19 @@ class ArmoryTable(GridLayout):
                 exitActionLoop(amt=0)()
         if space is None:
             output("Which smithing piece would you like to add it to?", 'blue')
-            actionGrid({'Weapon':partial(self.add_slot, item, 0), 'Primary Armor':partial(self.add_slot, item, self.primary), 'Secondary Armor':partial(self.add_slot, item, self.secondary), 'Cancel':exitActionLoop(amt=0)}, False)
-        elif (cost is None) and (not self.P.activated_bartering):
+            actions = {'Equipped Armor':partial(self.add_slot, item, self.primary, None, None), 'Non-Equipped Armor':partial(self.add_slot, item, self.secondary, None, None), 'Cancel':exitActionLoop(amt=0)}
+            # Only allow adding to weapon if combatstyle matches
+            if ore_properties[item][0] == self.P.combatstyle: actions['Weapon'] = partial(self.add_slot, item, 0, None, None)
+            actionGrid(actions, False)
+        elif (cost is None) and (not self.P.activated_bartering) and (barter is None):
             output(f"Rental cost is {rentalcost} or smith charges {fullcost}. Will you attempt to barter?", 'blue')
-            actionGrid({'Yes':partial(self.add_slot,item, space, None, True),
-                        'No':partial(self.add_slot,item,space,None,False),
+            actionGrid({'Yes':partial(self.add_slot, item, space, None, True),
+                        'No':partial(self.add_slot, item, space, None, False),
                         'Cancel':exitActionLoop(amt=0)},False)
         elif cost is None:
             if barter and (not self.P.activated_bartering):
                 bartering = self.P.activateSkill("Bartering")
-                r = rbtwn(1, 12)
+                r = rbtwn(1, 12, None, bartering, 'Bartering ')
                 if r <= bartering:
                     self.P.useSkill("Bartering")
                     output("Bartered with smith and reduced their cost!")
@@ -2182,7 +2741,7 @@ class ArmoryTable(GridLayout):
         elif barter == True:
             self.P.activated_bartering = True
             bartering = self.P.activateSkill("Bartering")
-            r = rbtwn(1,12)
+            r = rbtwn(1, 12, None, bartering, 'Bartering ')
             if r <= bartering:
                 self.P.useSkill("Bartering")
                 output("You successfully Barter", 'green')
@@ -2195,7 +2754,6 @@ class ArmoryTable(GridLayout):
                 self.P.coins += sellprice
                 output(f"Sold smithed piece for {sellprice}.")
                 self.rmv(space, True)
-                exitActionLoop('buy')()
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
                 actionGrid({'Yes':partial(self.sell, space, False), 'No':exitActionLoop('minor', 0, False)}, False)
@@ -2204,7 +2762,6 @@ class ArmoryTable(GridLayout):
             output(f"Sold smithed piece for {sellprice}.")
             self.P.coins += sellprice
             self.rmv(space, True)
-            exitActionLoop('buy')()
                 
 class CraftingTable(GridLayout):
     def __init__(self, relative_height = 0.15, fsize=12, **kwargs):
@@ -2392,7 +2949,7 @@ class CraftingTable(GridLayout):
         elif barter == True:
             self.P.activated_bartering = True
             bartering = self.P.activateSkill("Bartering")
-            r = rbtwn(1,12)
+            r = rbtwn(1, 12, None, bartering, 'Bartering ')
             if r <= bartering:
                 self.P.useSkill("Bartering")
                 output("You successfully Barter", 'green')
@@ -2405,7 +2962,6 @@ class CraftingTable(GridLayout):
                 self.P.coins += sellprice
                 output(f"Sold craft {space+1} for {sellprice}.")
                 self.rmv_craft(space, True)
-                exitActionLoop('buy')()
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
                 actionGrid({'Yes':partial(self.sell_craft, space, False), 'No':exitActionLoop('minor', 0, False)}, False)
@@ -2414,7 +2970,6 @@ class CraftingTable(GridLayout):
             output(f"Sold craft {space+1} for {sellprice}.")
             self.P.coins += sellprice
             self.rmv_craft(space, True)
-            exitActionLoop('buy')()
         
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
@@ -2659,7 +3214,7 @@ class PlayerTrack(GridLayout):
             elif (categ == 'Crafting') and (item not in noncraftableItems):
                 usebutton = {'text':'Craft', 'func':partial(self.player.PlayerTrack.craftingTable.add_craft, item, None)}
             elif (categ == 'Smithing') and (self.player.currenttile.tile in cities):
-                usebutton = {'text':'Smith', 'func':partial(self.player.PlayerTrack.armoryTable.add_slot, item, None)}
+                usebutton = {'text':'Smith', 'func':partial(self.player.PlayerTrack.armoryTable.add_slot, item, None, None, None)}
             else:
                 usebutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
             data.append([{'text':item, 'background_color':(1,1,1,0), 'disabled':True,'color':(0,0,0,1)},
@@ -2679,7 +3234,7 @@ class PlayerTrack(GridLayout):
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
         
 
-cities = {'anafola':{'Combat Style':'Summoner','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
+cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
           'demetry':{'Combat Style':'Elemental','Coins':9,'Knowledges':[('Bartering',2)],'Combat Boosts':[]},
           'enfeir':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Cunning',2)]},
@@ -2798,13 +3353,6 @@ def get_relpos(x, y):
 
 def get_hexcolor(rgb):
     return '%02x%02x%02x' % rgb
-
-def buy_from_market(wares, barter=None, _=None):
-    P = lclPlayer()
-    if P.paused:
-        return
-    if (barter is None) and (not P.activated_bartering):
-        output("Would you like to barter?")
         
 def city_trainer(abilities, mastery, _=None):
     actions = {ability:partial(Train, ability, mastery, False) for ability in abilities}
@@ -2812,10 +3360,32 @@ def city_trainer(abilities, mastery, _=None):
     actionGrid(actions, False)
 
 def city_actions(city, _=None):
+    P = lclPlayer()
+    def Sparring(_=None):
+        if not P.paused:
+            encounter('Sparring Partner', [2, 5], [cities[city]['Combat Style']], {}, enc=0)
+    def Duelling(_=None):
+        if (not P.paused) and (P.dueling_hiatus==0):
+            P.dueling_hiatus = 2
+            encounter('Duelist', [max([2, sum(P.current)-2]), sum(P.current)+6], ['Physical', 'Elemental', 'Trooper', 'Wizard'], {'coins':int(P.Combat/10)+2}, enc=0)
+    def Inn(_=None):
+        if P.paused:
+            return
+        if P.coins == 0:
+            output("Insufficient coin", 'yellow')
+            return
+        P.coins -= 1
+        P.recover(2)
     T = game_app.game_page.board_page.citytiles[city]
-    actions = {'Market':partial(Trading, T.city_wares, False),
+    actions = {'Market':partial(Trading, False),
                'Adept':partial(city_trainer, T.adept_trainers, 'adept'),
                'Master':partial(city_trainer, T.master_trainers, 'city')}
+    if (P is not None) and (P.currenttile.tile == 'scetcher'):
+        actions['Duel'] = Duelling
+    elif (P is not None) and (P.birthcity == city): 
+        actions['Sparring'] = Sparring
+    if (P is not None) and (P.birthcity != city) and (not P.homes[city]):
+        actions['Inn (2): 1 coin'] = Inn
     actionGrid(actions, True)
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
@@ -2996,16 +3566,6 @@ class BoardPage(FloatLayout):
         for T in self.gridtiles.values():
             if T.tile in cities:
                 self.citytiles[T.tile] = T
-                adept, master = set(), set()
-                for ability, lvl in city_info[T.tile].items():
-                    if type(lvl) is int:
-                        if lvl >= 12:
-                            master.add(ability)
-                            adept.add(ability)
-                        elif lvl >= 8:
-                            adept.add(ability)
-                T.adept_trainers = adept
-                T.master_trainers = master
                 # Initial markets will be different for local players
                 T.city_wares = set(np.random.choice(list(city_info[T.tile]['sell']), 6))
             T.set_neighbors()
@@ -3020,6 +3580,22 @@ class BoardPage(FloatLayout):
         self.gridtiles[(x,y)] = T
         T.parentBoard = self
         self.add_widget(T)
+    def startRound(self):
+        for P in self.Players.values():
+            P.paused = False
+        if self.localPlayer.dueling_hiatus > 0:
+            self.localPlayer.dueling_hiatus -= 1
+        self.localPlayer.unsellable = set()
+        self.localPlayer.actions = self.localPlayer.max_actions
+        self.sendFaceMessage('Start Round!')
+        for T in self.gridtiles.values():
+            T.update_tile_properties()
+        self.localPlayer.receiveInvestments() # Receive village investments (or at least update)
+        self.localPlayer.update_mainStatPage()
+        paralyzed = check_paralysis()
+        if not paralyzed: 
+            self.localPlayer.started_round = True
+            self.localPlayer.go2consequence(0)
     def update_market(self, city_markets, _=None):
         for city, T in self.citytiles.items():
             T.city_wares = city_markets[city]
@@ -3037,22 +3613,45 @@ class BoardPage(FloatLayout):
             self.localPlayer.add_mainStatPage()
             self.localPlayer.add_PlayerTrack()
             self.localPlayer.PlayerTrack.craftingTable.update_lbls()
+            
+            # Fix city trainers (done at this stage for purposes of Attack/Technique matching with user)
+            for city, T in self.citytiles.items():
+                adept, master = set(), set()
+                for ability, lvl in city_info[city].items():
+                    if ability in {'sell', 'entry'}:
+                        continue
+                    if ability in {'Physical', 'Elemental', 'Wizard', 'Trooper'}:
+                        if self.localPlayer.combatstyle != ability:
+                            continue
+                        # Meaning the teacher can teach the localPlayer Attack or Technique because their combat style matches
+                        ability = {'Attack', 'Technique'}
+                    else:
+                        ability = set([ability])
+                    if lvl >= 12:
+                        master = master.union(ability)
+                        adept = adept.union(ability)
+                    elif lvl >= 8:
+                        adept = adept.union(ability)
+                T.adept_trainers = adept
+                T.master_trainers = master
+            
             # Begin city action loop
             self.localPlayer.go2action()
             
             # Adjust the screen size
             #width, height = GetSystemMetrics(0), GetSystemMetrics(1)
             # Assumption: Width if greater than height.
-            monitor_info = GetMonitorInfo(MonitorFromPoint((0,0)))
-            _, _, width, fullheight = monitor_info.get("Monitor")
-            _, _, width, wheight = monitor_info.get("Work") # Account for the taskbar
-            wwidth = (1 + self.game_page.right_line_x)*xsize * wheight / ysize # use 1.25 to account for the right_line widget add on
-            Window.size = (wwidth, wheight)
-            Window.top = 0
-            Window.left = 0
-            self.game_width = wwidth/(1+self.game_page.right_line_x)
-            self.game_height = wheight
-            resize_images(self.game_width, self.game_height)
+            if auto_resize:
+                monitor_info = GetMonitorInfo(MonitorFromPoint((0,0)))
+                _, _, width, fullheight = monitor_info.get("Monitor")
+                _, _, width, wheight = monitor_info.get("Work") # Account for the taskbar
+                wwidth = (1 + self.game_page.right_line_x)*xsize * wheight / ysize # use 1.25 to account for the right_line widget add on
+                Window.size = (wwidth, wheight)
+                Window.top = 0
+                Window.left = 0
+                self.game_width = wwidth/(1+self.game_page.right_line_x)
+                self.game_height = wheight
+                resize_images(self.game_width, self.game_height)
     def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2):
         timeNow = time()
         msg = f'[color={trns_clr[clr]}]{msg}[/color]' if clr is not None else msg
@@ -3103,10 +3702,13 @@ class GamePage(GridLayout):
         self.cols = 2
         self.button_num = 1
         # Determine how wide the right_line widgets can be:
-        monitor_info = GetMonitorInfo(MonitorFromPoint((0,0)))
-        _, _, width, fullheight = monitor_info.get("Monitor")
-        _, _, width, wheight = monitor_info.get("Work") # Account for the taskbar
-        self.right_line_x = (width * ysize) / (xsize * wheight) - 1
+        if auto_resize:
+            monitor_info = GetMonitorInfo(MonitorFromPoint((0,0)))
+            _, _, width, height = monitor_info.get("Work") # Account for the taskbar
+        else:
+            # This should be more reliable across platforms.
+            width, height = GetSystemMetrics(0), GetSystemMetrics(1)
+        self.right_line_x = (width * ysize) / (xsize * height) - 1
         #self.right_line_x = 0.25
         # Add the Main Screen
         self.main_screen = ScreenManager()
@@ -3158,8 +3760,9 @@ class GamePage(GridLayout):
         # Any keyboard press will trigger the event:
         Window.bind(on_key_down=self.on_key_down)
     def switchView(self, instance):
-        self.main_screen.current = self.toggleView.text
-        self.toggleView.text = "Board" if self.toggleView.text=="Player Track" else "Player Track"
+        if self.main_screen.current != 'Battle':
+            self.main_screen.current = self.toggleView.text
+            self.toggleView.text = "Board" if self.toggleView.text=="Player Track" else "Player Track"
     def make_actionGrid(self, funcDict, save_rest=False):
         self.clear_actionGrid(save_rest)
         for txt, func in funcDict.items():
@@ -3357,7 +3960,6 @@ class LaunchPage(GridLayout):
             Skirmishes[0] = message
             Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
         elif category == '[MARKET]':
-            print("Benfriege's market today", message['benfriege'])
             Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.02)
     def update_self(self, _):
         self.ready[self.username] = 1 - self.ready[self.username]
