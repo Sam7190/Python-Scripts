@@ -6,6 +6,7 @@ python game.py
 
 import buildAI as AI
 import numpy as np
+import pandas as pd
 from PIL import Image as pilImage
 import os
 import sys
@@ -38,7 +39,7 @@ from kivy.core.window import Window
 
 # Tile Resolution and number of tiles in gameboard.
 seed = None
-auto_resize = False
+auto_resize = True
 xpix = 343
 ypix = 396
 xtiles = 17
@@ -179,7 +180,7 @@ class HitBox(Button):
         cunning = self.fpage.foestats[self.fpage.P.attributes["Cunning"]]
         stability = self.fpage.foestats[self.fpage.P.attributes["Stability"]]
         dodging = self.fpage.foestats[self.fpage.P.attributes["Agility"]]
-        group2boxes, boxes2group, volley = {}, [], 0
+        group2boxes, boxes2group, volley, click_prob, dodge_prob = {}, [], 0, [], []
         for i in range(len(self.boxes)):
             boxes2group.append(volley)
             if volley in group2boxes:
@@ -206,32 +207,44 @@ class HitBox(Button):
                 if gi == i:
                     continue
                 total += 1
-                dis2group += euc(nrmPos, self.getNormalizedPosition(self.rects[gi].pos))
+                dis2group += euc(nrmPos, self.getNormalizedPosition(self.boxes[gi].pos))
             if total > 0: dis2group /= total
             opacity = 0.96 if self.fakes[i] else (0.92 - cunning*0.013)
             data = [[foeAgility, cunning, stability, dodging, vgID, gSize, tApplied, dis2last, dis2cent, dis2group, opacity]]
-            # Allow for a 1% bias correction to the model to avoid 100% click rates.
-            click_prob = AI.cmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, 0.05*(self.fpage.order_refresh_count // 3)]))
-            print("Click Probability", click_prob)
-            clickType = None
-            if np.random.rand() <= click_prob:
-                # This means the AI "clicked" the box - now check to see if they would have "dodged" the box
-                dodge_prob = AI.dmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, 0.05*(self.fpage.order_refresh_count // 3)]))
-                print("Clicked", "Dodge Probability", dodge_prob)
-                if np.random.rand() <= dodge_prob:
-                    # AI dodges the box -- pass because nothing happens
-                    clickType = 'dodge'
-                elif blocksLeft > 0:
-                    # AI blocks the box
-                    blocksLeft -= 1
-                    clickType = 'block'
+            # Allow for a 1% bias correction to the model to avoid 100% click rates, and allow for reduce click probability as a function of volley number and order count
+            click_prob.append(AI.cmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, (0.08 * vgID/len(group2boxes))*(self.fpage.order_refresh_count // 3)])))
+            dodge_prob.append(AI.dmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, (0.1 * vgID/len(group2boxes))*(self.fpage.order_refresh_count // 3)])))
+        for vgID, boxIDs in sorted(group2boxes.items()):
+            clicked_fake = True
+            while clicked_fake and (len(boxIDs)>0):
+                click_ps = [click_prob[i] for i in boxIDs]
+                # Choose the box the NPC is most likely to click
+                click_i = np.argmax(click_ps)
+                i = boxIDs.pop(click_i)
+                click_p, dodge_p = click_prob[i], dodge_prob[i]
+                print("Click Probability", click_p, self.fakes[i])
+                clickType = None
+                if np.random.rand() <= click_p:
+                    if not self.fakes[i]: clicked_fake = False
+                    # This means the AI "clicked" the box - now check to see if they would have "dodged" the box
+                    print("Clicked", "Dodge Probability", dodge_p, self.fakes[i])
+                    if np.random.rand() <= dodge_p:
+                        # AI dodges the box -- pass because nothing happens
+                        clickType = 'dodge'
+                    elif blocksLeft > 0:
+                        # AI blocks the box
+                        blocksLeft -= 1
+                        clickType = 'block'
+                    elif not self.fakes[i]:
+                        # NPC takes damage because they have no blocks left, and the box is not a fake
+                        clickType = 'hit'
                 elif not self.fakes[i]:
-                    # NPC takes damage because they have no blocks left, and the box is not a fake
+                    # NPC takes damage because the box is not a fake
                     clickType = 'hit'
-            elif not self.fakes[i]:
-                # NPC takes damage because the box is not a fake
-                clickType = 'hit'
-            self.npcClickBox(i, clickType, 0.3 + 0.3*vgID, 0.3)
+                self.npcClickBox(i, clickType, 0.3 + 0.3*vgID, 0.3)
+            for i in boxIDs:
+                # Any remaining ids must be fake, so remove them
+                self.npcClickBox(i, None, 0.3 + 0.3*vgID, 0.3)
             #Clock.schedule_once(partial(self.removeBox, i, damageNPC), 0.3 + 0.3*vgID)
         Clock.schedule_once(self.fpage.nextAttack, 0.9 + 0.3*vgID)
     def countDown(self, instance=None):
@@ -307,7 +320,7 @@ class DefBox(Button):
     def npcAttacks(self):
         Atk = np.max(rbtwn(0, self.fpage.foestats[self.fpage.P.attributes['Attack']])) # Attack chosen technique amt of times, then max is chosen
         if Atk > self.fpage.foestats[self.fpage.P.attributes['Stability']]:
-            if rbtwn(0,2)==0:
+            if rbtwn(0,1)==0:
                 # Lack of stability effected foe's attack
                 Atk = self.fpage.foestats[self.fpage.P.attributes['Stability']]
         if self.fpage.logDef:
@@ -474,12 +487,13 @@ class DefBox(Button):
         self.fpage.remove_widget(self)
 
 class FightPage(FloatLayout):
-    def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, **kwargs):
+    def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, **kwargs):
         super().__init__(**kwargs)
         self.logDef = logDef
         self.consume = consume
         self.action_amt = action_amt
         self.reward = reward
+        self.consequence = consequence
         self.check_attributes = ['Agility', 'Cunning', 'Hit Points', 'Attack', 'Stability', f'Def-{style}']
         self.foeisNPC = foeisNPC
         self.order_refresh_count = 0
@@ -707,7 +721,7 @@ class FightPage(FloatLayout):
             data.append([{"text":str(self.pstats[i]), 'disabled':True, 'background_color':pbkg, 'color':(0,0,0,1), 'background_disabled_normal':''},
                          {"text":self.P.atrorder[i], 'disabled':True, 'background_color':bkg, 'color':(0, 0, 0, 1), 'background_disabled_normal':''},
                          {"text":str(self.foestats[i]), 'disabled':True, 'background_color':fbkg, 'color':(0,0,0,1), 'background_disabled_normal':''}])
-        return Table(header, data, header_color=(50,50,50), header_as_buttons=True)
+        return Table(header, data, header_color=(50,50,50), header_as_buttons=True, header_bkg_color=(1, 1, 1, opacity/2))
     def get_size_hint(self, x_max, y_max, imgSource):
         imgSize = pilImage.open(imgSource).size if type(imgSource) is str else imgSource # If imgSource is not string then assume that size has been fixed or already calculated
         y_hint = x_max * (imgSize[1] / imgSize[0]) # Find y ratio
@@ -731,7 +745,14 @@ class FightPage(FloatLayout):
             output("You take an extra fatigue for fighting")
         fainted_or_paralyzed = self.P.takeDamage(hp_dmg, self.runFTG if ran else 1) # Take damage equal to the amount you took
         action_amt = 0 if fainted_or_paralyzed else self.action_amt # We want to make sure that the actions are at least listed even if they are paralyzed or fainted.
-        if not fainted_or_paralyzed: exitActionLoop(consume=self.consume, amt=action_amt)() # [INCOMPLETE] This coding should be dependent on the type of tile they are on, also if fighting player then should be moved randomly
+        if not fainted_or_paralyzed:
+            exitActionLoop(consume=self.consume, amt=action_amt)() # [INCOMPLETE] if fighting player then should be moved randomly
+            if (self.foestats[self.P.attributes['Hit Points']] == 0) and (callable(self.reward)):
+                # Player must have won -- claim the reward if it was callable
+                self.reward()
+        elif (self.pstats[self.P.attributes['Hit Points']] == 0) and (self.consequence is not None): 
+            # They must have fainted and lost the battle
+            self.consequence()
     def foeTakesDamage(self):
         if (self.foestats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
             self.foestats[self.P.attributes['Hit Points']] -= 1
@@ -740,21 +761,20 @@ class FightPage(FloatLayout):
             cell.background_color = (1, 1, 0.2, 0.6)
             if self.foestats[self.P.attributes['Hit Points']] == 0:
                 # Get reward
-                for rwd, amt in self.reward.items():
-                    if rwd == 'coins':
-                        output("Rewarded {int(amt)} coin!", 'green')
-                        self.P.coins += int(amt)
-                    else:
-                        # Assumption: If not coins, then must be an item
-                        output("Rewarded {int(amt)} {rwd}!", 'green')
-                        self.P.addItem(rwd, int(amt))
+                if not callable(self.reward):
+                    for rwd, amt in self.reward.items():
+                        if rwd == 'coins':
+                            output(f"Rewarded {int(amt)} coin!", 'green')
+                            self.P.coins += int(amt)
+                        else:
+                            # Assumption: If not coins, then must be an item
+                            output(f"Rewarded {int(amt)} {rwd}!", 'green')
+                            self.P.addItem(rwd, int(amt))
                 # Training with Sparring partner does not gaurantee you a level increase like with others.
                 levelsup = (self.foecateg/2) ** 2
-                if self.foename == 'Sparring Partner': levelsup *= 0.6
-                if (levelsup > 0) and (levelsup < 1):
-                    # Take care of "probabilistic" leveling up
-                    output(f"Level up chance is: {round(levelsup*100)}%")
-                    levelsup = 1 if np.random.rand() <= levelsup else 0
+                if self.foename == 'Sparring Partner': levelsup *= 0.5
+                levelsup += self.P.combatxp # Get any remaining xp from previous fights
+                self.P.combatxp = float(levelsup) - int(levelsup) # Store any remaining xp away
                 self.levelsup = int(levelsup)
                 if self.levelsup > 0:
                     critthink = self.P.activateSkill('Critical Thinking')
@@ -773,7 +793,7 @@ class FightPage(FloatLayout):
                             self.P.updateAttribute(random_atr)
                         self.endFight()
                 else:
-                    output("You don't level up", 'yellow')
+                    output(f"You don't level up, level up remainder: {round(self.P.combatxp,2)}", 'yellow')
                     self.endFight()
     def levelup(self, atr, _=None):
         if self.levelsup > 0:
@@ -843,21 +863,24 @@ def npc_stats(lvl, fixed=None, maxAtr=None):
         if breakout: break
     return a
 
-def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=None, action_amt=1, empty_tile=False, lvlBalance=6, enc=1):
+def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=None, action_amt=1, empty_tile=False, lvlBalance=6, enc=1, consequence=None, background_img=None):
     P = lclPlayer()
     possibleLvls = rbtwn(lvlrange[0],lvlrange[1],max([1, round((lvlrange[1]-lvlrange[0])/lvlBalance)]))
     lvl = possibleLvls[np.argsort(np.abs(possibleLvls-np.sum(P.current)))[0]]
     # For rewards go through the dictionary and if value is a list then choose a random result biased toward the level chosen of opponent
-    new_reward = {}
-    for rwd, val in reward.items():
-        if type(val) is list:
-            lvlpct = (lvl - lvlrange[0])/(lvlrange[1] - lvlrange[0])
-            val = round(lvlpct * (val[1] - val[0]))
-        new_reward[rwd] = val
+    if not callable(reward):
+        new_reward = {}
+        for rwd, val in reward.items():
+            if type(val) is list:
+                lvlpct = (lvl - lvlrange[0])/(lvlrange[1] - lvlrange[0])
+                val = round(lvlpct * (val[1] - val[0]))
+            new_reward[rwd] = val
+    else:
+        new_reward = reward
     cbstyle = styles[rbtwn(0,len(styles)-1)]
     output(f'Encounter Lv{lvl} {name} using {cbstyle}','yellow')
     screen = Screen(name="Battle")
-    screen.add_widget(FightPage(name, cbstyle, lvl, npc_stats(lvl, fixed), enc, reward=new_reward, consume=consume, action_amt=action_amt, foeisNPC=True))
+    screen.add_widget(FightPage(name, cbstyle, lvl, npc_stats(lvl, fixed), enc, reward=new_reward, consume=consume, action_amt=action_amt, foeisNPC=True, consequence=consequence, background_img=background_img))
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
@@ -1041,6 +1064,8 @@ def Trading(trader, _=None):
     if P.paused:
         return
     items = P.currenttile.trader_wares if trader else P.currenttile.city_wares
+    if (P.currenttile.tile == 'benfriege') and (P.PlayerTrack.Quest.quests[(2, 1)].status == 'started'):
+        items = items.add('cooling cubes')
     def activate_bartering(_):
         if P.paused:
             return
@@ -1569,6 +1594,13 @@ def A_plains(inspect=False):
     if inspect:
         return exc, 9
     else:
+        P = lclPlayer()
+        def FindBabyMammoth(_=None):
+            output("You found a baby mammoth! Its attracted to your fruit and follows you. Don't lose your fruit!", 'green')
+            P.PlayerTrack.Quest.quests[(1, 8)].has_mammoth = True
+            exitActionLoop()()
+        if (P.PlayerTrack.Quest.quests[(1, 8)].status == 'started') and ('fruit' in P.items):
+            exc['Wild Herd'][2] = FindBabyMammoth
         actions = {'Excavate':Excavate(exc,9)}
         actionGrid(actions, True)
     
@@ -1827,12 +1859,13 @@ adept_loc, master_loc = get_inverse_city_info()
                 
 
 class Player(Image):
-    def __init__(self, board, username, birthcity, **kwargs):
+    def __init__(self, board, username, birthcity, is_human=True, **kwargs):
         super().__init__(**kwargs)
         self.source = f'images\\characters\\{birthcity}.png'
         self.parentBoard = board
         self.username = username
         self.birthcity = birthcity
+        self.is_human = is_human
         self.imgSize = pilImage.open(self.source).size
         
         # Player Victory Points
@@ -1851,7 +1884,7 @@ class Player(Image):
         self.max_minor_actions = 3
         self.max_capacity = 3
         self.max_fatigue = 10
-        self.stability_impact = 2
+        self.stability_impact = 1
         self.combatstyle = cities[self.birthcity]['Combat Style']
         
         # Current Stats
@@ -1865,6 +1898,8 @@ class Player(Image):
         self.unsellable = set()
         self.fatigue = 0
         self.dueling_hiatus = 0
+        self.free_smithing_rent = False
+        self.group = set()
         
         self.coins = cities[self.birthcity]['Coins']
         self.paralyzed_rounds = 0
@@ -1872,6 +1907,7 @@ class Player(Image):
         
         # Player Track
         #Combat
+        self.combatxp = 0
         self.attributes = {'Agility':0,'Cunning':1,'Technique':2,'Hit Points':3,'Attack':4,'Stability':5,'Def-Physical':6,'Def-Wizard':7, 'Def-Elemental':8, 'Def-Trooper':9}
         self.atrorder = ['Agility','Cunning','Technique','Hit Points','Attack','Stability','Def-Physical','Def-Wizard','Def-Elemental','Def-Trooper']
         self.combat = np.array([0, 0, 0, 2, 1, 0, 0, 0, 0, 0])
@@ -1997,6 +2033,7 @@ class Player(Image):
         for i in range(len(updated_data)):
             self.mtable.cells[self.mtable.header[i]][0].text = updated_data[i]
         self.PlayerTrack.updateAll()
+        self.PlayerTrack.Quest.update_reqs()
     def recover(self, rest_rate=None, _=None):
         if not self.paused:
             rest_rate = rest_rate if type(rest_rate) is int else self.get_recover()
@@ -2337,6 +2374,9 @@ class Player(Image):
             if item not in self.items:
                 output(f"{item} doesn't exit in the inventory!", 'yellow')
                 return
+            elif (item == 'fruit') and ((self.items[item] - amt) <= 0) and (self.PlayerTrack.Quest.quests[(1, 8)].status == 'started') and hasattr(self.PlayerTrack.Quest.quests[(1, 8)], 'has_mammoth') and self.PlayerTrack.Quest.quests[(1, 8)].has_mammoth:
+                output(f"You lost your fruit! The baby mammoth stops following you! You will need to find it again.", 'red')
+                self.PlayerTrack.Quest.quests[(1, 8)].has_mammoth = False
         self.item_count += amt
         if item in self.items:
             self.items[item] += amt
@@ -2355,7 +2395,7 @@ class HoverButton(Button, HoverBehavior):
         self.display.text = self.message
 
 class Table(GridLayout):
-    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, header_as_buttons=False, color_odd_rows=False,**kwargs):
+    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, header_as_buttons=False, color_odd_rows=False, header_bkg_color=(1,1,1,0), **kwargs):
         super().__init__(**kwargs)
         self.cols = len(header)
         self.wrap_text = wrap_text
@@ -2384,7 +2424,7 @@ class Table(GridLayout):
             clr = ['[b]','[/b]'] if header_color is None else [f'[color={get_hexcolor(header_color)}][b]','[/b][/color]']
             hkwargs = {} if text_color is None else {'color':text_color}
             if header_as_buttons:
-                L = Button(text=clr[0]+h+clr[1],markup=True,background_color=(1,1,1,0),underline=True,**hkwargs)
+                L = Button(text=clr[0]+h+clr[1],markup=True,background_color=header_bkg_color,underline=True,**hkwargs)
             else:
                 L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',**hkwargs)
                 #L.text_size = L.size
@@ -2433,9 +2473,12 @@ class Table(GridLayout):
                         L = Button(**item)
                     if func is not None:
                         L.bind(on_press=func)
-                else:
+                elif (type(item) is str) or (type(item) is int) or (type(item) is float):
                     L = Label(text=str(item)) if self.input_text_color is None else Label(text=str(item),color=self.input_text_color)
                     if self.wrap_text: L.text_size = L.size
+                else:
+                    # Assume it is a widget
+                    L = item
                 self.add_widget(L)
                 self.cells[cell].append(L)
             i += 1
@@ -2625,7 +2668,7 @@ class ArmoryTable(GridLayout):
         categ, price = getItemInfo(item)
         reqlvl = price2smithlvl[price]
         # 2 is the base rental cost -- can be reduced by quest
-        rentalcost = max([2 - int(self.P.bartering_mode>0), 0]) # Can't barter more than 1 coin (because smith is not a trader)
+        rentalcost = 0 if self.P.free_smithing_rent and (self.P.currenttile.tile == self.P.birthcity) else max([2 - int(self.P.bartering_mode>0), 0]) # Can't barter more than 1 coin (because smith is not a trader)
         fullcost = (price*reqlvl) + 4 - int(self.P.bartering_mode>0)
         if categ != 'Smithing':
             output("You cannot smelt that item.", 'yellow')
@@ -2970,6 +3013,263 @@ class CraftingTable(GridLayout):
             output(f"Sold craft {space+1} for {sellprice}.")
             self.P.coins += sellprice
             self.rmv_craft(space, True)
+            
+quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player.max_actions',
+             (1, 8): "'fruit' in self.playerTrack.player.items",
+             (2, 5): "self.quests[1, 6].status == 'complete'",
+             (2, 7): "self.quests[1, 4].status == 'complete'",
+             (3, 4): "self.playerTrack.player.Combat >= 40",
+             (3, 6): "False", # [INCOMPLETE] Figure out if beginning of skirmish for a city -- then choose that city
+             (3, 8): "self.quests[1, 7].status == 'complete'",
+             (4, 1): "self.quests[2, 5].status == 'complete'",
+             (4, 7): "(self.quests[1, 2].status == 'complete') and (self.playerTrack.player.skills['Crafting'] >= 6)",
+             (5, 5): "self.playerTrack.player.coins >= 40",
+             (5, 6): "self.quests[1, 8].status == 'complete'",
+             (5, 7): "self.quests[2, 8].status == 'complete'",
+             (5, 8): "self.playerTrack.player.skills['Crafting'] >= 12"}
+
+def getQuest(stage, mission):
+    P = lclPlayer()
+    return P.PlayerTrack.Quest.quests[(stage, mission)]
+
+def FindPet(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    excavating = P.activateSkill("Excavating")
+    r = rbtwn(1, 2, None, excavating, 'Excavating ')
+    if r <= excavating:
+        P.useSkill("Excavating")
+        output("You found the pet! You get 1 coin!", 'green')
+        P.coins += 1
+        P.PlayerTrack.Quest.update_quest_status((1, 1), 'complete')
+        
+    else:
+        output("Unable to find the pet.", 'yellow')
+    exitActionLoop()()
+    
+def CleanHome(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    B = getQuest(1, 2)
+    B.count = B.count + 1 if hasattr(B, 'count') else 1
+    output(f"You spent an action cleaning the home (Total: {B.count})")
+    if B.count >= 4:
+        P.addItem('string')
+        P.addItem('beads')
+        P.PlayerTrack.Quest.update_quest_status((1, 2), 'complete')
+    exitActionLoop()()
+    
+def GaurdHome(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    B = getQuest(1, 3)
+    def Reward():
+        actions = {'Tin': getItem('tin', 1, action_amt=0),
+                   'Iron': getItem('iron', 1, action_amt=0),
+                   'Lead': getItem('lead', 1, action_amt=0),
+                   'Copper': getItem('copper', 1, action_amt=0)}
+        P.PlayerTrack.Quest.update_quest_status((1, 3), 'complete')
+        output("The owner wants to reward you for gaurding the house! Choose one of the following:", 'blue')
+        actionGrid(actions, False)
+    def Consequence():
+        P.PlayerTrack.Quest.update_quest_status((1, 3), 'failed')
+    B.count = B.count + 1 if hasattr(B, 'count') else 1
+    output(f"You spent an action gaurding the house")
+    if B.count >= 2:
+        encounter('Robber', [6, 6], ['Physical'], Reward, consequence=Consequence, background_img='images\\resized\\background\\cottage.png')
+    else:
+        exitActionLoop()()
+        
+def OfferCraft(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    def Offer(space, _=None):
+        sellprice = P.PlayerTrack.craftingTable.sell_value(space)
+        persuasion = P.activateSkill("Persuasion")
+        r = rbtwn(1, 4, None, sellprice+persuasion, 'Persuasion ')
+        if r <= (sellprice + persuasion):
+            def lvlUp(skill, _=None):
+                P.updateSkill(skill, 1)
+                exitActionLoop()()
+            P.activateSkill("Persuasion")
+            P.PlayerTrack.craftingTable.rmv_craft(space)
+            output("The boy accepted your craft!", 'green')
+            P.PlayerTrack.Quest.update_quest_status((1, 4), 'complete')
+            if (P.skills['Crafting'] < 6) or (P.skills['Persuasion'] < 6):
+                output("Choose a skill to level up:", 'blue')
+                actions = {}
+                if P.skills['Crafting'] < 6:
+                    actions['Crafting'] = partial(lvlUp, 'Crafting')
+                if P.skills['Persuasion'] < 6:
+                    actions['Persuasion'] = partial(lvlUp, 'Persuasion')
+                actionGrid(actions, False)
+            else:
+                output("Your Crafting and Persuasion are already level 6+", 'yellow')
+                exitActionLoop()()
+        else:
+            output("Unable to convince the boy to accept your craft.", 'yellow')
+            exitActionLoop()()
+    actions = {'Cancel':exitActionLoop(amt=0)}
+    if P.PlayerTrack.craftingTable.space_items[0] > 1:
+        actions["Craft 1"] = partial(Offer, 0)
+    if P.PlayerTrack.craftingTable.space_items[1] > 1:
+        actions["Craft 2"] = partial(Offer, 1)
+    actionGrid(actions, False)
+    
+def SpareWithBoy(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    attack = P.base[P.attributes["Attack"]]
+    r = rbtwn(1, 5, None, attack, 'Sparring ')
+    if r <= attack:
+        output("The young warrior is satisfied with your playful duel! Impact stability increases by 1.", 'green')
+        P.stability_impact += 1
+        P.PlayerTrack.Quest.update_quest_status((1, 5), 'complete')
+    exitActionLoop()()
+
+def checkBook():
+    P = lclPlayer()
+    for item in P.items:
+        if 'book' in item:
+            return True
+    return False
+
+def OfferBook(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    def Offer(book, _=None):
+        P.addItem(book, -1)
+        P.PlayerTrack.Quest.update_quest_status((1, 6), 'complete')
+        exitActionLoop()()
+    actions = {"Cancel": exitActionLoop(amt=0)}
+    for item in P.items:
+        if 'book' in item:
+            actions[item] = partial(Offer, item)
+    actionGrid(actions, False)
+    
+def OfferSand(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.addItem('sand', -1)
+    P.PlayerTrack.Quest.update_quest_status((1, 7), 'complete')
+    exitActionLoop()()
+    
+def ZooKeeper(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.PlayerTrack.Quest.update_quest_status((1, 8), 'complete')
+    exitActionLoop()()
+    
+def ApplyCubes(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.addItem('cooling cubes', -1)
+    output("You applied the cubes successfully! The smith will now let you rent his facility for free!", 'green')
+    P.free_smithing_rent = True
+    P.PlayerTrack.Quest.update_quest_status((2, 1), 'complete')
+    exitActionLoop()()
+
+# Order: Action Name, Action Condition, Action Function
+city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
+                      (1, 2): ["Clean House", "True", CleanHome],
+                      (1, 3): ["Gaurd Home", "True", GaurdHome],
+                      (1, 4): ["Gift Craft", "(self.playerTrack.craftingTable.space_items[0] <= 1) and (self.playerTrack.craftingTable.space_items[1] <= 1)", OfferCraft],
+                      (1, 5): ["Spare with Boy", "True", SpareWithBoy],
+                      (1, 6): ["Gift Book", "checkBook()", OfferBook],
+                      (1, 7): ["Gift Sand", "'sand' in self.playerTrack.player.items", OfferSand],
+                      (1, 8): ["Drop Baby Mammoth at Zoo", "hasattr(self.quests[(1, 8)], 'has_mammoth') and self.quests[(1, 8)].has_mammoth", ZooKeeper],
+                      (2, 1): ["Apply Cubes", "'cooling cubes' in self.playerTrack.player.items", ApplyCubes]}
+   
+class Quest:
+    def __init__(self, playerTrack):
+        self.playerTrack = playerTrack
+        qgrid = GridLayout(cols=1)
+        self.Q = pd.read_csv('log\\QuestTable.csv')
+        self.questDisplay = Button(text='', height=Window.size[1]*0.15,size_hint_y=None,color=(0,0,0,1),markup=True,background_color=(1,1,1,0))
+        self.questDisplay.text_size = self.questDisplay.size
+        self.questDisplay.bind(size=self.update_bkgSize)
+        self.quests, data, self.stage_completion = {}, [], {i: 0 for i in range(1, 6)}
+        for mission in range(1, 9):
+            datarow = [Button(text=str(mission), disabled=True, background_disabled_normal='', color=(0,0,0,1))]
+            for stage in range(1, 6):
+                row = self.Q[(self.Q['Stage']==stage)&(self.Q['Mission']==mission)]
+                msg = 'Requirement: ' + str(row['Requirements'].iloc[0]) + ' | Failable: ' + str(row['Failable'].iloc[0]) + ' | Reward: ' + str(row['Rewards'].iloc[0]) + '\nProcedure: '+ str(row['Procedure'].iloc[0])
+                B = HoverButton(self.questDisplay, msg, text=row['Name'].iloc[0], disabled=False if (stage==1) and self.req_met((stage, mission)) else True)
+                B.mission = mission
+                B.stage = stage
+                B.status = 'not started'
+                datarow.append(B)
+                self.quests[stage, mission] = B
+                B.bind(on_press=self.activate)
+            data.append(datarow)
+        self.QuestTable = Table(['Mission','Stage 1\nCommon Folk', 'Stage 2\nNoblemen', 'Stage 3\nLocal Leaders', 'Stage 4\nCity Counsel', 'Stage 5\nMayor'], data, header_color=(50, 50, 50), header_as_buttons=True)
+        qgrid.add_widget(self.QuestTable)
+        qgrid.add_widget(self.questDisplay)
+        screen = Screen(name = 'Reputation')
+        screen.add_widget(qgrid)
+        self.playerTrack.track_screen.add_widget(screen)
+    def update_bkgSize(self, instance, value):
+        self.questDisplay.text_size = self.questDisplay.size
+    def update_reqs(self):
+        for B in self.quests.values():
+            if B.status == 'not started':
+                B.disabled = False if self.req_met((B.stage, B.mission)) else True
+                if B.disabled: B.color = (1, 1, 1, 1)
+    def req_met(self, quest):
+        init_req = eval(quest_req[quest]) if quest in quest_req else True
+        inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
+        return init_req * inCity if (quest[0] == 1) else init_req * (self.stage_completion[quest[0]-1] >= 4) * inCity
+    def update_quest_status(self, quest, new_status):
+        if (new_status == 'started') and (self.quests[quest].status == 'not started'):
+            self.quests[quest].disabled = True
+            self.quests[quest].background_color = (1.5, 1.5, 0.5, 1.5)
+            self.quests[quest].color = (0.6, 0.6, 0.6, 1)
+        elif (new_status == 'not started') and (self.quests[quest].status != 'failed'):
+            self.quests[quest].disabled = not self.req_met(quest)
+            self.quests[quest].background_color = (1, 1, 1, 1)
+            self.quests[quest].color = (1, 1, 1, 1)
+        elif (new_status == 'failed') and (self.quests[quest].status == 'started'):
+            output(f"You failed the mission '{self.quests[quest].text}'!", 'red')
+            self.quests[quest].background_color = (3, 0, 0, 1.5)
+        elif (new_status == 'complete') and (self.quests[quest].status == 'started'):
+            output(f"You completed the mission '{self.quests[quest].text}'! Reputation increases by {self.quests[quest].stage}!", 'green')
+            self.quests[quest].background_color = (0, 3, 0, 1.5)
+            self.playerTrack.player.Reputation += self.quests[quest].stage
+            self.playerTrack.reputationTab.text = f"Reputation: [color={self.playerTrack.hclr}]{self.playerTrack.player.Reputation}[/color]"
+            self.stage_completion[self.quests[quest].stage] += 1
+            for city in city_info:
+                if self.playerTrack.player.Reputation > city_info[city]['entry']:
+                    self.playerTrack.player.entry_allowed[city] = True
+            # [INCOMPLETE] Get Reward -- probably similar to how we do req_met
+        else:
+            # Each statement was failed so assume that the status should not be changed
+            return
+        self.quests[quest].status = new_status
+    def activate(self, instance):
+        if self.playerTrack.player.paused:
+            return
+        quest = (instance.stage, instance.mission)
+        if not self.req_met(quest):
+            output("You do not meet the requirements for starting this quest!", 'yellow')
+            return
+        self.update_quest_status(quest, 'started')
+        exitActionLoop('minor')()
+    def add_active_city_actions(self, actions):
+        for B in self.quests.values():
+            if B.status == 'started':
+                quest = (B.stage, B.mission)
+                if (quest in city_quest_actions) and eval(city_quest_actions[quest][1]):
+                    actions[city_quest_actions[quest][0]] = city_quest_actions[quest][2]
+        return actions
         
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
@@ -3008,6 +3308,7 @@ class PlayerTrack(GridLayout):
         screen.add_widget(capGrid)
         self.track_screen.add_widget(screen)
         # Reputation Screen
+        self.Quest = Quest(self)
         # Item Screen
         itemGrid = GridLayout(cols=1)
         self.Items = Table(header=['Item', 'Quantity', 'Sell', 'Use'], data=self.get_Items(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True)
@@ -3018,9 +3319,13 @@ class PlayerTrack(GridLayout):
         screen.add_widget(itemGrid)
         self.track_screen.add_widget(screen)
         # Add header tabs
-        def changeTab(tabName,_):
+        def changeTab(tabName, tabButton):
             self.track_screen.current = tabName
-        self.tabs = GridLayout(cols=5, height=0.05*Window.size[1], size_hint_y=None)
+            for tB in self.tabs.children:
+                tB.disabled = True if tB == tabButton else False
+                tB.color = (0, 0, 0, 1) if tB == tabButton else (1, 1, 1, 1)
+            #print(tabButton.color)
+        self.tabs = GridLayout(cols=5, height=0.07*Window.size[1], size_hint_y=None)
         self.tab_color = (0.1, 0.6, 0.5, 1)
         self.combatTab = Button(text=f"Combat: [color={self.hclr}]{player.Combat}[/color]",markup=True,background_color=self.tab_color)
         self.combatTab.bind(on_press=partial(changeTab, 'Combat'))
@@ -3028,11 +3333,14 @@ class PlayerTrack(GridLayout):
         self.knowledgeTab.bind(on_press=partial(changeTab, 'Knowledge'))
         self.capitalTab = Button(text=f'Capital: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
         self.capitalTab.bind(on_press=partial(changeTab, "Capital"))
+        self.reputationTab = Button(text=f'Reputation: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
+        self.reputationTab.bind(on_press=partial(changeTab, "Reputation"))
         self.itemsTab = Button(text='Items: 0/3',markup=True,background_color=self.tab_color)
         self.itemsTab.bind(on_press=partial(changeTab, 'Items'))
         self.tabs.add_widget(self.combatTab)
         self.tabs.add_widget(self.knowledgeTab)
         self.tabs.add_widget(self.capitalTab)
+        self.tabs.add_widget(self.reputationTab)
         self.tabs.add_widget(self.itemsTab)
         # Add widgets in order
         self.add_widget(self.tabs)
@@ -3075,7 +3383,8 @@ class PlayerTrack(GridLayout):
             if city in sk:
                 fighting = fighting.union(sk.difference({city}))
         msg = '[color=009e33]Not at war![/color]' if len(fighting) == 0 else '[color=b50400]In skirmish with[/color]: '+', '.join([city[0].upper()+city[1:] for city in fighting])
-        msg += '\nPossible items sold: '+', '.join(sorted(city_info[city]['sell']))
+        reputation = "\n" if self.player.entry_allowed[city] else f"\nEntry Reputation: [color={self.hclr}]{city_info[city]['entry']}[/color] | "
+        msg += f"{reputation}Items Sold: "+', '.join(sorted(city_info[city]['sell']))
         data['hover'] = (self.capitalDisplay, msg)
         data['background_color'] = (1,1,1,0) if len(fighting) == 0 else (1, 0, 0, 0.3)
         return data
@@ -3257,7 +3566,7 @@ gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish
              'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
              'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'crafting book':4, 'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
              'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':3},
-             'Quests':{'cooling cubes':1}}
+             'Quests':{'cooling cubes':2}}
 clothSpecials = {'benfriege cloth':{'zinzibar','glaser','enfeir','starfex'},
                  'enfeir cloth':{'benfriege','tutalu','pafiz'},
                  'glaser cloth':{'pafiz','fodker','benfriege','tutalu','scetcher'},
@@ -3386,6 +3695,9 @@ def city_actions(city, _=None):
         actions['Sparring'] = Sparring
     if (P is not None) and (P.birthcity != city) and (not P.homes[city]):
         actions['Inn (2): 1 coin'] = Inn
+    if P.currenttile.tile == P.birthcity:
+        # If player is in their birth city then allow more actions depending on active quests
+        actions = P.PlayerTrack.Quest.add_active_city_actions(actions)
     actionGrid(actions, True)
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
@@ -3696,6 +4008,30 @@ class BoardPage(FloatLayout):
         self.inspectButton.text = 'Move' if self.inspect_mode else 'Inspect'
         self.game_page.outputscreen.current = 'Inspect' if self.inspect_mode else 'Actions'
 
+class ScrollLabel(Label, HoverBehavior):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.msg_index = 0
+        self.messages = []
+        self.hovering = False
+    def add_msg(self, msg):
+        self.msg_index += 1
+        self.messages.append(msg)
+        self.display()
+    def display(self):
+        self.text = '\n'.join(self.messages[:self.msg_index])
+    def on_enter(self):
+        self.hovering = True
+    def on_leave(self):
+        self.hovering = False
+    def on_touch_down(self, touch):
+        if self.hovering and touch.is_mouse_scrolling:
+            if touch.button == 'scrolldown':
+                self.msg_index = max([0, self.msg_index - 1])
+            elif touch.button == 'scrollup':
+                self.msg_index = min([len(self.messages), self.msg_index + 1])
+            self.display()
+
 class GamePage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -3725,8 +4061,9 @@ class GamePage(GridLayout):
         self.toggleView.bind(on_press=self.switchView)
         self.outputscreen = ScreenManager()
         screen = Screen(name='Actions')
-        self.output = Label(text='Action Buttons:',pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y),color=(0.1,0.1,0.1,0.8),valign='bottom',halign='left',markup=True)
+        self.output = ScrollLabel(text='',pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y),color=(0.1,0.1,0.1,0.8),valign='bottom',halign='left',markup=True)
         self.output.text_size = self.output.size
+        self.output.add_msg('Action Buttons:')
         with self.output.canvas.before:
             Color(0.6, 0.6, 0.8, 0.7, mode='rgba')
             self.outrect=Rectangle(pos=self.output.pos, size=self.output.size)
@@ -3742,8 +4079,9 @@ class GamePage(GridLayout):
         # Button is bound after local player is detected
         self.actionButtons = [self.recover_button]
         self.statGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y)},size_hint_y=stat_y,cols=4)
-        self.display_page = Label(text='Chat Box (press enter to send message)\n',pos_hint={'x':0,'y':input_y},color=(1,1,1,0.8),size_hint=(1,label_y),markup=True)
+        self.display_page = ScrollLabel(text='',pos_hint={'x':0,'y':input_y},color=(1,1,1,0.8),size_hint=(1,label_y),markup=True)
         self.display_page.text_size = self.display_page.size
+        self.display_page.add_msg('Chat Box (press enter to send message)\n')
         with self.display_page.canvas.before:
             Color(0, 0, 0.1, 0.7, mode='rgba')
             self.rect=Rectangle(pos=self.display_page.pos,size=self.display_page.size)
@@ -3794,12 +4132,14 @@ class GamePage(GridLayout):
         else:
             hx = get_hexcolor(color)
             message = '[color='+hx+']'+message+'[/color]'
-        self.output.text += '\n' + message
+        #self.output.text += '\n' + message
+        self.output.add_msg(message)
     def update_display(self, username, message):
         if message[0]=='\n':
             message = message[1:]
         clr = get_hexcolor((131,215,190)) if username == self.board_page.localuser else get_hexcolor((211, 131, 131))
-        self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
+        #self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
+        self.display_page.add_msg(f'\n|[color={clr}]{username}[/color]| ' + message)
     def on_key_down(self, instance, keyboard, keycode, text, modifiers):
         # We want to take an action only when Enter key is being pressed, and send a message
         if keycode == 40:
