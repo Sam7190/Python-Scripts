@@ -511,6 +511,9 @@ class FightPage(FloatLayout):
             output(f"Activating Logged Def, Player Lv.{np.sum(self.pstats)}, NPC Lv.{np.sum(self.foestats)}")
         else:
             self.pstats = deepcopy(self.P.current)
+            for Name, G in self.P.group.items():
+                output(f"Level {np.sum(G)} {Name} boosts stats. Combined stat is maximum of each attribute.")
+                self.pstats = np.max([self.pstats, G], 0)
             self.foestats = stats
         
         # Foe objects
@@ -1089,6 +1092,9 @@ def Trading(trader, _=None):
     for item in items:
         categ, price = getItemInfo(item)
         cost = price if trader else mrktPrice[price]
+        # Reduce cost if have discount in the city
+        if (P.currenttile.tile == P.birthcity) and (cost >= P.city_discount_threshold):
+            cost = max([1, cost - P.city_discount])
         # Reduce cost depending on trader and bartering mode, but min cost must be 1.
         reduce = P.bartering_mode if trader else min([1, P.bartering_mode])
         cost = max([cost - reduce, 1])
@@ -1179,7 +1185,7 @@ def readbook(book, _=None):
         P.useSkill("Critical Thinking")
         output(f"You successfully read the {book}!", 'green')
         P.addItem(book, -1)
-        P.updateSkill(book2skill(book), 1)
+        P.addXP(book2skill(book), P.standard_read_xp)
     else:
         output("You failed to understand. You can try again.", 'red')
     exitActionLoop('minor')()
@@ -1285,8 +1291,11 @@ def C_road(action=1):
     coord, depth = P.currenttile.findNearest(cities)
     r = np.random.rand()
     if r <= (depth/6):
-        # [INCOMPLETE] Have trader run away
-        stealth = P.activateSkill("Stealth")
+        if (P.PlayerTrack.Quest.quests[(2, 3)].status == 'started'):
+            # Stealth is set to 0
+            stealth = 0
+        else:
+            stealth = P.activateSkill("Stealth")
         r = rbtwn(1, 12, None, stealth, 'Stealth ')
         if r <= stealth:
             P.useSkill('Stealth')
@@ -1294,6 +1303,7 @@ def C_road(action=1):
             exitActionLoop('road')()
         else:
             output("Unable to avoid robber!", 'yellow')
+            P.currenttile.remove_trader() # If trader exists on tile, the trader runs away.
             encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action)
     elif P.currenttile.trader_rounds == 0:
         r = rbtwn(1, 6)
@@ -1600,7 +1610,8 @@ def A_plains(inspect=False):
             P.PlayerTrack.Quest.quests[(1, 8)].has_mammoth = True
             exitActionLoop()()
         if (P.PlayerTrack.Quest.quests[(1, 8)].status == 'started') and ('fruit' in P.items):
-            exc['Wild Herd'][2] = FindBabyMammoth
+            exc.pop('Wild Herd')
+            exc['Baby Mammoth'] = [2, 6, FindBabyMammoth]
         actions = {'Excavate':Excavate(exc,9)}
         actionGrid(actions, True)
     
@@ -1611,6 +1622,29 @@ def A_pond(inspect=False):
     if inspect:
         return exc, 12
     else:
+        P = lclPlayer()
+        if (P.PlayerTrack.Quest.quests[2, 4].status == 'started') and (P.currenttile == P.PlayerTrack.Quest.quests[2, 4].pond):
+            # The player encounters Serpent Mother instead
+            def Reward(_=None):
+                # Companion leaves and player gets scales and raw fish
+                P.group.pop("Companion")
+                P.PlayerTrack.Quest.update_quest_status((2, 4), 'complete')
+                P.PlayerTrack.Quest.quests[2, 4].pond.color = (1,1,1,1)
+                P.addItem('scales', 3)
+                P.addItem('raw fish', 2)
+            exc.pop('Giant Serpent')
+            exc['Mother Serpent'] = [9,9,partial(encounter,'Mother Serpent',[50,50],['Elemental'],Reward)]
+        elif (P.PlayerTrack.Quest.quests[2, 4].status == 'complete'):
+            # 2/3 chance that you get 2 scales without fighting
+            if rbtwn(1, 3) <= 2:
+                def func(_=None):
+                    output("Found 2 scales instead of serpent", 'yellow')
+                    P.useSkill("Excavating")
+                    P.addItem('scales', 2)
+                    exitActionLoop()()
+            else:
+                func = partial(encounter,'Giant Serpent',[20,45],['Elemental'],{'scales':[1,3]})
+            exc['Giant Serpent'][2] = func
         actions = {'Excavate':Excavate(exc,12)}
         actionGrid(actions, True)
     
@@ -1899,7 +1933,10 @@ class Player(Image):
         self.fatigue = 0
         self.dueling_hiatus = 0
         self.free_smithing_rent = False
-        self.group = set()
+        self.city_discount = 0
+        self.city_discount_threshold = float('inf')
+        self.standard_read_xp = 4
+        self.group = {}
         
         self.coins = cities[self.birthcity]['Coins']
         self.paralyzed_rounds = 0
@@ -1986,6 +2023,13 @@ class Player(Image):
                 socket_client.send('[MOVE]',coord)
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
+            # Quest completions (if any)
+            if hasattr(self, 'PlayerTrack'):
+                if (self.PlayerTrack.Quest.quests[(2, 3)].status == 'started') and (self.PlayerTrack.Quest.quests[(2, 3)].furthest_city==self.currenttile.tile):
+                    # The player made it to the furthest city without failing, give reward
+                    self.PlayerTrack.Quest.update_quest_status((2, 3), 'complete')
+                    output("The nobleman gives you 10 coins for your service", 'green')
+                    self.coins += 10
             # Collect any money waiting at bank
             if (self.currenttile.tile in cities):
                 self.coins += self.bank[self.currenttile.tile]
@@ -2116,6 +2160,9 @@ class Player(Image):
             # Artificially paralyze the player by setting fatigue 1 greater than max
             self.fatigue = self.max_fatigue + 1
             fainted = True
+            # Check if Fainting fails any missions:
+            if (self.PlayerTrack.Quest.quests[2, 3].status == 'started'):
+                self.PlayerTrack.Quest.update_quest_status((2, 3), 'failed')
         if not fainted:
             self.fatigue = self.fatigue + ftg_amt if add else ftg_amt
         self.update_mainStatPage()
@@ -3016,7 +3063,9 @@ class CraftingTable(GridLayout):
             
 quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player.max_actions',
              (1, 8): "'fruit' in self.playerTrack.player.items",
+             (2, 3): "self.quests[2, 6].status != 'started'",
              (2, 5): "self.quests[1, 6].status == 'complete'",
+             (2, 6): "self.quests[2, 3].status != 'started'",
              (2, 7): "self.quests[1, 4].status == 'complete'",
              (3, 4): "self.playerTrack.player.Combat >= 40",
              (3, 6): "False", # [INCOMPLETE] Figure out if beginning of skirmish for a city -- then choose that city
@@ -3079,7 +3128,7 @@ def GaurdHome(_=None):
     B.count = B.count + 1 if hasattr(B, 'count') else 1
     output(f"You spent an action gaurding the house")
     if B.count >= 2:
-        encounter('Robber', [6, 6], ['Physical'], Reward, consequence=Consequence, background_img='images\\resized\\background\\cottage.png')
+        encounter('Robber', [6, 6], [P.combatstyle], Reward, consequence=Consequence, background_img='images\\resized\\background\\cottage.png')
     else:
         exitActionLoop()()
         
@@ -3177,8 +3226,47 @@ def ApplyCubes(_=None):
     P.free_smithing_rent = True
     P.PlayerTrack.Quest.update_quest_status((2, 1), 'complete')
     exitActionLoop()()
+    
+def WaitforRobber(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    def Reward(_=None):
+        output("The Robber is scared off! Market owners will now give you a discount of 1 coin for items costing 5+ coins!", 'green')
+        P.city_discount = 1
+        P.city_discount_threshold = 5        
+        P.PlayerTrack.Quest.update_quest_status((2, 2), 'complete')
+    stealth = P.activateSkill("Stealth")
+    r = rbtwn(0, 4, None, stealth, "Stealth ")
+    if r <= stealth:
+        P.useSkill("Stealth")
+        output("You find and suprise the Robber!")
+        encounter("Robber", [30, 30], [P.combatstyle], Reward, consequence=Reward, encounter=-1, background_img='images\\resized\\background\\city_night.png')
+    else:
+        output("You were not able to find the Robber", 'yellow')
+        exitActionLoop()()
+        
+def BeginProtection(_=None):
+    P = lclPlayer()
+    sorted_cities = sorted(cities)
+    i = sorted_cities.index(P.birthcity)
+    distances = np.concatenate((connectivity[:i, i], connectivity[i, i:]))
+    # If there is a tie, pick a random furthest city
+    furthest_city = np.random.choice(np.array(sorted_cities)[distances == np.max(distances)])
+    output(f"The Nobleman requests you to protect him until reaching {furthest_city}", 'blue')
+    P.PlayerTrack.Quest.quests[2, 3].furthest_city = furthest_city
+    
+def MotherSerpent(_=None):
+    P = lclPlayer()
+    coord, distance = P.currenttile.findNearest('pond')
+    output(f"The pond where the Mother Serpent lives is tinted green on the map!", 'blue')
+    P.PlayerTrack.Quest.quests[2, 4].pond = P.parentBoard.gridtiles[coord]
+    P.PlayerTrack.Quest.quests[2, 4].pond.color = (1, 1.5, 1, 1)
+    P.group["Companion"] = npc_stats(35)
 
 # Order: Action Name, Action Condition, Action Function
+quest_activate_response = {(2, 3): BeginProtection,
+                           (2, 4): MotherSerpent}
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
@@ -3187,7 +3275,8 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 6): ["Gift Book", "checkBook()", OfferBook],
                       (1, 7): ["Gift Sand", "'sand' in self.playerTrack.player.items", OfferSand],
                       (1, 8): ["Drop Baby Mammoth at Zoo", "hasattr(self.quests[(1, 8)], 'has_mammoth') and self.quests[(1, 8)].has_mammoth", ZooKeeper],
-                      (2, 1): ["Apply Cubes", "'cooling cubes' in self.playerTrack.player.items", ApplyCubes]}
+                      (2, 1): ["Apply Cubes", "'cooling cubes' in self.playerTrack.player.items", ApplyCubes],
+                      (2, 2): ["Wait for Robber", 'True', WaitforRobber]}
    
 class Quest:
     def __init__(self, playerTrack):
@@ -3262,6 +3351,8 @@ class Quest:
             output("You do not meet the requirements for starting this quest!", 'yellow')
             return
         self.update_quest_status(quest, 'started')
+        if quest in quest_activate_response:
+            quest_activate_response[quest]()
         exitActionLoop('minor')()
     def add_active_city_actions(self, actions):
         for B in self.quests.values():
@@ -3747,6 +3838,15 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.trader_rounds = rounds
         self.parentBoard.add_widget(self.trader_label)
         self.parentBoard.sendFaceMessage('Trader Appears!','green')
+    def remove_trader(self, recvd=False, _=None):
+        if not recvd:
+            socket_client.send('[TRADER]', [(self.gridx, self.gridy), 0])
+        self.trader_rounds = 0
+        self.trader_label.text = ''
+        self.parentBoard.remove_widget(self.trader_label)
+        self.trader_label = None
+        self.color = (1, 1, 1, 1)
+        self.trader_wares = set()
     def buy_from_trader(self, item, rounds=3, recvd=False):
         if not recvd:
             socket_client.send('[TRADER]',[(self.gridx, self.gridy), item])
@@ -3768,11 +3868,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         if self.trader_rounds > 0:
             self.trader_rounds -= 1
             if self.trader_rounds == 0:
-                self.trader_label.text = ''
-                self.parentBoard.remove_widget(self.trader_label)
-                self.trader_label = None
-                self.color = (1, 1, 1, 1)
-                self.trader_wares = set()
+                self.remove_trader(True)
             else:
                 self.trader_label.text = str(self.trader_rounds)
     def updateView(self, xshift=0, yshift=0):
@@ -4296,6 +4392,9 @@ class LaunchPage(GridLayout):
                 Clock.schedule_once(clockedTrader, 0.2)
             elif type(message[1]) is str:
                 Clock.schedule_once(clockedPurchase, 0.1)
+            elif message[1] == 0:
+                P = lclPlayer()
+                Clock.schedule_once(partial(P.remove_trader, True), 0.1)
         elif category == '[SKIRMISH]':
             Skirmishes[0] = message
             Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
