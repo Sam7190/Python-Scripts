@@ -1395,14 +1395,25 @@ def C_oldlibrary(skip=False):
     def hermit_approach(_=None):
         P = lclPlayer()
         persuasion = P.activateSkill('Persuasion')
-        r = rbtwn(1, 12, None, persuasion, 'Persuasion ')
-        if r <= persuasion:
-            P.useSkill('Persuasion')
-            output('Successfully persuaded the hermit to teach you!','green')
-            Train(['Cunning','Critical Thinking'],'hermit',False)
+        if (P.PlayerTrack.Quest.quests[2, 5].status == 'started') and (P.PlayerTrack.Quest.quests[2, 5].tile == P.currenttile) and (not P.PlayerTrack.Quest.quests[2, 5].has_book):
+            r = rbtwn(1, 5, None, persuasion, 'Persuasion ')
+            if r <= persuasion:
+                P.useSkill('Persuasion')
+                output('Successfully persuaded the hermit to show you the book. Go hand the book to the librarian.', 'blue')
+                P.PlayerTrack.Quest.quests[2, 5].has_book = True
+                P.PlayerTrack.Quest.quests[2, 5].tile.color = (1, 1, 1, 1)
+            else:
+                output("Could not persuade the hermit to show you the book.", 'yellow')
+            exitActionLoop()()
         else:
-            output('Unsuccessful in persuasion','red')
-            encounter('Hermit',[55,75],['Wizard','Elemental'],{'coins':[5, 9]},{'Hit Points':12})
+            r = rbtwn(1, 12, None, persuasion, 'Persuasion ')
+            if r <= persuasion:
+                P.useSkill('Persuasion')
+                output('Successfully persuaded the hermit to teach you!','green')
+                Train(['Cunning','Critical Thinking'],'hermit',False)
+            else:
+                output('Unsuccessful in persuasion','red')
+                encounter('Hermit',[55,75],['Wizard','Elemental'],{'coins':[5, 9]},{'Hit Points':12})
     if not skip:
         r = rbtwn(1, 4)
         if r == 1:
@@ -3263,10 +3274,27 @@ def MotherSerpent(_=None):
     P.PlayerTrack.Quest.quests[2, 4].pond = P.parentBoard.gridtiles[coord]
     P.PlayerTrack.Quest.quests[2, 4].pond.color = (1, 1.5, 1, 1)
     P.group["Companion"] = npc_stats(35)
+    
+def LibrariansSecret(_=None):
+    P = lclPlayer()
+    coord, distance = P.currenttile.findNearest('oldlibrary')
+    output(f"The old library where they librarian lost his book is tinted green on the map!", 'blue')
+    P.PlayerTrack.Quest.quests[2, 5].tile = P.parentBoard.gridtiles[coord]
+    P.PlayerTrack.Quest.quests[2, 5].tile.color = (1, 1.5, 1, 1)
+    P.PlayerTrack.Quest.quests[2, 5].has_book = False
+    
+def HandOverBook(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.PlayerTrack.Quest.update_quest_status((2, 5), 'complete')
+    output("You can now gain 8xp from reading books!", 'green')
+    P.standard_read_xp = 8
 
 # Order: Action Name, Action Condition, Action Function
 quest_activate_response = {(2, 3): BeginProtection,
-                           (2, 4): MotherSerpent}
+                           (2, 4): MotherSerpent,
+                           (2, 5): LibrariansSecret}
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
@@ -3276,7 +3304,8 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 7): ["Gift Sand", "'sand' in self.playerTrack.player.items", OfferSand],
                       (1, 8): ["Drop Baby Mammoth at Zoo", "hasattr(self.quests[(1, 8)], 'has_mammoth') and self.quests[(1, 8)].has_mammoth", ZooKeeper],
                       (2, 1): ["Apply Cubes", "'cooling cubes' in self.playerTrack.player.items", ApplyCubes],
-                      (2, 2): ["Wait for Robber", 'True', WaitforRobber]}
+                      (2, 2): ["Wait for Robber", 'True', WaitforRobber],
+                      (2, 5): ["Give Book", 'self.quests[2, 5].has_book', HandOverBook]}
    
 class Quest:
     def __init__(self, playerTrack):
