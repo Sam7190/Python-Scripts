@@ -3310,6 +3310,68 @@ def TheLetter(_=None):
     furthest_city = np.random.choice(np.array(sorted_cities)[distances == np.max(distances)])
     output(f"You are requested to take the letter to {furthest_city}", 'blue')
     P.PlayerTrack.Quest.quests[2, 6].furthest_city = furthest_city
+    
+def GiveOresToSmith(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    def rewards(items, choices_left=2):
+        actions = {(item[0].upper()+item[1:]):partial(choose_ore, item, items, choices_left) for item in items}
+        actionGrid(actions, False)
+    def choose_ore(item, from_items, choices_left, _=None):
+        choices_left -= 1
+        from_items.pop(item)
+        P.addItem(item, 1)
+        if choices_left > 0:
+            rewards(from_items, choices_left)
+        else:
+            exitActionLoop()()
+    for item in {'aluminum', 'nickel', 'tantalum', 'kevlium'}:
+        P.addItem(item, -1)
+    P.PlayerTrack.Quest.update_quest_status((2, 7), 'complete')
+    output("Choose 2 of the following ores:", 'blue')
+    rewards({'titanium', 'chromium', 'tungsten', 'diamond'}, 2)
+
+def PursuadeStealthMaster(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if P.currenttile.tile not in {'enfeir', 'zinzibar'}:
+        output("There is no steatlh master to persuade here!", 'yellow')
+        exitActionLoop(amt=0)()
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'has_book') and P.PlayerTrack.Quest.quests[2, 8].has_book:
+        output("You already own the book!", 'yellow')
+        exitActionLoop(amt=0)()
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]>0) and (P.currenttile==P.PlayerTrack.Quest.quests[2, 8].tile):
+        output(f"You need to wait {P.PlayerTrack.Quest.quests[2, 8].wait_rounds} more rounds for master to write the book", 'yellow')
+        exitActionLoop(amt=0)()
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]==0) and (P.currenttile==P.PlayerTrack.Quest.quests[2, 8].tile):
+        P.PlayerTrack.Quest.quests[2, 8].has_book = True
+        output("The stealth master hands you the book, now present it to the librarian at home!", 'blue')
+        exitActionLoop('minor')()
+    elif not hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds'):
+        persuasion = P.activateSkill("Persuasion")
+        r = rbtwn(1, 8, None, persuasion, 'Persuasion ')
+        if r <= persuasion:
+            output("You convinced the master stealth master to write you a special stealth book! Come back in 5 rounds to pick it up!", 'blue')
+            P.PlayerTrack.Quest.quests[2, 8].wait_rounds = 5
+            P.PlayerTrack.Quest.quests[2, 8].tile = P.currenttile
+        else:
+            output("You fail to convince the master to write you a book", 'yellow')
+        exitActionLoop()()
+    else:
+        # They could only get to this point if they go to the other city and persuade another master
+        output("You have already persuaded a stealth master to write you a book!", 'red')
+        exitActionLoop(amt=0)()
+
+def PresentStealthBook(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.PlayerTrack.Quest.update_quest_status((2, 8), 'complete')
+    for i in range(2):
+        if P.skills['Stealth'] < 8:
+            P.updateSkill('Stealth', 1)
 
 # Order: Action Name, Action Condition, Action Function
 quest_activate_response = {(2, 3): BeginProtection,
@@ -3326,7 +3388,9 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 8): ["Drop Baby Mammoth at Zoo", "hasattr(self.quests[(1, 8)], 'has_mammoth') and self.quests[(1, 8)].has_mammoth", ZooKeeper],
                       (2, 1): ["Apply Cubes", "'cooling cubes' in self.playerTrack.player.items", ApplyCubes],
                       (2, 2): ["Wait for Robber", 'True', WaitforRobber],
-                      (2, 5): ["Give Book", 'self.quests[2, 5].has_book', HandOverBook]}
+                      (2, 5): ["Give Book", 'self.quests[2, 5].has_book', HandOverBook],
+                      (2, 7): ["Give Ores", "{'aluminum', 'nickel', 'tantalum', 'kevlium'}.issubset(self.playerTrack.player.items)", GiveOresToSmith],
+                      (2, 8): ["Give Stealth Book", "hasattr(self.quests[2, 8], 'has_book') and self.quests[2, 8].has_book", PresentStealthBook]}
    
 class Quest:
     def __init__(self, playerTrack):
@@ -3840,6 +3904,9 @@ def city_actions(city, _=None):
     if P.currenttile.tile == P.birthcity:
         # If player is in their birth city then allow more actions depending on active quests
         actions = P.PlayerTrack.Quest.add_active_city_actions(actions)
+    # Add any special quest actions:
+    if (P.PlayerTrack.Quest.quests[2, 8].status=='started') and (P.currenttile.tile in {'enfeir', 'zinzibar'}):
+        actions['Approach Stealth Master'] = PursuadeStealthMaster
     actionGrid(actions, True)
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
