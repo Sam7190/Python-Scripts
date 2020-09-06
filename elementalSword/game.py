@@ -1290,6 +1290,12 @@ def C_road(action=1):
     P = lclPlayer()
     coord, depth = P.currenttile.findNearest(cities)
     r = np.random.rand()
+    consequence = None
+    if P.PlayerTrack.Quest.quests[2, 6].status == 'started':
+        depth *= 2 # Probability of finding robber is doubled
+        def reset_quest(_=None):
+            P.PlayerTrack.Quest.update_quest_status((2, 6), 'not started')
+        consequence = reset_quest
     if r <= (depth/6):
         if (P.PlayerTrack.Quest.quests[(2, 3)].status == 'started'):
             # Stealth is set to 0
@@ -1304,7 +1310,7 @@ def C_road(action=1):
         else:
             output("Unable to avoid robber!", 'yellow')
             P.currenttile.remove_trader() # If trader exists on tile, the trader runs away.
-            encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action)
+            encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action, consequence=consequence)
     elif P.currenttile.trader_rounds == 0:
         r = rbtwn(1, 6)
         if r == 1:
@@ -2041,6 +2047,10 @@ class Player(Image):
                     self.PlayerTrack.Quest.update_quest_status((2, 3), 'complete')
                     output("The nobleman gives you 10 coins for your service", 'green')
                     self.coins += 10
+                elif (self.PlayerTrack.Quest.quests[2, 6].status == 'started') and (self.PlayerTrack.Quest.quests[2, 6].furthest_city==self.currentile.tile):
+                    self.PlayerTrack.Quest.update_quest_status((2, 6), 'complete')
+                    output("You now have one additional move on the road!", 'green')
+                    self.max_road_moves += 1
             # Collect any money waiting at bank
             if (self.currenttile.tile in cities):
                 self.coins += self.bank[self.currenttile.tile]
@@ -3290,11 +3300,22 @@ def HandOverBook(_=None):
     P.PlayerTrack.Quest.update_quest_status((2, 5), 'complete')
     output("You can now gain 8xp from reading books!", 'green')
     P.standard_read_xp = 8
+    
+def TheLetter(_=None):
+    P = lclPlayer()
+    sorted_cities = sorted(cities)
+    i = sorted_cities.index(P.birthcity)
+    distances = np.concatenate((connectivity[:i, i], connectivity[i, i:]))
+    # If there is a tie, pick a random furthest city
+    furthest_city = np.random.choice(np.array(sorted_cities)[distances == np.max(distances)])
+    output(f"You are requested to take the letter to {furthest_city}", 'blue')
+    P.PlayerTrack.Quest.quests[2, 6].furthest_city = furthest_city
 
 # Order: Action Name, Action Condition, Action Function
 quest_activate_response = {(2, 3): BeginProtection,
                            (2, 4): MotherSerpent,
-                           (2, 5): LibrariansSecret}
+                           (2, 5): LibrariansSecret,
+                           (2, 6): TheLetter}
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
@@ -3351,10 +3372,11 @@ class Quest:
             self.quests[quest].disabled = True
             self.quests[quest].background_color = (1.5, 1.5, 0.5, 1.5)
             self.quests[quest].color = (0.6, 0.6, 0.6, 1)
-        elif (new_status == 'not started') and (self.quests[quest].status != 'failed'):
+        elif (new_status == 'not started') and (self.quests[quest].status == 'started'):
             self.quests[quest].disabled = not self.req_met(quest)
             self.quests[quest].background_color = (1, 1, 1, 1)
             self.quests[quest].color = (1, 1, 1, 1)
+            output(f"Mission '{self.quests[quest].text}' must be restarted!", 'red')
         elif (new_status == 'failed') and (self.quests[quest].status == 'started'):
             output(f"You failed the mission '{self.quests[quest].text}'!", 'red')
             self.quests[quest].background_color = (3, 0, 0, 1.5)
