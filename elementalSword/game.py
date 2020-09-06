@@ -992,6 +992,15 @@ def getItem(item, amt=1, consume=None, empty_tile=False, action_amt=1):
         if P.paused:
             return
         P.addItem(item, amt)
+        if (P.PlayerTrack.Quest.quests[3, 2].status == 'started') and (P.currenttile.tile == 'mountain'):
+            # Assumption is that this function is only called in a mountain if they excavated for ore
+            categ, price = getItemInfo(item)
+            if categ == 'Smithing':
+                P.PlayerTrack.Quest.quests[3, 2].total_ore_cost += sellPrice[price]
+                output(f"So far, found ores costing a total of {P.PlayerTrack.Quest.quests[3, 2].total_ore_cost}", 'blue')
+                if (P.PlayerTrack.Quest.quests[3, 2].total_ore_cost >= 5) and (P.PlayerTrack.Quest.quests[3, 2].reached_top):
+                    P.PlayerTrack.Quest.quests[3, 2].completed_mountain = True
+                    output("Now go to the plains and find at least 5 pieces of meat!", 'blue')
         exitActionLoop(consume, action_amt, empty_tile)()
     return getitem
 
@@ -1178,6 +1187,16 @@ def readbook(book, _=None):
         return
     if book not in P.items:
         output("You don't own this book to read it!", 'yellow')
+        exitActionLoop(amt=0)()
+        return
+    skill = book2skill(book)
+    if P.skills[skill] >= 12:
+        output(f"You have already maxed out {skill}.", 'yellow')
+        exitActionLoop(amt=0)()
+        return
+    elif P.skills[skill] >= 8:
+        output("You cannot level beyond lvl 8 with books. Go seek a trainer.", 'yellow')
+        exitActionLoop(amt=0)()
         return
     critthink = P.activateSkill("Critical Thinking")
     r = rbtwn(0, 8, None, critthink, 'Critical Thinking ')
@@ -1185,7 +1204,7 @@ def readbook(book, _=None):
         P.useSkill("Critical Thinking")
         output(f"You successfully read the {book}!", 'green')
         P.addItem(book, -1)
-        P.addXP(book2skill(book), P.standard_read_xp)
+        P.addXP(skill, P.standard_read_xp)
     else:
         output("You failed to understand. You can try again.", 'red')
     exitActionLoop('minor')()
@@ -1198,23 +1217,35 @@ def Train(abilities, master, confirmed, _=None):
         if master == 'monk':
             cost = 0
         elif type(abilities) is str:
-            if master == 'adept':
+            if P.get_level(abilities) >= 12:
+                output(f"You have already maxed out {abilities}", 'yellow')
+                exitActionLoop(amt=0 if master in {'adept', 'city'} else 1)()
+                return
+            elif master == 'adept':
                 cost = P.get_level(abilities)+5
             elif master == 'city':
                 cost = P.get_level(abilities)+11
             else:
                 cost = 8 if P.get_level(abilities) < 8 else 12
         else:
-            costs = []
+            costs, leftoverabilities = [], []
             for ability in abilities:
-                if master == 'adept':
-                    cost = P.get_level(abilities)+5
+                if P.get_level(ability) >= 12:
+                    continue
+                elif master == 'adept':
+                    cost = P.get_level(ability)+5
                 elif master == 'city':
-                    cost = P.get_level(abilities)+11
+                    cost = P.get_level(ability)+11
                 else:
-                    cost = 8 if P.get_level(abilities) < 8 else 12
+                    cost = 8 if P.get_level(ability) < 8 else 12
                 costs.append(f'{cost} for {ability}')
+                leftoverabilities.append(ability)
+            if len(costs) == 0:
+                output("You have already maxed out these abilities", 'yellow')
+                exitActionLoop(amt=0 if master in {'adept', 'city'} else 1)()
+                return
             cost = '('+', '.join(costs)+')'
+            abilities = leftoverabilities
         output(f"Would you like to train at cost of {cost} coins?", 'blue')
         game_app.game_page.make_actionGrid({'Yes':(lambda _:Train(abilities, master, True)), 'No':exitActionLoop(amt=0 if master in {'adept','city'} else 1)}, False)
     elif type(abilities) is not str:
@@ -1222,7 +1253,10 @@ def Train(abilities, master, confirmed, _=None):
         game_app.game_page.make_actionGrid({ability:(lambda _:Train(ability, master, confirmed)) for ability in abilities})
     else:
         lvl = P.get_level(abilities)
-        if master == 'adept':
+        if lvl >= 12:
+            output(f"You have already maxed out {abilities}", 'yellow')
+            exitActionLoop(amt=0 if master in {'adept', 'city'} else 1)()
+        elif master == 'adept':
             cost = lvl+5
             if lvl >= 8:
                 output("Adept trainers cannot teach beyond lvl 8",'yellow')
@@ -1237,14 +1271,14 @@ def Train(abilities, master, confirmed, _=None):
                 Train(abilities, master, False)
             elif rbtwn(1,3) == 1:
                 output(f"You successfully leveled up in {abilities}",'green')
-                P.updateSkill(abilities,1)
+                P.levelup(abilities,1,8)
                 exitActionLoop(None,1)()
             else:
                 critthink = P.activateSkill('Critical Thinking')
                 if rbtwn(1,12) <= critthink:
                     P.useSkill('Critical Thinking')
                     output(f"You successfully leveled up in {abilities}",'green')
-                    P.updateSkill(abilities,1)
+                    P.levelup(abilities,1,8)
                     exitActionLoop(None,1)()
                 else:
                     output("You were unsuccessful.",'red')
@@ -1267,18 +1301,18 @@ def Train(abilities, master, confirmed, _=None):
                 Train(abilities, master, False)
             elif lvl < 8:
                 output(f"You successfully leveled up in {abilities}",'green')
-                P.updateSkill(abilities,1)
+                P.levelup(abilities,1)
                 exitActionLoop(None,1)()
             elif rbtwn(1,4) == 1:
                 output(f"You successfully leveled up in {abilities}",'green')
-                P.updateSkill(abilities,1)
+                P.levelup(abilities,1)
                 exitActionLoop(None,1)()
             else:
                 critthink = P.activateSkill('Critical Thinking')
                 if rbtwn(1,16) <= critthink:
                     P.useSkill('Critical Thinking', 2, 7)
                     output(f"You successfully leveled up in {abilities}",'green')
-                    P.updateSkill(abilities,1)
+                    P.levelup(abilities,1)
                     exitActionLoop(None,1)()
                 else:
                     output("You were unsuccessful.",'red')
@@ -1290,12 +1324,7 @@ def C_road(action=1):
     P = lclPlayer()
     coord, depth = P.currenttile.findNearest(cities)
     r = np.random.rand()
-    consequence = None
-    if P.PlayerTrack.Quest.quests[2, 6].status == 'started':
-        depth *= 2 # Probability of finding robber is doubled
-        def reset_quest(_=None):
-            P.PlayerTrack.Quest.update_quest_status((2, 6), 'not started')
-        consequence = reset_quest
+    if P.PlayerTrack.Quest.quests[2, 6].status == 'started': depth *= 2 # Probability of finding robber is doubled
     if r <= (depth/6):
         if (P.PlayerTrack.Quest.quests[(2, 3)].status == 'started'):
             # Stealth is set to 0
@@ -1310,7 +1339,7 @@ def C_road(action=1):
         else:
             output("Unable to avoid robber!", 'yellow')
             P.currenttile.remove_trader() # If trader exists on tile, the trader runs away.
-            encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action, consequence=consequence)
+            encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action)
     elif P.currenttile.trader_rounds == 0:
         r = rbtwn(1, 6)
         if r == 1:
@@ -1560,6 +1589,11 @@ def Gather(item, discrete):
             gathered += 1
         output(f"Gathered {gathered} {item}",'green')
         P.addItem(item, gathered)
+        if (P.PlayerTrack.Quest.quest[3, 2].status == 'started') and (P.PlayerTrack.Quest.quest[3, 2].completed_mountain) and (P.currenttile.tile == 'plains') and (item == 'raw meat'):
+            P.PlayerTrack.Quest.quest[3, 2].meat_collected += gathered
+            output(f"So far, gathered a total of {P.PlayerTrack.Quest.quest[3, 2].meat_collected} raw meat", 'blue')
+            if P.PlayerTrack.Quest.quest[3, 2].meat_collected >= 5:
+                finishFitnessTraining()
         exitActionLoop(None, 1)()
     return gather
 
@@ -1708,6 +1742,11 @@ def A_mountain(tier=1, inspect=False):
         P = lclPlayer()
         if P.paused:
             return
+        if (P.PlayerTrack.Quest.quests[3, 2].status=='started') and ((tier+1) == 3):
+            P.PlayerTrack.Quest.quests[3, 2].reached_top = True
+            if (P.PlayerTrack.Quest.quests[3, 2].total_ore_cost >= 5):
+                P.PlayerTrack.Quest.quests[3, 2].completed_mountain = True
+                output("Now go to the plains and find at least 5 pieces of meat!", 'blue')
         C_mountain(tier+1)
     exc = {1:{'Copper':[1,5,getItem('copper')],'Iron':[6,10,getItem('iron')],'Monk':[11,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},
            2:{'Kevlium':[1,4,getItem('kevlium')],'Nickel':[5,8,getItem('nickel')],'Monk':[9,11,persuade_trainer(['Survival','Excavating'],'monk',exitActionLoop())]},
@@ -1715,6 +1754,20 @@ def A_mountain(tier=1, inspect=False):
     if inspect:
         return exc, 20
     else:
+        P = lclPlayer()
+        if (P.PlayerTrack.Quest.quests[3, 3].status == 'started') and (not hasattr(P.PlayerTrack.Quest.quests[3, 3], 'convinced_monk')):
+            def convince_monk(_=None):
+                persuasion = P.activateSkill("Persuasion")
+                r = rbtwn(1, 12, None, persuasion, 'Persuasion ')
+                if r <= persuasion:
+                    P.useSkill("Persuasion")
+                    output("You were able to convince the monk to come with you. Study with him at your city.", 'blue')
+                    P.PlayerTrack.Quest.quests[3, 3].convinced_monk = 0
+                else:
+                    output("You were unable to convince the monk to come with you." , 'yellow')
+                exitActionLoop()()
+            for i in range(1, 4):
+                exc[i]['Monk'][2] = convince_monk
         action_tiers = {1:{'Excavate':Excavate(exc[1],20),'Ascend':move_up},
                         2:{'Excavate':Excavate(exc[2],20),'Descend':move_down,'Ascend':move_up},
                         3:{'Excavate':Excavate(exc[3],20),'Descend':move_down}}
@@ -1738,7 +1791,7 @@ def A_ruins(inspect=False):
             r = rbtwn(1, 12, None, critthink, 'Critical Thinking ')
             if r <= critthink:
                 output(f"Understood teachings from old {book}.",'green')
-                P.updateSkill(skill)
+                P.updateSkill(skill, 1, 8)
             else:
                 # Get 3 xp from reading
                 output(f"Understood some from old {book}.")
@@ -2040,7 +2093,7 @@ class Player(Image):
                 socket_client.send('[MOVE]',coord)
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
-            # Quest completions (if any)
+            # Quest completions/consequences (if any)
             if hasattr(self, 'PlayerTrack'):
                 if (self.PlayerTrack.Quest.quests[(2, 3)].status == 'started') and (self.PlayerTrack.Quest.quests[(2, 3)].furthest_city==self.currenttile.tile):
                     # The player made it to the furthest city without failing, give reward
@@ -2051,6 +2104,14 @@ class Player(Image):
                     self.PlayerTrack.Quest.update_quest_status((2, 6), 'complete')
                     output("You now have one additional move on the road!", 'green')
                     self.max_road_moves += 1
+                elif (self.PlayerTrack.Quest.quests[3, 1].status == 'complete') and (self.currenttile.tile==self.birthcity):
+                    # Moving into your birth city after completing 'Feed the Poor' quest has a chance of being given some well cooked food
+                    if rbtwn(1, 4) == 1:
+                        food = ['well cooked fish', 'well cooked meat'][rbtwn(0,1)]
+                        output(f"City villagers gift you a {food}!", 'green')
+                        self.addItem(food)
+                elif (self.PlayerTrack.Quest.quests[3, 2].status == 'started') and (self.currenttile.tile in cities):
+                    resetFitnessTraining()
             # Collect any money waiting at bank
             if (self.currenttile.tile in cities):
                 self.coins += self.bank[self.currenttile.tile]
@@ -2181,9 +2242,13 @@ class Player(Image):
             # Artificially paralyze the player by setting fatigue 1 greater than max
             self.fatigue = self.max_fatigue + 1
             fainted = True
-            # Check if Fainting fails any missions:
+            # Check if Fainting fails/restarts any missions:
             if (self.PlayerTrack.Quest.quests[2, 3].status == 'started'):
                 self.PlayerTrack.Quest.update_quest_status((2, 3), 'failed')
+            if (self.PlayerTrack.Quest.quests[2, 6].status == 'started'):
+                self.PlayerTrack.Quest.update_quest_status((2, 6), 'not started')
+            if (self.PlayerTrack.Quest.quests[3, 2].status == 'started'):
+                resetFitnessTraining()
         if not fainted:
             self.fatigue = self.fatigue + ftg_amt if add else ftg_amt
         self.update_mainStatPage()
@@ -2219,9 +2284,12 @@ class Player(Image):
         if self.actions <= 0:
             self.pause()
             socket_client.send("[ROUND]",'end')
-    def updateSkill(self, skill, val=1):
-        self.skills[skill] += val
-        self.Knowledge += val
+    def updateSkill(self, skill, val=1, max_lvl=12):
+        lvl_gain = max([0, min([max_lvl - self.skills[skill], val])])
+        if lvl_gain != max_lvl:
+            output(f"Your level in {skill} was not able to level beyond {max_lvl} with this action", 'yellow')
+        self.skills[skill] += lvl_gain
+        self.Knowledge += lvl_gain
         if (skill == 'Crafting') and (hasattr(self, 'PlayerTrack')):
             self.PlayerTrack.craftingTable.update_lbls()
     def addXP(self, skill, xp, msg=''):
@@ -2229,7 +2297,8 @@ class Player(Image):
         self.xps[skill] += xp
         while (self.xps[skill] >= (3 + self.skills[skill])):
             self.xps[skill] -= (3 + self.skills[skill])
-            self.updateSkill(skill)
+            # When gaining xp, you can't level up beyond level 8
+            self.updateSkill(skill, 1, 8)
             output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
     def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
@@ -2243,21 +2312,24 @@ class Player(Image):
     def useSkill(self, skill, xp=1, max_lvl_xp=5):
         if self.skills[skill] <= max_lvl_xp:
             self.addXP(skill, xp, 'Successful: ')
-    def updateAttribute(self, attribute, val=1):
-        self.combat[self.attributes[attribute]] += val
-        self.current[self.attributes[attribute]] += val
-        self.Combat += val
+    def updateAttribute(self, attribute, val=1, max_lvl=12):
+        lvl_gain = max([0, min([max_lvl - self.combat[self.attributes[attribute]], val])])
+        if lvl_gain != max_lvl:
+            output(f"Your level in {attribute} was not able to level beyond {max_lvl} with this action", 'yellow')
+        self.combat[self.attributes[attribute]] += lvl_gain
+        self.current[self.attributes[attribute]] += lvl_gain
+        self.Combat += lvl_gain
         self.update_mainStatPage()
     def applyBoost(self, attribute, val=1, update_stats=True):
         index = self.attributes[attribute]
         self.boosts[index] += val
         self.current[index] += val
         if update_stats: self.update_mainStatPage()
-    def levelup(self, ability, val=1):
+    def levelup(self, ability, val=1, max_lvl=12):
         if ability in self.skills:
-            self.updateSkill(ability, val)
+            self.updateSkill(ability, val, max_lvl)
         else:
-            self.updateAttribute(ability, val)
+            self.updateAttribute(ability, val, max_lvl)
     def get_level(self, ability):
         if ability in self.skills:
             return self.skills[ability]
@@ -3163,7 +3235,7 @@ def OfferCraft(_=None):
         r = rbtwn(1, 4, None, sellprice+persuasion, 'Persuasion ')
         if r <= (sellprice + persuasion):
             def lvlUp(skill, _=None):
-                P.updateSkill(skill, 1)
+                P.updateSkill(skill, 1, 6)
                 exitActionLoop()()
             P.activateSkill("Persuasion")
             P.PlayerTrack.craftingTable.rmv_craft(space)
@@ -3171,11 +3243,7 @@ def OfferCraft(_=None):
             P.PlayerTrack.Quest.update_quest_status((1, 4), 'complete')
             if (P.skills['Crafting'] < 6) or (P.skills['Persuasion'] < 6):
                 output("Choose a skill to level up:", 'blue')
-                actions = {}
-                if P.skills['Crafting'] < 6:
-                    actions['Crafting'] = partial(lvlUp, 'Crafting')
-                if P.skills['Persuasion'] < 6:
-                    actions['Persuasion'] = partial(lvlUp, 'Persuasion')
+                actions = {skill: partial(lvlUp, skill) for skill in ['Crafting', 'Persuasion']}
                 actionGrid(actions, False)
             else:
                 output("Your Crafting and Persuasion are already level 6+", 'yellow')
@@ -3369,15 +3437,117 @@ def PresentStealthBook(_=None):
     if P.paused:
         return
     P.PlayerTrack.Quest.update_quest_status((2, 8), 'complete')
-    for i in range(2):
-        if P.skills['Stealth'] < 8:
-            P.updateSkill('Stealth', 1)
+    P.updateSkill('Stealth', 2, 8)
+    exitActionLoop('minor')()
+            
+def FeedThePoor(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    def GiveItem(item, _=None):
+        P.addItem(item, -1)
+        P.PlayerTrack.Quest.quests[3, 1].food_given += 1
+        output(f"You have distributed a total of {P.PlayerTrack.Quest.quests[3, 1].food_given} food!", 'blue')
+        if P.PlayerTrack.Quest.quests[3, 1].food_given >= 10:
+            P.PlayerTrack.Quest.update_quest_status((3, 1), 'complete')
+            output(f"Your max eating per action increases by 2!", 'green')
+            P.max_eating += 2
+        exitActionLoop('minor')
+    if not hasattr(P.PlayerTrack.Quest.quests[3, 1], 'food_given'):
+        P.PlayerTrack.Quest.quests[3, 1].food_given = 0
+    actions = {'Cancel': exitActionLoop(amt=0)}
+    food_pieces = 0
+    for item in P.items:
+        if item in {'fruit', 'cooked meat', 'well cooked meat', 'cooked fish', 'well cooked fish'}:
+            actions[item] = partial(GiveItem, item)
+            food_pieces += 1
+    if food_pieces == 0:
+        output("You do not have any cooked food or fruit to distribute!", 'yellow')
+        exitActionLoop(amt=0)()
+    else:
+        actionGrid(actions, False)
+
+def resetFitnessTraining(_=None):
+    P = lclPlayer()
+    output("The three adventurers leave you and you must restart the Fitness Training", 'red')
+    for i in range(3):
+        P.group.pop(f'Adventurer {i+1}')
+    P.PlayerTrack.Quest.update_quest_status((3, 2), 'not started')
+
+def finishFitnessTraining(_=None):
+    P = lclPlayer()
+    output("The three adventurers leave you")
+    for i in range(3):
+        P.group.pop(f'Adventurer {i+1}')
+    P.PlayerTrack.Quest.update_quest_status((3, 2), 'complete')
+    for skill in ['Gathering', 'Excavating', 'Survival']:
+        P.updateSkill(skill, 1, 8)
+    output("Max fatigue increases by 2", 'green')
+    P.max_fatigue += 2
+
+def FitnessTraining(_=None):
+    P = lclPlayer()
+    output("3 Adventurers group up with you. First go to any mountain and find ores worth a total of 5 coins (sell cost) and climb to the top.", 'blue')
+    for i in range(3):
+        P.group[f'Adventurer {i+1}'] = npc_stats(15)
+    P.PlayerTrack.Quest.quests[3, 2].total_ore_cost = 0
+    P.PlayerTrack.Quest.quests[3, 2].reached_top = False
+    P.PlayerTrack.Quest.quests[3, 2].completed_mountain = False
+    P.PlayerTrack.Quest.quests[3, 2].meat_collected = 0
+    
+def LearnFromMonk(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.PlayerTrack.Quest.quests[3, 3].convinced_monk += 1
+    if P.PlayerTrack.Quest.quests[3, 3].convinced_monk >= 3:
+        P.PlayerTrack.Quest.update_quest_status((3, 3), 'completed')
+        for skill in ['Excavating', 'Survival']:
+            P.updateSkill(skill, 1, 12)
+    exitActionLoop()()
+    
+def SearchForMonster(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    excavating = P.activateSkill("Excavating")
+    r = rbtwn(1, 12, None, excavating, 'Excavating ')
+    if r <= excavating:
+        def monster_flees(rewarded=True, _=None):
+            P.PlayerTrack.Quest.update_quest_status((3, 4), 'completed')
+            if rewarded:
+                P.updateAttribute("Cunning", 1, 8)
+                P.updateAttribute("Technique", 1, 8)
+        encounter('Monster', [55, 55], ['Physical', 'Elemental', 'Trooper', 'Wizard'], monster_flees, consequence=partial(monster_flees, False), background_img='images\\resized\\background\\city_night.png')
+    else:
+        output("You fail to find the monster.", 'yellow')
+        exitActionLoop()()
+        
+def TeachFishing(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if not hasattr(P.PlayerTrack.Quest.quests[3, 5], 'count'): P.PlayerTrack.Quest.quests[3, 5].count = 0
+    gathering = P.activateSkill("Gathering")
+    r = rbtwn(1, 8, None, gathering, 'Gathering ')
+    if r <= gathering:
+        P.useSkill("Gathering")
+        P.PlayerTrack.Quest.quests[3, 5].count += 1
+        output(f'Success! So far, taught {P.PlayerTrack.Quest.quests[3, 5].count} men to fish', 'blue')
+        if P.PlayerTrack.Quest.quests[3, 5].count >= 6:
+            P.PlayerTrack.Quest.update_quest_status((3, 5), 'complete')
+            P.coins += 8
+            P.updateSkill('Gathering', 1, 8)
+    else:
+        output("Unable to teach a man to fish.", 'yellow')
+    exitActionLoop()()
 
 # Order: Action Name, Action Condition, Action Function
 quest_activate_response = {(2, 3): BeginProtection,
                            (2, 4): MotherSerpent,
                            (2, 5): LibrariansSecret,
-                           (2, 6): TheLetter}
+                           (2, 6): TheLetter,
+                           (3, 2): FitnessTraining}
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
@@ -3390,7 +3560,11 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (2, 2): ["Wait for Robber", 'True', WaitforRobber],
                       (2, 5): ["Give Book", 'self.quests[2, 5].has_book', HandOverBook],
                       (2, 7): ["Give Ores", "{'aluminum', 'nickel', 'tantalum', 'kevlium'}.issubset(self.playerTrack.player.items)", GiveOresToSmith],
-                      (2, 8): ["Give Stealth Book", "hasattr(self.quests[2, 8], 'has_book') and self.quests[2, 8].has_book", PresentStealthBook]}
+                      (2, 8): ["Give Stealth Book", "hasattr(self.quests[2, 8], 'has_book') and self.quests[2, 8].has_book", PresentStealthBook],
+                      (3, 1): ["Distribute Food", "True", FeedThePoor],
+                      (3, 3): ["Study with Monk", "hasattr(self.quests[3, 3], 'convinced_monk')", LearnFromMonk],
+                      (3, 4): ["Search for Monster", "self.playerTrack.player.Combat >= 40", SearchForMonster],
+                      (3, 5): ["Teach Fishing", 'True', TeachFishing]}
    
 class Quest:
     def __init__(self, playerTrack):
@@ -4113,6 +4287,10 @@ class BoardPage(FloatLayout):
             self.localPlayer.dueling_hiatus -= 1
         self.localPlayer.unsellable = set()
         self.localPlayer.actions = self.localPlayer.max_actions
+        # Update any Quest specs
+        if (self.localPlayer.PlayerTrack.Quest.quest[2, 8].status=='started') and hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds'):
+            if P.PlayerTrack.Quest.quests[2, 8].wait_rounds > 0:
+                P.PlayerTrack.Quest.quests[2, 8].wait_rounds -= 1
         self.sendFaceMessage('Start Round!')
         for T in self.gridtiles.values():
             T.update_tile_properties()
