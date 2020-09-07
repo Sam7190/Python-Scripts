@@ -1121,6 +1121,10 @@ def Trading(trader, _=None):
         cost = max([cost - reduce, 1])
         clr = 'ffff75' if P.bartering_mode == 0 else '00ff75'
         actions[f'{item}:[color={clr}]{cost}[/color]'] = buyItem(item, cost, trader, consume='minor')
+        if trader and (P.PlayerTrack.Quest.quests[4, 4].status == 'started'):
+            if not hasattr(P.PlayerTrack.Quest.quests[4, 4], 'count'):
+                P.PlayerTrack.Quest.quests[4, 4].count = 0
+            actions["Pursuade"] = PursuadeTrader
         # Give the player the option to go back to regular action menu of the tile
         actions['Back'] = exitActionLoop(None, 0)
     # If the player has not activated bartering already, give them a chance to do so
@@ -1890,20 +1894,20 @@ ore_properties = {'lead':('Elemental',1),'tin':('Physical',1),'copper':('Trooper
                   'tungsten':('Elemental',3),'titanium':('Physical',3),'diamond':('Trooper',3),'chromium':('Wizard',3),
                   'shinopsis':('Elemental',4),'ebony':('Physical',4),'astatine':('Trooper',4),'promethium':('Wizard',4)}
 
-capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
-                'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0},
-                'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9,'efficiency':0,'discount':0},
-                'enfeir':{'home':20,'home_cap':4,'capacity':4,'market':9,'return':2,'market_cap':1,'invest':3,'efficiency':0,'discount':0},
-                'fodker':{'home':24,'home_cap':4,'capacity':4,'market':12,'return':3,'market_cap':1,'invest':None,'efficiency':0,'discount':0}, # Fodker has no villages to invest in
-                'glaser':{'home':5,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0},
-                'kubani':{'home':37,'home_cap':5,'capacity':4,'market':19,'return':4,'market_cap':2,'invest':7,'efficiency':0,'discount':0},
-                'pafiz':{'home':27,'home_cap':4,'capacity':4,'market':13,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0},
-                'scetcher':{'home':42,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
-                'starfex':{'home':28,'home_cap':4,'capacity':4,'market':14,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0},
-                'tamarania':{'home':43,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
-                'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
-                'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4,'efficiency':0,'discount':0},
-                'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0}}
+capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
+                'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
+                'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9,'efficiency':0,'discount':0,'trader allowed':False},
+                'enfeir':{'home':20,'home_cap':4,'capacity':4,'market':9,'return':2,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
+                'fodker':{'home':24,'home_cap':4,'capacity':4,'market':12,'return':3,'market_cap':1,'invest':None,'efficiency':0,'discount':0,'trader allowed':False}, # Fodker has no villages to invest in
+                'glaser':{'home':5,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
+                'kubani':{'home':37,'home_cap':5,'capacity':4,'market':19,'return':4,'market_cap':2,'invest':7,'efficiency':0,'discount':0,'trader allowed':False},
+                'pafiz':{'home':27,'home_cap':4,'capacity':4,'market':13,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0,'trader allowed':False},
+                'scetcher':{'home':42,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
+                'starfex':{'home':28,'home_cap':4,'capacity':4,'market':14,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0,'trader allowed':False},
+                'tamarania':{'home':43,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
+                'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
+                'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4,'efficiency':0,'discount':0,'trader allowed':False},
+                'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False}}
 
 city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':8, 'Excavating':12, 'Smithing':4, 'entry':12, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'}},
              'benfriege':{'Hit Points':8, 'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':8, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':12, 'Survival':8, 'Smithing':4, 'entry':4, 'sell':{'raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'}},
@@ -1936,7 +1940,15 @@ connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
                          [10,10, 8, 0, 0, 0, 0, 3, 6, 0, 0, 0, 2, 8],
                          [ 0,12, 0, 0, 0, 0, 0, 7, 0, 0, 0, 6, 0,10],
                          [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
-Skirmishes = [{}]
+def conn2set():
+    P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
+    S = {}
+    for i in range(len(P)):
+        for j in range(len(P[i])):
+            if P[i][j] > 0:
+                S[frozenset([cities[i], cities[j]])] = P[i][j]
+    return S
+Skirmishes = [{}, conn2set()]
 
 # Get the inverse of ore_properties
 def get_inverse_ore_properties():
@@ -2072,6 +2084,9 @@ class Player(Image):
             return 2
         return 1
     def go2consequence(self, amt=1):
+        if (self.currenttile.tile in cities) and capital_info[self.currenttile.tile]['trader allowed']:
+            if rbtwn(1, 8) == 1:
+                self.currentile.trader_appears()
         if self.currenttile.tile in consequences:
             if self.tiered:
                 # In the case that they are in the mountain or cave, then make sure they go to the right tier.
@@ -3717,6 +3732,58 @@ def ConvinceMarketLeader(_=None):
     else:
         output("You were unable to convince them this time.", 'yellow')
     exitActionLoop()()
+    
+def PursuadeTrader(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    persuasion = P.activateSkill("Persuasion")
+    r = rbtwn(1, 12, None, persuasion, "Persuasion ")
+    if r <= persuasion:
+        P.useSkill("Persuasion")
+        output(f"Successfully pursuaded trader to start coming to {P.birthcity}!", 'green')
+        P.PlayerTrack.Quest.quests[4, 4].count += 1
+        if P.PlayerTrack.Quest.quests[4, 4].count >= 3:
+            P.PlayerTrack.Quest.update_quest_status((4, 4), 'complete')
+            output(f"Traders now have a 1/8 chance of appearing in {P.birthcity}!", 'green')
+            capital_info[P.birthcity]['trader allowed'] = True
+            socket_client.send('[TRADER ALLOWED]', P.birthcity)
+    else:
+        output("Unable to convince the trader.", 'yellow')
+    exitActionLoop()()
+    
+def FindAndPursuadeLeader(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if not hasattr(P.PlayerTrack.Quest.quests[4, 5], 'count'):
+        P.PlayerTrack.Quest.quests[4, 5].count = 0
+    if not hasattr(P.PlayerTrack.Quest.quests[4, 5], 'skirmish'):
+        P.PlayerTrack.Quest.quests[4, 5].skirmish = {P.currenttile.tile, P.birthcity}
+    if {P.currenttile.tile, P.birthcity} != P.PlayerTrack.Quest.quests[4, 5].skirmish:
+        output(f"You already began trying to reduce tension between {' and '.join(list(P.PlayerTrack.Quest.quests[4, 5].skirmish))}. You must stick to that!", 'yellow')
+        return
+    excavating = P.activateSkill("Excavating")
+    r = rbtwn(1, 10, None, excavating, "Excavating ")
+    if r <= excavating:
+        P.useSkill("Excavating")
+        output(f"You found a leader!")
+        persuasion = P.activateSkill("Persuasion")
+        r = rbtwn(1, 12, None, persuasion, "Persuasion ")
+        if r <= persuasion:
+            P.useSkill("Persuasion")
+            P.PlayerTrack.Quest.quests[4, 5].count += 1
+            output(f"You convinced the leader to lessen the war effort! {5 - P.PlayerTrack.Quest.quests[4, 5].count} left to go!", 'blue')
+            if P.PlayerTrack.Quest.quests[4, 5].count >= 5:
+                P.PlayerTrack.Quest.update_quest_status((4, 5), 'complete')
+                skirmish = frozenset([P.birthcity, P.currenttile.tile])
+                output("You reduced the tensions between {' and '.join(list(skirmish))} by a factor of 3!", 'green')
+                Skirmishes[1][skirmish] += 3
+                socket_client.send('[REDUCED TENSION]', skirmish)
+        else:
+            output("Failed to persuade the leader.", 'yellow')
+    else:
+        output("Failed to find a leader.", 'yellow')
 
 # Order: Action Name, Action Condition, Action Function
 quest_activate_response = {(2, 3): BeginProtection,
@@ -3943,7 +4010,7 @@ class PlayerTrack(GridLayout):
         for sk in Skirmishes[0]:
             if city in sk:
                 fighting = fighting.union(sk.difference({city}))
-        msg = '[color=009e33]Not at war![/color]' if len(fighting) == 0 else '[color=b50400]In skirmish with[/color]: '+', '.join([city[0].upper()+city[1:] for city in fighting])
+        msg = '[color=009e33]Not skirmishing![/color]' if len(fighting) == 0 else '[color=b50400]In skirmish with[/color]: '+', '.join([city[0].upper()+city[1:] for city in fighting])
         reputation = "\n" if self.player.entry_allowed[city] else f"\nEntry Reputation: [color={self.hclr}]{city_info[city]['entry']}[/color] | "
         msg += f"{reputation}Items Sold: "+', '.join(sorted(city_info[city]['sell']))
         data['hover'] = (self.capitalDisplay, msg)
@@ -3992,12 +4059,17 @@ class PlayerTrack(GridLayout):
             else:
                 data['background_color'] = (2, 2, 0.2, 1)
                 data['func'] = partial(self.player.purchase, 'market', city, None)
-        data['hover'] = (self.capitalDisplay, city[0].upper()+city[1:]+' Market | '+msg)
+        tensions = []
+        for S in Skirmishes[1]:
+            if city in S:
+                other_city = list(S.difference(set([city]))).pop()
+                tensions.append(other_city[0].upper()+other_city[1:]+f' ([color=ff3718]{Skirmishes[1][S]}[/color])')
+        data['hover'] = (self.capitalDisplay, city[0].upper()+city[1:]+' Market | '+msg+', Tensions: '+', '.join(tensions))
         return data
     def villageDisplay(self, city, _=None):
         data = {}
         cost, output = capital_info[city]['invest'], round((12 - capital_info[city]['invest']) + (6 - (12 - capital_info[city]['invest']))/1.9) - capital_info[city]['efficiency']
-        msg = f'Capital: [color={self.hclr}]1ea[/color], Cost: [color=cfb53b]{cost}[/color], Output: [color=00d900]{output}[/color]'+', '.join([f'V{v[-1]}: '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else f'[color=bf004b]{self.player.villages[city][v][0]}[/color] ({self.player.villages[city][v][1]})') for v in city_villages[city]])
+        msg = f'Capital: [color={self.hclr}]1ea[/color], Cost: [color=cfb53b]{cost}[/color], Output Speed: [color=00d900]{output}[/color]'+', '.join([f'V{v[-1]}: '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else f'[color=bf004b]{self.player.villages[city][v][0]}[/color] ({self.player.villages[city][v][1]})') for v in city_villages[city]])
         if (self.player.currenttile.tile == 'village3') and ('village3' not in self.player.villages[city]) and (city in self.player.currenttile.neighbortiles):
             data['text'] = f'Invest: [color=ffff75]-{capital_info[city]["invest"]}[/color]'
             data['func'] = partial(self.player.invest)
@@ -4266,6 +4338,8 @@ def city_actions(city, _=None):
     elif (P.PlayerTrack.Quest.quests[4, 2].status=='started') and (P.currenttile.tile in cities) and (P.currenttile.tile != P.birthcity):
         if not (hasattr(P.PlayerTrack.Quest.quests[4, 2], 'cities_searched') and (P.currenttile.tile in P.PlayerTrack.Quest.quests[4, 2].cities_searched)):
             actions["Find Warrior"] = FindWarrior
+    elif (P.PlayerTrack.Quest.quests[4, 5].status=='started') and ({P.currenttile.tile, P.birthcity} in Skirmishes[1]):
+        actions["Find & Convince Leader"] = FindAndPursuadeLeader
     actionGrid(actions, True)
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
@@ -4893,6 +4967,12 @@ class LaunchPage(GridLayout):
         elif category == '[DISCOUNT]':
             output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
             capital_info[message]['discount'] += 1
+        elif category == '[TRADER ALLOWED]':
+            output(f"{username} convinced traders to start appearing in {message}! (1/8 chance)", 'green')
+            capital_info[message]['trader allowed'] = True
+        elif category == '[REDUCED TENSION]':
+            output(f"{username} reduced the tensions between {' and '.join(list(message))} by a factor of 3!", 'green')
+            Skirmishes[1][message] += 3
     def update_self(self, _):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready

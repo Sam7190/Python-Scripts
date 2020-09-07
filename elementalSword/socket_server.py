@@ -199,6 +199,8 @@ def updateServer(username, category, msg):
                     client_gameStatus[username]['round end'] = False
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
                 sendMessage('[SERVER]', username, '[MARKET]', getTodaysMarket())
+    elif category == '[REDUCED TENSION]':
+        Skirmishes[0][msg] += 3
 
 def close_socket(notified_socket):
     closed_username = clients[notified_socket]['data'].decode('utf-8')
