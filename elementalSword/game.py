@@ -558,6 +558,16 @@ class FightPage(FloatLayout):
         # Plot Foe
         style_num = str(rbtwn(1,3)) if name == 'Duelist' else ''
         fsource = f'images\\resized\\npc\\{name}\\{style}{style_num}.png'
+        if not os.path.exists(fsource):
+            # Must belong to a city or must be a username
+            if foeisNPC:
+                for city in cities:
+                    if city in self.foename.lower():
+                        # They must belong to this city
+                        break
+                fsource = f'images\\resized\\origsize\\{city}.png'
+            else:
+                fsource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.foename].birthcity}.png'
         x_hint, y_hint = self.get_size_hint(x_max, y_max, fsource)
         self.fimg = Image(source=fsource, pos_hint={'right':0.98, 'y':0.02}, size_hint=(x_hint, y_hint))
         self.add_widget(self.fimg)
@@ -930,6 +940,8 @@ def check_paralysis():
     paralyzed = False
     if (P.fatigue > P.max_fatigue) or (P.paralyzed_rounds in {1,2}):
         paralyzed = True
+        if P.PlayerTrack.Quest.quests[3, 6].status == 'started':
+            P.PlayerTrack.Quest.update_quest_status((3, 6), 'failed')
         P.paralyzed_rounds += 1
         A = np.arange(P.actions)
         for a in A:
@@ -1105,7 +1117,7 @@ def Trading(trader, _=None):
         if (P.currenttile.tile == P.birthcity) and (cost >= P.city_discount_threshold):
             cost = max([1, cost - P.city_discount])
         # Reduce cost depending on trader and bartering mode, but min cost must be 1.
-        reduce = P.bartering_mode if trader else min([1, P.bartering_mode])
+        reduce = P.bartering_mode if trader else min([1, P.bartering_mode]) + (capital_info[P.currenttile.tile]['discount'])
         cost = max([cost - reduce, 1])
         clr = 'ffff75' if P.bartering_mode == 0 else '00ff75'
         actions[f'{item}:[color={clr}]{cost}[/color]'] = buyItem(item, cost, trader, consume='minor')
@@ -1322,7 +1334,7 @@ def Train(abilities, master, confirmed, _=None):
 # Consequences
 def C_road(action=1):
     P = lclPlayer()
-    coord, depth = P.currenttile.findNearest(cities)
+    coord, depth, path = P.currenttile.findNearest(cities)
     r = np.random.rand()
     if P.PlayerTrack.Quest.quests[2, 6].status == 'started': depth *= 2 # Probability of finding robber is doubled
     if r <= (depth/6):
@@ -1878,20 +1890,20 @@ ore_properties = {'lead':('Elemental',1),'tin':('Physical',1),'copper':('Trooper
                   'tungsten':('Elemental',3),'titanium':('Physical',3),'diamond':('Trooper',3),'chromium':('Wizard',3),
                   'shinopsis':('Elemental',4),'ebony':('Physical',4),'astatine':('Trooper',4),'promethium':('Wizard',4)}
 
-capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8},
-                'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3},
-                'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9},
-                'enfeir':{'home':20,'home_cap':4,'capacity':4,'market':9,'return':2,'market_cap':1,'invest':3},
-                'fodker':{'home':24,'home_cap':4,'capacity':4,'market':12,'return':3,'market_cap':1,'invest':None}, # Fodker has no villages to invest in
-                'glaser':{'home':5,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3},
-                'kubani':{'home':37,'home_cap':5,'capacity':4,'market':19,'return':4,'market_cap':2,'invest':7},
-                'pafiz':{'home':27,'home_cap':4,'capacity':4,'market':13,'return':3,'market_cap':1,'invest':5},
-                'scetcher':{'home':42,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8},
-                'starfex':{'home':28,'home_cap':4,'capacity':4,'market':14,'return':3,'market_cap':1,'invest':5},
-                'tamarania':{'home':43,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8},
-                'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8},
-                'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4},
-                'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3}}
+capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
+                'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0},
+                'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9,'efficiency':0,'discount':0},
+                'enfeir':{'home':20,'home_cap':4,'capacity':4,'market':9,'return':2,'market_cap':1,'invest':3,'efficiency':0,'discount':0},
+                'fodker':{'home':24,'home_cap':4,'capacity':4,'market':12,'return':3,'market_cap':1,'invest':None,'efficiency':0,'discount':0}, # Fodker has no villages to invest in
+                'glaser':{'home':5,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0},
+                'kubani':{'home':37,'home_cap':5,'capacity':4,'market':19,'return':4,'market_cap':2,'invest':7,'efficiency':0,'discount':0},
+                'pafiz':{'home':27,'home_cap':4,'capacity':4,'market':13,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0},
+                'scetcher':{'home':42,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
+                'starfex':{'home':28,'home_cap':4,'capacity':4,'market':14,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0},
+                'tamarania':{'home':43,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
+                'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0},
+                'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4,'efficiency':0,'discount':0},
+                'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0}}
 
 city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':8, 'Excavating':12, 'Smithing':4, 'entry':12, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'}},
              'benfriege':{'Hit Points':8, 'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':8, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':12, 'Survival':8, 'Smithing':4, 'entry':4, 'sell':{'raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'}},
@@ -2079,6 +2091,10 @@ class Player(Image):
         else:
             actionGrid({}, True)
     def moveto(self, coord, trigger_consequence=True, skip_check=False):
+        if hasattr(self, 'PlayerTrack'):
+            if self.PlayerTrack.Quest.quests[3, 6].status == 'started':
+                output("You cannot move while fighting in Skirmish!", 'yellow')
+                return
         nxt = self.parentBoard.gridtiles[coord]
         if nxt.tile in cities:
             # Can't enter the city unless was fainted and rushed to the hospital"
@@ -2237,7 +2253,7 @@ class Player(Image):
             # Just in case they die in a tiered environment, make sure they are not stuck.
             self.tiered = False
             # Move to nearest city
-            coord, distance = self.currenttile.findNearest(cities)
+            coord, distance, path = self.currenttile.findNearest(cities)
             self.moveto(coord, trigger_consequence=False)
             # Artificially paralyze the player by setting fatigue 1 greater than max
             self.fatigue = self.max_fatigue + 1
@@ -2249,6 +2265,8 @@ class Player(Image):
                 self.PlayerTrack.Quest.update_quest_status((2, 6), 'not started')
             if (self.PlayerTrack.Quest.quests[3, 2].status == 'started'):
                 resetFitnessTraining()
+            if (self.PlayerTrack.Quest.quests[3, 6].status == 'started'):
+                self.PlayerTrack.Quest.update_quest_status((3, 6), 'failed')
         if not fainted:
             self.fatigue = self.fatigue + ftg_amt if add else ftg_amt
         self.update_mainStatPage()
@@ -2280,10 +2298,17 @@ class Player(Image):
         self.ate = 0 # Refresh how much one can eat
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
         self.already_asset_bartered = False # If an action is taken, you can try to barter for the asset again.
+        if self.PlayerTrack.Quest.quests[3, 6].status == 'started':
+            self.PlayerTrack.Quest.quests[3, 6].action += 1
+            if self.PlayerTrack.Quest.quests[3, 6].action >= 6:
+                self.PlayerTrack.Quest.update_quest_status((3, 6), 'complete')
+                self.coins += 15
         self.update_mainStatPage()
         if self.actions <= 0:
             self.pause()
             socket_client.send("[ROUND]",'end')
+        elif (self.PlayerTrack.Quest.quests[3, 6].status == 'started') and (self.PlayerTrack.Quest.quests[3, 6].action % 2):
+            JoinFight()
     def updateSkill(self, skill, val=1, max_lvl=12):
         lvl_gain = max([0, min([max_lvl - self.skills[skill], val])])
         if lvl_gain != max_lvl:
@@ -2490,7 +2515,7 @@ class Player(Image):
                         # Otherwise store the investment
                         self.storeInvestment(city, v, self.villages[city][v][0], self.villages[city][v][2])
                     rounds = 12 - capital_info[city]['invest']
-                    self.villages[city][v][1] = round(rounds + (6 - rounds)/1.9)
+                    self.villages[city][v][1] = max([1, round(rounds + (6 - rounds)/1.9) - capital_info[city]['efficiency']])
                     self.villages[city][v][2] = 1 # Have one waiting after the round count is over
     def addItem(self, item, amt, store=False):
         if amt > 0:
@@ -3161,7 +3186,7 @@ quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player
              (2, 6): "self.quests[2, 3].status != 'started'",
              (2, 7): "self.quests[1, 4].status == 'complete'",
              (3, 4): "self.playerTrack.player.Combat >= 40",
-             (3, 6): "False", # [INCOMPLETE] Figure out if beginning of skirmish for a city -- then choose that city
+             (3, 6): "StartofSkirmish()", # [INCOMPLETE] Figure out if beginning of skirmish for a city -- then choose that city
              (3, 8): "self.quests[1, 7].status == 'complete'",
              (4, 1): "self.quests[2, 5].status == 'complete'",
              (4, 7): "(self.quests[1, 2].status == 'complete') and (self.playerTrack.player.skills['Crafting'] >= 6)",
@@ -3310,10 +3335,15 @@ def ApplyCubes(_=None):
     P = lclPlayer()
     if P.paused:
         return
-    P.addItem('cooling cubes', -1)
-    output("You applied the cubes successfully! The smith will now let you rent his facility for free!", 'green')
-    P.free_smithing_rent = True
-    P.PlayerTrack.Quest.update_quest_status((2, 1), 'complete')
+    if not hasattr(P.PlayerTrack.Quest.quests[2, 1], 'count'):
+        P.PlayerTrack.Quest.quests[2, 1].count = 1
+        output("Partially applied cubes")
+    else:
+        P.PlayerTrack.Quest.quests[2, 1].count += 1
+        P.addItem('cooling cubes', -1)
+        output("You applied the cubes successfully! The smith will now let you rent his facility for free!", 'green')
+        P.free_smithing_rent = True
+        P.PlayerTrack.Quest.update_quest_status((2, 1), 'complete')
     exitActionLoop()()
     
 def WaitforRobber(_=None):
@@ -3347,7 +3377,7 @@ def BeginProtection(_=None):
     
 def MotherSerpent(_=None):
     P = lclPlayer()
-    coord, distance = P.currenttile.findNearest('pond')
+    coord, distance, path = P.currenttile.findNearest('pond')
     output(f"The pond where the Mother Serpent lives is tinted green on the map!", 'blue')
     P.PlayerTrack.Quest.quests[2, 4].pond = P.parentBoard.gridtiles[coord]
     P.PlayerTrack.Quest.quests[2, 4].pond.color = (1, 1.5, 1, 1)
@@ -3355,7 +3385,7 @@ def MotherSerpent(_=None):
     
 def LibrariansSecret(_=None):
     P = lclPlayer()
-    coord, distance = P.currenttile.findNearest('oldlibrary')
+    coord, distance, path = P.currenttile.findNearest('oldlibrary')
     output(f"The old library where they librarian lost his book is tinted green on the map!", 'blue')
     P.PlayerTrack.Quest.quests[2, 5].tile = P.parentBoard.gridtiles[coord]
     P.PlayerTrack.Quest.quests[2, 5].tile.color = (1, 1.5, 1, 1)
@@ -3542,12 +3572,159 @@ def TeachFishing(_=None):
         output("Unable to teach a man to fish.", 'yellow')
     exitActionLoop()()
 
+def StartofSkirmish(_=None):
+    P = lclPlayer()
+    firstAction = P.actions == P.max_actions
+    sufficientMinor = P.minor_actions >= 2
+    skirmStart = False
+    for sk in Skirmishes[0]:
+        if (P.birthcity in sk) and (Skirmishes[0][sk] == 2):
+            skirmStart = True
+    return firstAction * sufficientMinor * skirmStart
+
+def JoinFight(_=None):
+    P = lclPlayer()
+    city_against = P.PlayerTrack.Quest.quests[3, 6].city_against
+    foename = city_against[0].upper()+city_against[1:]+' Fighter'
+    foestyle = cities[city_against]['Combat Style']
+    encounter(foename, [30, 50], [foestyle], {'coins':[3, 6]}, enc=0)
+    
+def TransportToField(_=None):
+    P = lclPlayer()
+    skirmishesPossible = set()
+    for sk in Skirmishes[0]:
+        if (P.birthcity in sk) and (Skirmishes[0][sk] == 2):
+            skirmishesPossible = skirmishesPossible.union(sk.difference({P.birthcity}))
+    skirmishesPossible = list(skirmishesPossible)
+    city_against = np.random.choice(skirmishesPossible) if len(skirmishesPossible) > 0 else skirmishesPossible[0]
+    coord, distance, path = P.currenttile.findNearest(city_against)
+    mid_i = int(np.median(np.arange(len(path))))
+    mid_tile = path[mid_i]
+    P.moveto((mid_tile.gridx, mid_tile.gridy), False, True)
+    P.PlayerTrack.Quest.quests[3, 6].city_against = city_against
+    P.PlayerTrack.Quest.quests[3, 6].action = 1
+    JoinFight()
+    
+def PresentCraftBooks(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    P.addItem("crafting book", -3)
+    P.PlayerTrack.Quest.update_quest_status((3, 7), 'complete')
+    if P.birthcity == 'fodker':
+        P.addItem('old fodker cloth', 3)
+    else:
+        output(f"Village output efficiency increased by 1 for {P.birthcity}!", 'green')
+        capital_info[P.birthcity]['efficiency'] += 1
+        socket_client.send('[EFFICIENCY]', P.birthcity)
+    exitActionLoop()()
+    
+def DistributeSand(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if not hasattr(P.PlayerTrack.Quest.quests[3, 8], 'count'):
+        P.PlayerTrack.Quest.quests[3, 8].count = 1
+    else:
+        P.PlayerTrack.Quest.quests[3, 8].count += 1
+    output(f"Delivered {P.PlayerTrack.Quest.quests[3, 8].count} bags of sand so far", 'blue')
+    P.addItems('sand', -1)
+    if P.PlayerTrack.Quest.quests[3, 8].count >= 10:
+        P.PlayerTrack.Quest.update_quest_status((3, 8), 'complete')
+        output("New glass making school gives you 3 pieces of glass", 'green')
+        P.addItem('glass', 3)
+    exitActionLoop('minor')()
+    
+def FillLibrary(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if not hasattr(P.PlayerTrack.Quest.quests[4, 1], 'books_given'):
+        P.PlayerTrack.Quest.quests[4, 1].books_given = set()
+    def give_book(book, _=None):
+        P.PlayerTrack.Quest.quests[4, 1].books_given.add(book)
+        output("You have now given: {', '.join(list(P.PlayerTrack.Quest.quests[4, 1].books_given))}", 'blue')
+        if len(P.PlayerTrack.Quest.quests[4, 1].books_given) >= 5:
+            P.PlayerTrack.Quest.update_quest_status((4, 1), 'complete')
+            P.updateSkill("Critical Thinking", 2 if P.skills['Critical Thinking'] < 8 else 1)
+        exitActionLoop('minor')()
+    actions = {'Cancel':exitActionLoop(amt=0)}
+    for item in P.items:
+        if ('book' in item) and (item not in P.PlayerTrack.Quest.quests[4, 1].books_given):
+            actions[item] = partial(give_book, item)
+    actionGrid(actions, False)
+    
+def FindWarrior(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    city = P.currenttile.tile
+    if city not in cities:
+        output("You are not in a city!", 'yellow')
+        return
+    elif city == P.birthcity:
+        output("You need to search in cities part from yours!", 'yellow')
+        return
+    if not hasattr(P.PlayerTrack.Quest.quests[4, 2], 'cities_searched'):
+        P.PlayerTrack.Quest.quests[4, 2].cities_searched = set()
+        P.PlayerTrack.Quest.quests[4, 2].cities_found = set()
+    if city not in P.PlayerTrack.Quest.quests[4, 2].cities_searched:
+        P.PlayerTrack.Quest.quests[4, 2].cities_searched.add(city)
+        excavating = P.activateSkill("Excavating")
+        r = rbtwn(1, 12, None, excavating, 'Excavating ')
+        if r <= excavating:
+            P.useSkill("Excavating")
+            output(f"You found a {P.birthcity} warrior in {city}! He responds to your call and heads to {P.birthcity}!", 'green')
+            P.PlayerTrack.Quest.quests[4, 2].cities_found.add(city)
+            if len(P.PlayerTrack.Quest.quests[4, 2].cities_found) >= 7:
+                P.PlayerTrack.Quest.update_quest_status((4, 2), 'complete')
+                output("Your Hit Points and Stability are boosted by 2!", 'green')
+                P.boosts[P.attributes["Hit Points"]] += 2
+                P.current[P.attributes["Hit Points"]] += 2
+                P.boosts[P.attributes["Stability"]] += 2
+                P.boosts[P.attributes["Stability"]] += 2
+        elif (len(P.PlayerTrack.Quest.quests[4, 2].cities_searched) - len(P.PlayerTrack.Quest.quests[4, 2].cities_found)) >= 7:
+            output("It is no longer possible for you to find 7 warriors!", 'red')
+            P.PlayerTrack.Quest.update_quest_status((4, 2), 'failed')
+        else:
+            failsleft = 7 - (len(P.PlayerTrack.Quest.quests[4, 2].cities_searched) - len(P.PlayerTrack.Quest.quests[4, 2].cities_found))
+            output(f"You failed to find a warrior in {city}! You can only fail {failsleft} more times!", 'red')
+        exitActionLoop()()
+    else:
+        output("You have already searched this city!", 'yellow')
+        
+def ConvinceMarketLeader(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if not hasattr(P.PlayerTrack.Quest.quests[4, 3], 'count'):
+        P.PlayerTrack.Quest.quests[4, 3].count = 0
+    bartering = P.activateSkill("Bartering")
+    persuasion = P.activateSkill("Persuasion")
+    r = rbtwn(1, 24, None, bartering+persuasion, 'Convincing Market Leader ')
+    if r <= (bartering + persuasion):
+        P.useSkill("Bartering")
+        P.useSkill("Persuasion")
+        output("You convinced the market leader to lower his prices!", 'green')
+        P.PlayerTrack.Quest.quests[4, 3].count += 1
+        if P.PlayerTrack.Quest.quests[4, 3].count >= 6:
+            P.PlayerTrack.Quest.update_quest_status((4, 3), 'complete')
+            output(f"Market prices reduced by 1 (min=1) in {P.birthcity}!", 'green')
+            capital_info[P.birthcity]['discount'] += 1
+            socket_client.send('[DISCOUNT]', P.birthcity)
+        else:
+            output("You still need to convince {6 - P.PlayerTrack.Quest.quests[4, 3].count} more market leaders.", 'blue')
+    else:
+        output("You were unable to convince them this time.", 'yellow')
+    exitActionLoop()()
+
 # Order: Action Name, Action Condition, Action Function
 quest_activate_response = {(2, 3): BeginProtection,
                            (2, 4): MotherSerpent,
                            (2, 5): LibrariansSecret,
                            (2, 6): TheLetter,
-                           (3, 2): FitnessTraining}
+                           (3, 2): FitnessTraining,
+                           (3, 6): TransportToField}
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
@@ -3564,7 +3741,11 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (3, 1): ["Distribute Food", "True", FeedThePoor],
                       (3, 3): ["Study with Monk", "hasattr(self.quests[3, 3], 'convinced_monk')", LearnFromMonk],
                       (3, 4): ["Search for Monster", "self.playerTrack.player.Combat >= 40", SearchForMonster],
-                      (3, 5): ["Teach Fishing", 'True', TeachFishing]}
+                      (3, 5): ["Teach Fishing", 'True', TeachFishing],
+                      (3, 7): ["Gift Craft Books", "('crafting book' in self.playerTrack.player.items) and (self.playerTrack.player.items['crafting book'] >= 3)", PresentCraftBooks],
+                      (3, 8): ["Deliver Sand", "'sand' in self.playerTrack.player.items", DistributeSand],
+                      (4, 1): ["Fill Library", "True", FillLibrary],
+                      (4, 3): ["Convince a Market Leader", "True", ConvinceMarketLeader]}
    
 class Quest:
     def __init__(self, playerTrack):
@@ -3815,7 +3996,8 @@ class PlayerTrack(GridLayout):
         return data
     def villageDisplay(self, city, _=None):
         data = {}
-        msg = f'Capital: [color={self.hclr}]1ea[/color], '+', '.join([v[0].upper()+v[1:]+': '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else f'[color=bf004b]{self.player.villages[city][v][0]}[/color] ({self.player.villages[city][v][1]})') for v in city_villages[city]])
+        cost, output = capital_info[city]['invest'], round((12 - capital_info[city]['invest']) + (6 - (12 - capital_info[city]['invest']))/1.9) - capital_info[city]['efficiency']
+        msg = f'Capital: [color={self.hclr}]1ea[/color], Cost: [color=cfb53b]{cost}[/color], Output: [color=00d900]{output}[/color]'+', '.join([f'V{v[-1]}: '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else f'[color=bf004b]{self.player.villages[city][v][0]}[/color] ({self.player.villages[city][v][1]})') for v in city_villages[city]])
         if (self.player.currenttile.tile == 'village3') and ('village3' not in self.player.villages[city]) and (city in self.player.currenttile.neighbortiles):
             data['text'] = f'Invest: [color=ffff75]-{capital_info[city]["invest"]}[/color]'
             data['func'] = partial(self.player.invest)
@@ -4081,6 +4263,9 @@ def city_actions(city, _=None):
     # Add any special quest actions:
     if (P.PlayerTrack.Quest.quests[2, 8].status=='started') and (P.currenttile.tile in {'enfeir', 'zinzibar'}):
         actions['Approach Stealth Master'] = PursuadeStealthMaster
+    elif (P.PlayerTrack.Quest.quests[4, 2].status=='started') and (P.currenttile.tile in cities) and (P.currenttile.tile != P.birthcity):
+        if not (hasattr(P.PlayerTrack.Quest.quests[4, 2], 'cities_searched') and (P.currenttile.tile in P.PlayerTrack.Quest.quests[4, 2].cities_searched)):
+            actions["Find Warrior"] = FindWarrior
     actionGrid(actions, True)
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
@@ -4189,13 +4374,16 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             city_villages[self.tile] = sorted(self.neighbortiles.intersection({'village1','village2','village3','village4','village5'}))
     def is_neighbor(self):
         return self.parentBoard.localPlayer.currentcoord in self.neighbors
-    def findNearest(self, tiles, T=None, depth=0, checked=set(), queue={}):
+    def findNearest(self, tiles, T=None, depth=0, checked={}, queue={}):
         if T is None: T = self
         if T.tile in tiles:
-            nextDepth = None
-            return (T.gridx, T.gridy), depth
+            path = [(T.gridx, T.gridy)]
+            while path[-1] in checked: 
+                path.append((checked[path[-1]].gridx, checked[path[-1]].gridy))
+            return (T.gridx, T.gridy), depth, path
         nextinLine = deepcopy(T.neighbors.difference(checked))
-        checked = checked.union(nextinLine)
+        for nxt in nextinLine:
+            checked[nxt] = T # Store parent tile of each next tile for path search
         if (depth+1) in queue:
             queue[depth+1] = queue[depth+1].union(nextinLine)
         else:
@@ -4299,7 +4487,10 @@ class BoardPage(FloatLayout):
         paralyzed = check_paralysis()
         if not paralyzed: 
             self.localPlayer.started_round = True
-            self.localPlayer.go2consequence(0)
+            if (self.localPlayer.PlayerTrack.Quest.quests[3, 6].status=='started') and (self.localPlayer.PlayerTrack.Quest.quests[3, 6].action % 2):
+                JoinFight()
+            else:
+                self.localPlayer.go2consequence(0)
     def update_market(self, city_markets, _=None):
         for city, T in self.citytiles.items():
             T.city_wares = city_markets[city]
@@ -4696,6 +4887,12 @@ class LaunchPage(GridLayout):
             Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
         elif category == '[MARKET]':
             Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.02)
+        elif category == '[EFFICIENCY]':
+            output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
+            capital_info[message]['efficiency'] += 1
+        elif category == '[DISCOUNT]':
+            output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
+            capital_info[message]['discount'] += 1
     def update_self(self, _):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready
