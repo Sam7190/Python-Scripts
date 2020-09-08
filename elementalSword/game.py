@@ -1987,7 +1987,7 @@ connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
                          [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
 def conn2set():
     P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
-    cityOrder = sorted(cities)
+    cityOrder = sorted(capital_info)
     S, T = {}, {}
     for i in range(len(P)):
         t = set()
@@ -2377,7 +2377,7 @@ class Player(Image):
             JoinFight()
     def updateSkill(self, skill, val=1, max_lvl=12):
         lvl_gain = max([0, min([max_lvl - self.skills[skill], val])])
-        if lvl_gain != max_lvl:
+        if lvl_gain != val:
             output(f"Your level in {skill} was not able to level beyond {max_lvl} with this action", 'yellow')
         self.skills[skill] += lvl_gain
         self.Knowledge += lvl_gain
@@ -2405,7 +2405,7 @@ class Player(Image):
             self.addXP(skill, xp, 'Successful: ')
     def updateAttribute(self, attribute, val=1, max_lvl=12):
         lvl_gain = max([0, min([max_lvl - self.combat[self.attributes[attribute]], val])])
-        if lvl_gain != max_lvl:
+        if lvl_gain != val:
             output(f"Your level in {attribute} was not able to level beyond {max_lvl} with this action", 'yellow')
         self.combat[self.attributes[attribute]] += lvl_gain
         self.current[self.attributes[attribute]] += lvl_gain
@@ -4409,8 +4409,9 @@ class PlayerTrack(GridLayout):
         return data
     def villageDisplay(self, city, _=None):
         data = {}
-        cost, output = capital_info[city]['invest'], round((12 - capital_info[city]['invest']) + (6 - (12 - capital_info[city]['invest']))/1.9) - capital_info[city]['efficiency']
-        msg = f'Capital: [color={self.hclr}]1ea[/color], Cost: [color=cfb53b]{cost}[/color], Output Speed: [color=00d900]{output}[/color]'+', '.join([f'V{v[-1]}: '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else f'[color=bf004b]{self.player.villages[city][v][0]}[/color] ({self.player.villages[city][v][1]})') for v in city_villages[city]])
+        cost = capital_info[city]['invest']
+        output = None if cost is None else round((12-cost) + (6 - (12-cost))/1.9) - capital_info[city]['efficiency']
+        msg = f'Capital: [color={self.hclr}]1ea[/color], Cost: [color=cfb53b]{cost}[/color], Output Speed: [color=00d900]{output}[/color], '+', '.join([f'V{v[-1]}: '+('[color=b50400]Not Invested[/color]' if v not in self.player.villages[city] else f'[color=bf004b]{self.player.villages[city][v][0]}[/color] ({self.player.villages[city][v][1]})') for v in city_villages[city]])
         if (self.player.currenttile.tile == 'village3') and ('village3' not in self.player.villages[city]) and (city in self.player.currenttile.neighbortiles):
             data['text'] = f'Invest: [color=ffff75]-{capital_info[city]["invest"]}[/color]'
             data['func'] = partial(self.player.invest)
@@ -5195,10 +5196,10 @@ class BirthCityButton(ButtonBehavior, HoverBehavior, Image):
         kstr = ', '.join([(str(ks[i][1])+' ' if ks[i][1]>1 else '')+ks[i][0] for i in range(len(ks))]) if len(ks)>0 else '-'
         cstr = ', '.join([(str(cb[i][1])+' ' if cb[i][1]>1 else '')+cb[i][0] for i in range(len(cb))]) if len(cb)>0 else '-'
         display = '[b][color=ffa500]'+self.city[0].upper()+self.city[1:]+'[/color][/b]:\nCombat Style: [color=ffa500]'+benefits['Combat Style']+'[/color]\nCoins: [color=ffa500]'+str(benefits['Coins'])
-        display += '[/color]\nKnowledges: [color=ffa500]'+kstr+'[/color]\nCombat Boosts: [color=ffa500]'+cstr
-        tensions = ', '.join([f'{city} ([color=ff3718]{Skirmishes[1][frozenset([city, self.city])]}[/color])' for city in Skirmishes[2][self.city]])
-        display += '\nTensions With: '+tensions
-        self.parentPage.displaylbl.text = '[color=000000]'+display+'[/color][/color]'
+        display += '[/color]\nKnowledges: [color=ffa500]'+kstr+'[/color]\nCombat Boosts: [color=ffa500]'+cstr+'[/color]'
+        tensions = ', '.join([f'{city[0].upper()+city[1:]} ([color=ff3718]{Skirmishes[1][frozenset([city, self.city])]}[/color])' for city in Skirmishes[2][self.city]])
+        display += '\nTensions: '+tensions
+        self.parentPage.displaylbl.text = '[color=000000]'+display+'[/color]'
         self.parentPage.character_image.source = f'images\\characters\\{self.city}.png'
     def on_leave(self, *args):
         self.source = f'images\\tile\\{self.city}.png'
@@ -5378,8 +5379,8 @@ class ConnectPage(GridLayout):
         super().__init__(**kwargs)
 
         self.cols = 2  # used for our grid
-        if os.path.isfile("prev_details.txt"):
-            with open("prev_details.txt","r") as f:
+        if os.path.isfile("save\\prev_details.txt"):
+            with open("save\\prev_details.txt","r") as f:
                 d = f.read().split(",")
                 prev_ip = d[0]
                 prev_port = d[1]
