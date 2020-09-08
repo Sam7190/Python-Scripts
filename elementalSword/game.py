@@ -11,6 +11,8 @@ from PIL import Image as pilImage
 import os
 import sys
 import csv
+import pickle
+import joblib
 from collections import Counter
 from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
 from copy import deepcopy
@@ -38,7 +40,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 
 # Tile Resolution and number of tiles in gameboard.
-seed = None
+seed = 232
 auto_resize = True
 xpix = 343
 ypix = 396
@@ -988,6 +990,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                         P.update_mainStatPage()
                 elif amt>0:
                     P.takeAction(amt)
+                
                 if empty_tile: P.currenttile.empty_tile()
                 if (consume is None) or ('tiered' not in consume):
                     P.go2action()
@@ -1088,7 +1091,7 @@ def Trading(trader, _=None):
     if P.paused:
         return
     items = P.currenttile.trader_wares if trader else P.currenttile.city_wares
-    if (P.currenttile.tile == 'benfriege') and (P.PlayerTrack.Quest.quests[(2, 1)].status == 'started'):
+    if (P.currenttile.tile == 'benfriege') and (P.PlayerTrack.Quest.quests[2, 1].status == 'started'):
         items = items.add('cooling cubes')
     def activate_bartering(_):
         if P.paused:
@@ -1351,7 +1354,7 @@ def C_road(action=1):
     r = np.random.rand()
     if P.PlayerTrack.Quest.quests[2, 6].status == 'started': depth *= 2 # Probability of finding robber is doubled
     if r <= (depth/6):
-        if (P.PlayerTrack.Quest.quests[(2, 3)].status == 'started'):
+        if (P.PlayerTrack.Quest.quests[2, 3].status == 'started'):
             # Stealth is set to 0
             stealth = 0
         else:
@@ -1363,7 +1366,7 @@ def C_road(action=1):
             exitActionLoop('road')()
         else:
             output("Unable to avoid robber!", 'yellow')
-            P.currenttile.remove_trader() # If trader exists on tile, the trader runs away.
+            if P.currenttile.trader_rounds > 0: P.currenttile.remove_trader() # If trader exists on tile, the trader runs away.
             encounter('Highway Robber',[3,30],['Physical','Trooper'],{'coins':[0,3]}, consume=None, action_amt=action)
     elif P.currenttile.trader_rounds == 0:
         r = rbtwn(1, 6)
@@ -1635,10 +1638,10 @@ def Gather(item, discrete):
             gathered += 1
         output(f"Gathered {gathered} {item}",'green')
         P.addItem(item, gathered)
-        if (P.PlayerTrack.Quest.quest[3, 2].status == 'started') and (P.PlayerTrack.Quest.quest[3, 2].completed_mountain) and (P.currenttile.tile == 'plains') and (item == 'raw meat'):
-            P.PlayerTrack.Quest.quest[3, 2].meat_collected += gathered
-            output(f"So far, gathered a total of {P.PlayerTrack.Quest.quest[3, 2].meat_collected} raw meat", 'blue')
-            if P.PlayerTrack.Quest.quest[3, 2].meat_collected >= 5:
+        if (P.PlayerTrack.Quest.quests[3, 2].status == 'started') and (P.PlayerTrack.Quest.quests[3, 2].completed_mountain) and (P.currenttile.tile == 'plains') and (item == 'raw meat'):
+            P.PlayerTrack.Quest.quests[3, 2].meat_collected += gathered
+            output(f"So far, gathered a total of {P.PlayerTrack.Quest.quests[3, 2].meat_collected} raw meat", 'blue')
+            if P.PlayerTrack.Quest.quests[3, 2].meat_collected >= 5:
                 finishFitnessTraining()
         exitActionLoop(None, 1)()
     return gather
@@ -1711,10 +1714,10 @@ def A_plains(inspect=False):
         P = lclPlayer()
         def FindBabyMammoth(_=None):
             output("You found a baby mammoth! Its attracted to your fruit and follows you. Don't lose your fruit!", 'green')
-            P.PlayerTrack.Quest.quests[(1, 8)].has_mammoth = True
+            P.PlayerTrack.Quest.quests[1, 8].has_mammoth = True
             P.PlayerTrack.Quest.quests[1, 8].tile_found = P.currenttile
             exitActionLoop()()
-        if (P.PlayerTrack.Quest.quests[(1, 8)].status == 'started') and ('fruit' in P.items):
+        if (P.PlayerTrack.Quest.quests[1, 8].status == 'started') and ('fruit' in P.items):
             exc.pop('Wild Herd')
             exc['Baby Mammoth'] = [2, 6, FindBabyMammoth]
         actions = {'Excavate':Excavate(exc,9)}
@@ -2086,6 +2089,8 @@ class Player(Image):
         self.coins = cities[self.birthcity]['Coins']
         self.paralyzed_rounds = 0
         self.tiered = False
+        self.cspace = [[None]*7, [None]*7]
+        self.aspace = [[None, None], [None]*4, [None]*4]
         
         # Player Track
         #Combat
@@ -2117,7 +2122,10 @@ class Player(Image):
         self.market_allowed = {city: False for city in cities}
         self.market_allowed[self.birthcity] = True
         # Reputation
-        self.reputation = np.empty((8, 5),dtype=object)
+        self.reputation = np.empty((6, 8), dtype=object)
+        for stage in range(6):
+            for mission in range(8):
+                self.reputation[stage, mission] = {}
         self.entry_allowed = {city: False for city in cities}
         self.entry_allowed[self.birthcity] = True
         # Position Player
@@ -2125,6 +2133,22 @@ class Player(Image):
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
         self.moveto(self.currentcoord, False, True)
         self.size_hint = (self.imgSize[0]/xsize, self.imgSize[1]/ysize)
+    def savePlayer(self):
+        self.PlayerTrack.Quest.saveTable()
+        self.PlayerTrack.craftingTable.saveTable()
+        self.PlayerTrack.armoryTable.saveTable()
+        exclusions = {'_coreimage','_loops','_context','_disabled_value','disabled_count','canvas','_proxy_ref','_loop','parentBoard','currenttile', 'mtable', 'PlayerTrack'}
+        myVars = {field: self.__dict__[field] for field in set(self.__dict__).difference(exclusions)}
+        with open('saves\\Player.pickle', 'wb') as f:
+            pickle.dump(myVars, f)
+    def loadPlayer(self):
+        with open('saves\\Player.pickle', 'rb') as f:
+            myVars = pickle.load(f)
+        for field, value in myVars.items():
+            setattr(self, field, value)
+        self.PlayerTrack.Quest.loadTable()
+        self.PlayerTrack.craftingTable.loadTable()
+        self.PlayerTrack.armoryTable.loadTable()
     def updateView(self):
         self.size_hint = (self.imgSize[0]*(self.parentBoard.zoom+1)/xsize, self.imgSize[1]*(self.parentBoard.zoom+1)/ysize)
         self.pos_hint = {'center_x':self.currenttile.centx, 'center_y':self.currenttile.centy}
@@ -2177,7 +2201,7 @@ class Player(Image):
             self.currenttile = self.parentBoard.gridtiles[coord]
             # Quest completions/consequences (if any)
             if hasattr(self, 'PlayerTrack'):
-                if (self.PlayerTrack.Quest.quests[(2, 3)].status == 'started') and (self.PlayerTrack.Quest.quests[(2, 3)].furthest_city==self.currenttile.tile):
+                if (self.PlayerTrack.Quest.quests[2, 3].status == 'started') and (self.PlayerTrack.Quest.quests[2, 3].furthest_city==self.currenttile.tile):
                     # The player made it to the furthest city without failing, give reward
                     self.PlayerTrack.Quest.update_quest_status((2, 3), 'complete')
                     output("The nobleman gives you 10 coins for your service", 'green')
@@ -2605,9 +2629,9 @@ class Player(Image):
             if item not in self.items:
                 output(f"{item} doesn't exit in the inventory!", 'yellow')
                 return
-            elif (item == 'fruit') and ((self.items[item] - amt) <= 0) and (self.PlayerTrack.Quest.quests[(1, 8)].status == 'started') and hasattr(self.PlayerTrack.Quest.quests[(1, 8)], 'has_mammoth') and self.PlayerTrack.Quest.quests[(1, 8)].has_mammoth:
+            elif (item == 'fruit') and ((self.items[item] - amt) <= 0) and (self.PlayerTrack.Quest.quests[1, 8].status == 'started') and hasattr(self.PlayerTrack.Quest.quests[1, 8], 'has_mammoth') and self.PlayerTrack.Quest.quests[1, 8].has_mammoth:
                 output(f"You lost your fruit! The baby mammoth stops following you! You will need to find it again.", 'red')
-                self.PlayerTrack.Quest.quests[(1, 8)].has_mammoth = False
+                self.PlayerTrack.Quest.quests[1, 8].has_mammoth = False
         self.item_count += amt
         if item in self.items:
             self.items[item] += amt
@@ -2889,6 +2913,26 @@ class ArmoryTable(GridLayout):
             self.P.item_count -= 1
             self.assign_sell_value(space)
             self.P.update_mainStatPage()
+    def saveTable(self):
+        for space in range(3):
+            for slot in range(1, 3 if space==0 else 5):
+                self.P.aspace[space][slot-1] = self.aspace[space][slot].text if self.aspace[space][slot].text in gameItems['Smithing'] else None
+    def loadTable(self):
+        for space in range(3):
+            for slot in range(1, 3 if space==0 else 5):
+                if self.P.aspace[space][slot-1] is not None:
+                    self.confirmed_add_slot(self.P.aspace[space][slot-1], space, slot, False)
+            self.assign_sell_value(space)
+    def confirmed_add_slot(self, item, space, slot, from_items):
+        if (not from_items) and (self.P.item_count >= self.P.max_capacity):
+            output("Inventory is full!", 'yellow')
+        else:
+            self.aspace[space][slot].text = item
+            self.aspace[space][slot].color = (0, 0.6, 0, 1)
+            self.aspace[space][slot].disabled = True
+            self.space_items[space] += 1
+            if from_items: self.P.addItem(item, -1)
+            self.P.item_count += 1
     def add_slot(self, item, space=None, cost=None, barter=None, _=None):
         if self.P.paused:
             return
@@ -2920,12 +2964,7 @@ class ArmoryTable(GridLayout):
                     # Assign Defense Boost
                     self.P.applyBoost(f'Def-{atr}', amt, False)
                     output(f"Smithing successful! Def-{atr} boosted by {amt}", 'green')
-                self.aspace[space][slot].text = item
-                self.aspace[space][slot].color = (0, 0.6, 0, 1)
-                self.aspace[space][slot].disabled = False
-                self.space_items[space] += 1
-                self.P.addItem(item, -1)
-                self.P.item_count += 1
+                self.confirmed_add_slot(item, space, slot, True)
                 if smithing_on_own:
                     exitActionLoop()()
                 else:
@@ -3162,6 +3201,25 @@ class CraftingTable(GridLayout):
             self.space_items[space] -= 1
             self.P.item_count -= 1
             self.assign_sell_value(space)
+    def saveTable(self):
+        for space in range(2):
+            for slot in range(1, 8):
+                self.P.cspace[space][slot-1] = self.cspace[space][slot].text if self.cspace[space][slot].text in gameItems['Crafting'] else None
+    def loadTable(self):
+        for space in range(3):
+            for slot in range(1, 8):
+                if self.P.cspace[space][slot-1] is not None:
+                    self.confirmed_add_slot(self.P.cspace[space][slot-1], space, slot, False)
+    def confirmed_add_slot(self, item, space, slot, from_items):
+        if (not from_items) and (self.P.item_count >= self.P.max_capacity):
+            output("Not enough inventory space to add to craft!", 'yellow')
+        else:
+            self.cspace[space][slot].text = item
+            self.cspace[space][slot].color = (0, 0.6, 0, 1)
+            self.cspace[space][slot].disabled = False
+            self.space_items[space] += 1
+            if from_items: self.P.addItem(item, -1)
+            self.P.item_count += 1
     def add_craft(self, item, space=None, _=None):
         if self.P.paused:
             return
@@ -3182,12 +3240,7 @@ class CraftingTable(GridLayout):
                 def attempt_craft(success, slot):
                     if success:
                         self.P.useSkill("Crafting")
-                        self.cspace[space][slot].text = item
-                        self.cspace[space][slot].color = (0, 0.6, 0, 1)
-                        self.cspace[space][slot].disabled = False
-                        self.space_items[space] += 1
-                        self.P.addItem(item, -1)
-                        self.P.item_count += 1
+                        self.confirmed_add_slot(item, space, slot, True)
                     else:
                         output("Failed. Item is Destroyed.", 'red')
                         self.P.addItem(item, -1)
@@ -3269,7 +3322,7 @@ quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player
 
 def getQuest(stage, mission):
     P = lclPlayer()
-    return P.PlayerTrack.Quest.quests[(stage, mission)]
+    return P.PlayerTrack.Quest.quests[stage, mission]
 
 def FindPet(_=None):
     P = lclPlayer()
@@ -4132,7 +4185,7 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 5): ["Spare with Boy", "True", SpareWithBoy],
                       (1, 6): ["Gift Book", "checkBook()", OfferBook],
                       (1, 7): ["Gift Sand", "'sand' in self.playerTrack.player.items", OfferSand],
-                      (1, 8): ["Drop Baby Mammoth at Zoo", "hasattr(self.quests[(1, 8)], 'has_mammoth') and self.quests[(1, 8)].has_mammoth", ZooKeeper],
+                      (1, 8): ["Drop Baby Mammoth at Zoo", "hasattr(self.quests[1, 8], 'has_mammoth') and self.quests[1, 8].has_mammoth", ZooKeeper],
                       (2, 1): ["Apply Cubes", "'cooling cubes' in self.playerTrack.player.items", ApplyCubes],
                       (2, 2): ["Wait for Robber", 'True', WaitforRobber],
                       (2, 5): ["Give Book", 'self.quests[2, 5].has_book', HandOverBook],
@@ -4190,33 +4243,47 @@ class Quest:
             if B.status == 'not started':
                 B.disabled = False if self.req_met((B.stage, B.mission)) else True
                 if B.disabled: B.color = (1, 1, 1, 1)
+    def saveTable(self):
+        variableExclusions = {'_trigger_texture', '_context', '_disabled_value', '_disabled_count', 'canvas', '_proxy_ref', '_label', '_ButtonBehavior__state_event', '_ButtonBehavior__touch_time', 'display', 'message', 'mission', 'stage'}
+        for mission in range(1, 9):
+            for stage in range(1, 6):
+                B = self.quests[stage, mission]
+                self.playerTrack.player.reputation[stage-1, mission-1] = {field: B.__dict__[field] for field in set(B.__dict__).difference(variableExclusions)}
+    def loadTable(self):
+        for mission in range(1, 9):
+            for stage in range(1, 6):
+                for field, value in self.playerTrack.player.reputation[mission-1, stage-1].items():
+                    if field == 'status':
+                        self.update_quest_status((stage, mission), value, False)
+                    else:
+                        setattr(self.quests[mission, stage], field, value)
     def req_met(self, quest):
         init_req = eval(quest_req[quest]) if quest in quest_req else True
         inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
         return init_req * inCity if (quest[0] == 1) else init_req * (self.stage_completion[quest[0]-1] >= 4) * inCity
-    def update_quest_status(self, quest, new_status):
-        if (new_status == 'started') and (self.quests[quest].status == 'not started'):
+    def update_quest_status(self, quest, new_status, verbose=True):
+        if (new_status == 'started'):
             self.quests[quest].disabled = True
             self.quests[quest].background_color = (1.5, 1.5, 0.5, 1.5)
             self.quests[quest].color = (0.6, 0.6, 0.6, 1)
-        elif (new_status == 'not started') and (self.quests[quest].status == 'started'):
+        elif (new_status == 'not started'):
             self.quests[quest].disabled = not self.req_met(quest)
             self.quests[quest].background_color = (1, 1, 1, 1)
             self.quests[quest].color = (1, 1, 1, 1)
-            output(f"Mission '{self.quests[quest].text}' must be restarted!", 'red')
-        elif (new_status == 'failed') and (self.quests[quest].status == 'started'):
-            output(f"You failed the mission '{self.quests[quest].text}'!", 'red')
+            if verbose: output(f"Mission '{self.quests[quest].text}' must be restarted!", 'red')
+        elif (new_status == 'failed'):
+            if verbose: output(f"You failed the mission '{self.quests[quest].text}'!", 'red')
             self.quests[quest].background_color = (3, 0, 0, 1.5)
         elif (new_status == 'complete') and (self.quests[quest].status == 'started'):
-            output(f"You completed the mission '{self.quests[quest].text}'! Reputation increases by {self.quests[quest].stage}!", 'green')
+            if verbose: output(f"You completed the mission '{self.quests[quest].text}'! Reputation increases by {self.quests[quest].stage}!", 'green')
             self.quests[quest].background_color = (0, 3, 0, 1.5)
-            self.playerTrack.player.Reputation += self.quests[quest].stage
+            if verbose: self.playerTrack.player.Reputation += self.quests[quest].stage
             self.playerTrack.reputationTab.text = f"Reputation: [color={self.playerTrack.hclr}]{self.playerTrack.player.Reputation}[/color]"
             self.stage_completion[self.quests[quest].stage] += 1
-            for city in city_info:
-                if self.playerTrack.player.Reputation > city_info[city]['entry']:
-                    self.playerTrack.player.entry_allowed[city] = True
-            # [INCOMPLETE] Get Reward -- probably similar to how we do req_met
+            if verbose:
+                for city in city_info:
+                    if self.playerTrack.player.Reputation > city_info[city]['entry']:
+                        self.playerTrack.player.entry_allowed[city] = True
         else:
             # Each statement was failed so assume that the status should not be changed
             return
@@ -4799,28 +4866,22 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             city_villages[self.tile] = sorted(self.neighbortiles.intersection({'village1','village2','village3','village4','village5'}))
     def is_neighbor(self):
         return self.parentBoard.localPlayer.currentcoord in self.neighbors
-    def findNearest(self, tiles, T=None, depth=0, checked={}, queue={}):
-        if T is None: T = self
-        if T.tile in tiles:
-            path = [(T.gridx, T.gridy)]
-            while path[-1] in checked: 
-                path.append((checked[path[-1]].gridx, checked[path[-1]].gridy))
-            return (T.gridx, T.gridy), depth, path
-        nextinLine = deepcopy(T.neighbors.difference(checked))
-        for nxt in nextinLine:
-            checked[nxt] = T # Store parent tile of each next tile for path search
-        if (depth+1) in queue:
-            queue[depth+1] = queue[depth+1].union(nextinLine)
-        else:
-            queue[depth+1] = nextinLine
-        nextDepth = min(queue.keys())
-        if len(queue[nextDepth]) == 0:
-            queue.pop(nextDepth)
-            nextDepth = min(queue.keys())
-            if len(queue[nextDepth]) == 0:
-                print("Warning: are you sure you are looking for a tile that exists?")
-        nextT = self.parentBoard.gridtiles[queue[nextDepth].pop()]
-        return nextT.findNearest(tiles, nextT, nextDepth, checked, queue)
+    def findNearest(self, tiles):
+        T = self
+        checked, queue = {(T.gridx, T.gridy):None}, [(self, 0)]
+        while queue:
+            T, depth = queue.pop(0)
+            if T.tile in tiles:
+                path, c = [], (T.gridx, T.gridy)
+                while c is not None:
+                    path.append(c)
+                    c = checked[c]
+                return (T.gridx, T.gridy), depth, path
+            nextinLine = T.neighbors.difference(checked)
+            for coord in nextinLine:
+                checked[coord] = (T.gridx, T.gridy)
+                queue.append((self.parentBoard.gridtiles[coord], depth+1))
+        return None, None, None
     def on_enter(self, *args):
         hovering[0] += 1
         self.source = f'images\\selectedtile\\{self.tile}.png'
@@ -4894,6 +4955,7 @@ class BoardPage(FloatLayout):
         T.parentBoard = self
         self.add_widget(T)
     def startRound(self):
+        self.localPlayer.savePlayer()
         for P in self.Players.values():
             P.paused = False
         if self.localPlayer.dueling_hiatus > 0:
@@ -4901,7 +4963,7 @@ class BoardPage(FloatLayout):
         self.localPlayer.unsellable = set()
         self.localPlayer.actions = self.localPlayer.max_actions
         # Update any Quest specs
-        if (self.localPlayer.PlayerTrack.Quest.quest[2, 8].status=='started') and hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds'):
+        if (self.localPlayer.PlayerTrack.Quest.quests[2, 8].status=='started') and hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds'):
             if P.PlayerTrack.Quest.quests[2, 8].wait_rounds > 0:
                 P.PlayerTrack.Quest.quests[2, 8].wait_rounds -= 1
         self.sendFaceMessage('Start Round!')
@@ -5379,8 +5441,8 @@ class ConnectPage(GridLayout):
         super().__init__(**kwargs)
 
         self.cols = 2  # used for our grid
-        if os.path.isfile("save\\prev_details.txt"):
-            with open("save\\prev_details.txt","r") as f:
+        if os.path.isfile("saves\\prev_details.txt"):
+            with open("saves\\prev_details.txt","r") as f:
                 d = f.read().split(",")
                 prev_ip = d[0]
                 prev_port = d[1]
