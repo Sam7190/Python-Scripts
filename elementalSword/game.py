@@ -4746,6 +4746,63 @@ class PlayerTrack(GridLayout):
         self.capitalTab.text=f"Capital: [color={self.hclr}]{self.player.Capital}[/color]"
         self.Items.update_data_cells(self.get_Items())
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
+
+class TradePage(FloatLayout):
+    def __init__(self, username, **kwargs):
+        super().__init__(**kwargs)
+        self.P = lclPlayer()
+        self.P.paused = True
+        self.trading = True
+        self.confirmed = False
+        self.items = deepcopy(self.P.items)
+        self.adept, self.master = {}, {}
+        for skill, lvl in self.P.skills.items():
+            if lvl >= 12:
+                self.master.add(skill)
+            elif lvl >= 8:
+                self.adept.add(skill)
+        
+        bkgSource = f'images\\resized\\background\\{self.P.currenttile.tile}.png' if (self.P.currenttile.tile+'.png') in os.listdir('images\\background') else f'images\\resized\\background\\{self.P.currenttile.tile[:-1]}.png'
+        self.add_widget(Image(source=bkgSource, pos=(0,0), size_hint=(1,1)))
+        
+        psource = f'images\\resized\\origsize\\{self.P.birthcity}.png'
+        x_person, y_person = 0.125, 0.3
+        x_grid, y_grid = 0.3, 0.7
+        x_middle, y_middle = 0.15, 0.7
+        y_bottom = 0.3
+        
+        # Plot Player
+        self.pimg = Image(source=psource, pos_hint={'x':0, 'y':y_bottom}, size_hint=(x_person, y_person))
+        self.add_widget(self.pimg)
+        # Plot Other Player
+        fsource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.foename].birthcity}.png'
+        self.oimg = Image(source=fsource, pos_hint={'right':1, 'y':y_bottom}, size_hint=(x_person, y_person))
+        self.add_widget(self.fimg)
+        
+        self.pGrid = GridLayout(cols=3, pos_hint={'x':x_person, 'y':y_bottom}, size_hint=(x_grid, y_grid))
+        self.mGrid = GridLayout(cols=1, pos_hint={'x':(x_person+x_grid), 'y':y_bottom}, size_hint=(x_middle, y_middle))
+        self.oGrid = GridLayout(cols=3, pos_hint={'right':(1-x_person),'y':y_bottom}, size_hint=(x_grid, y_grid))
+        
+        slot_shape = (7, 3)
+        self.pGrid.slots = np.empty(slot_shape,dtype=object)
+        self.oGrid.slots = np.empty(slot_shape,dtype=object)
+        for i in range(slot_shape[0]):
+            for j in range(slot_shape[1]):
+                self.pGrid.slots[i,j] = Button(text='', disabled=True)
+                self.pGrid.slots[i,j].bind(on_press=partial(self.remove, i, j))
+                self.oGrid.slots[i,j] = Button(text='', disabled=True, background_disabled_normal='', background_color=(0.3, 0.3, 0.3, 0.7), color=(1, 1, 1, 1))
+                self.pGrid.add_widget(self.pGrid.slots[i,j])
+                self.oGrid.add_widget(self.oGrid.slots[i,j])
+        
+        self.confirm = Button(text='Confirm', color=(0.3, 1, 0.3, 1), background_color=(1.3, 1.5, 1.3, 1))
+        self.decline = Button(text='Decline', color=(1, 0.3, 0.3, 1), background_color=(1.5, 1.3, 1.3, 1))
+        self.abort = Button(text='Abort', color=(0.8, 0, 0, 1), background_color=(1.7, 1.4, 1.4, 1))
+    def add_coins(self, amt, _=None):
+        pass
+    def add_item(self, item, _=None):
+        pass
+    def add_train(self, ability, _=None):
+        pass
         
 
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
