@@ -2223,7 +2223,7 @@ class Player(Image):
         myVars = {field: self.__dict__[field] for field in set(self.__dict__).difference(exclusions)}
         myVars['output messages'] = self.parentBoard.game_page.output.messages[1:]
         myVars['seed'] = seed
-        myVars['gameEnd'] = gameEnd
+        myVars['gameEnd'] = game_app.launch_page.end_lbl.text.split('\n')[1]
         myVars['capital info'] = capital_info
         myVars['skirmishes'] = [Skirmishes[1], Skirmishes[0]]
         if not os.path.exists(f'saves\\{self.username}'):
@@ -5734,10 +5734,11 @@ class LaunchPage(GridLayout):
             except ValueError:
                 pass
         return False
-    def load(self, new=None):
+    def load(self, new=None, send=False):
         global load_file
         new = self.load_input.text if new is None else new
         if new != '':
+            out = False
             self.load_input.text = ''
             load_file = new
             self.load_lbl.text = f'Load:\n{load_file}'
@@ -5746,11 +5747,22 @@ class LaunchPage(GridLayout):
             elif os.path.exists(f'saves\\{self.username}\\{load_file}.pickle'):
                 # If loading, then the board has to be the same, so receive seed data -- this will create issues if the files are on different games
                 self.load_lbl.background_color = (0.8, 1, 0.8, 1)
+                with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
+                    playerInfo = pickle.load(f)
+                if send: socket_client.send('[LOAD]', load_file)
+                d = self.seed(playerInfo['seed'])
+                if d and send: socket_client.send('[SEED]', d)
+                s = self.save(load_file)
+                if s and send: socket_client.send('[SAVE]', s)
+                e = self.gameEnd(playerInfo['gameEnd'])
+                if e and send: socket_client.send('[END SETTING]', e)
+                if send: socket_client.send('[LOAD SKIRMISHES]', playerInfo['skirmishes'])
+                out = load_file
             else:
                 self.load_lbl.background_color = (1, 0.8, 0.8, 1)
             if self.ready[self.username]:
                 self.update_self()
-            return load_file
+            return out
         return False
         # [INCOMPLETE] Need to check each player to see if they have the correct data saved
     def save(self, new=None):
@@ -5769,7 +5781,7 @@ class LaunchPage(GridLayout):
         new = self.end_input.text if new is None else new
         if new != '':
             valid = True
-            params = new.replace(' ','').split(',')
+            params = new.replace(' ','').replace('=',':').split(',')
             potential, texts = {}, []
             for p in params:
                 psplit = p.split(':')
@@ -5781,7 +5793,7 @@ class LaunchPage(GridLayout):
                     valid = False
                     break
                 spec = int(spec)
-                if int(spec) > 120:
+                if (int(spec) > 120) or (int(spec) < 0):
                     valid = False
                     break
                 if isint(setting) and (int(setting) <= 4) and (int(setting) >= 1):
@@ -5803,25 +5815,18 @@ class LaunchPage(GridLayout):
     def submitChange(self, instance):
         n = self.npc_difficulty()
         if n: socket_client.send('[DIFFICULTY]', n)
-        d = self.seed()
-        if d: socket_client.send('[SEED]', d)
-        s = self.save()
-        if s: socket_client.send('[SAVE]', s)
-        e = self.gameEnd()
-        if e: socket_client.send('[END SETTING]', e)
-        l = self.load()
-        if l: 
-            socket_client.send('[LOAD]', l)
-            if os.path.exits('saves\\{self.username}\\{l}.pickle'):
-                with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
-                    playerInfo = pickle.load(f)
-                d = self.seed(playerInfo['seed'])
-                if d: socket_client.send('[SEED]', d)
-                s = self.save(load_file)
-                if s: socket_client.send('[SAVE]', s)
-                e = self.gameEnd(playerInfo['gameEnd'])
-                if e: socket_client.send('[END SETTING]', e)
-                socket_client.send('[LOAD SKIRMISHES]', playerInfo['skirmishes'])
+        l = self.load(send=True)
+        if not l:
+            d = self.seed()
+            if d: socket_client.send('[SEED]', d)
+            s = self.save()
+            if s: socket_client.send('[SAVE]', s)
+            e = self.gameEnd()
+            if e: socket_client.send('[END SETTING]', e)
+        else:
+            self.seed_input.text = ''
+            self.save_input.text = ''
+            self.end_input.text = ''
     def incoming_message(self, username, category, message):
         if category == '[LAUNCH]':
             if username not in self.ready:
@@ -5834,7 +5839,7 @@ class LaunchPage(GridLayout):
         elif category == '[SEED]':
             self.seed(message)
         elif category == '[LOAD]':
-            self.load(message)
+            self.load(message, send=False)
         elif category == '[SAVE]':
             self.save(message)
         elif category == '[END SETTING]':
