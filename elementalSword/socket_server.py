@@ -8,6 +8,7 @@ python socket_server.py
 import socket
 import select
 import pickle
+import datetime
 import numpy as np
 
 HEADER_LENGTH = 10
@@ -18,6 +19,13 @@ clients = {}
 client_code = {}
 client_gameStatus = {}
 game_launched = [False]
+
+# Settings:
+difficulty = [None]
+seed = [None]
+default_save = [None]
+default_load = [None]
+gameEnd = [None]
 
 ## getting the hostname by socket.gethostname() method
 hostname = socket.gethostname()
@@ -163,12 +171,27 @@ def getTodaysMarket(max_items=6):
 def updateServer(username, category, msg):
     if category == '[LAUNCH]':
         if msg == 'Listening':
+            if len(client_gameStatus) == 1:
+                difficulty[0] = 'moderate'
+                seed[0] = np.random.randint(1, 100000)
+                dtm = str(datetime.datetime.now())
+                dtm = dtm[:dtm.index('.')].replace(':','').replace(' ','_') # Exclude the milliseconds
+                default_save[0] = dtm + f'_{seed[0]}'
+                default_load[0] = 'None'
+                gameEnd[0] = '2:100'
             client_gameStatus[username]['ready'] = False
             client_gameStatus[username]['round end'] = False
+            client_gameStatus[username]['end'] = False
             for other_username in client_gameStatus:
                 if other_username != username:
                     send_msg = 'Ready' if client_gameStatus[other_username]['ready'] else 'Not Ready'
                     sendMessage(other_username, username, '[LAUNCH]', send_msg)
+                else:
+                    sendMessage('[SERVER]', username, '[DIFFICULTY]', difficulty[0])
+                    sendMessage('[SERVER]', username, '[SEED]', seed[0])
+                    sendMessage('[SERVER]', username, '[SAVE]', default_save[0])
+                    sendMessage('[SERVER]', username, '[LOAD]', default_load[0])
+                    sendMessage('[SERVER]', username, '[END SETTING]', gameEnd[0])
         elif msg == 'Ready':
             client_gameStatus[username]['ready'] = True
             client_gameStatus[username]['round end'] = False
@@ -184,6 +207,16 @@ def updateServer(username, category, msg):
             client_gameStatus[username]['ready'] = False
     elif category == '[CLAIM]':
         client_gameStatus[username]['birth city'] = msg
+    elif category == '[DIFFICULTY]':
+        difficulty[0] = msg
+    elif category == '[SEED]':
+        seed[0] = msg
+    elif category == '[SAVE]':
+        default_save[0] = msg
+    elif category == '[LOAD]':
+        default_load[0] = msg
+    elif category == '[END SETTING]':
+        gameEnd[0] = msg
     elif (category == '[ROUND]') and (msg == 'end'):
         client_gameStatus[username]['round end'] = True
         all_ended = True
@@ -201,6 +234,19 @@ def updateServer(username, category, msg):
                 sendMessage('[SERVER]', username, '[MARKET]', getTodaysMarket())
     elif category == '[REDUCED TENSION]':
         Skirmishes[0][msg[0]] += msg[1]
+    elif category == '[END STATS]':
+        client_gameStatus[username]['end'] = msg
+        all_sent = True
+        stats = {}
+        for username, D in client_gameStatus.items():
+            if ('round end' in D) and (D['end'] == False):
+                all_sent = False
+                break
+            else:
+                stats[username] = D['end']
+        if all_sent:
+            for username in client_gameStatus:
+                sendMessage('[SERVER]', username, '[FINAL END STATS]', stats)
 
 def close_socket(notified_socket):
     closed_username = clients[notified_socket]['data'].decode('utf-8')
@@ -219,6 +265,10 @@ def close_socket(notified_socket):
     
     if len(client_code) == 0:
         game_launched[0] = False
+        difficulty[0] = None
+        seed[0] = None
+        default_save[0] = None
+        default_load[0] = None
         print("All connections closed. Resetting Stats.")
     else:
         for username in client_code:

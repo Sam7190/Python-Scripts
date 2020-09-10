@@ -22,6 +22,7 @@ from win32api import GetSystemMetrics, GetMonitorInfo, MonitorFromPoint
 #import mechanic as mcnc
 import kivy
 from kivy.app import App
+from kivy.uix.dropdown import DropDown
 from kivy.uix.label import Label
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.stacklayout import StackLayout
@@ -39,9 +40,14 @@ from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.clock import Clock
 from kivy.core.window import Window
 
-# Tile Resolution and number of tiles in gameboard.
-seed = 232
+# Settings
+seed = None
 auto_resize = True
+save_file = None
+load_file = 'None'
+gameEnd = {2: 100}
+
+# Tile Resolution and number of tiles in gameboard.
 xpix = 343
 ypix = 396
 xtiles = 17
@@ -64,6 +70,11 @@ def randofsum(s, n):
     return np.random.multinomial(s,np.ones(n)/n,size=1)[0]
 def euc(a, b): 
     return np.linalg.norm(a-b)
+def isint(s):
+    try:
+        return int(s) == float(s)
+    except ValueError:
+        return False
 
 class HitBox(Button):
     def __init__(self, fpage, **kwargs):
@@ -489,7 +500,7 @@ class DefBox(Button):
         self.fpage.remove_widget(self)
 
 class FightPage(FloatLayout):
-    def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, **kwargs):
+    def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, foeStealth=0, **kwargs):
         super().__init__(**kwargs)
         self.logDef = logDef
         self.consume = consume
@@ -512,16 +523,25 @@ class FightPage(FloatLayout):
             self.foestats = npc_stats(rbtwn(3, 120))
             output(f"Activating Logged Def, Player Lv.{np.sum(self.pstats)}, NPC Lv.{np.sum(self.foestats)}")
         else:
-            self.pstats = deepcopy(self.P.current)
+            self.pstats, Gsum = deepcopy(self.P.current), np.zeros((len(self.P.attributes),),dtype=int)
             for Name, G in self.P.group.items():
                 output(f"Level {np.sum(G)} {Name} boosts stats. Combined stat is maximum of each attribute.")
                 self.pstats = np.max([self.pstats, G], 0)
+                Gsum += G
+            # Apply algorithmic boost for party size - minimum of sum and logged multiplier
+            for i in range(len(self.pstats)):
+                self.pstats[i] = int(min([self.pstats[i]+Gsum[i], self.pstats[i]*(1 + np.log10(len(self.P.group)+1))]))
             self.foestats = stats
-        
+        # Reduce Stats based on these hard limits
+        hard_limits = {"Technique":12, "Stability":14}
+        for atr, lvl in hard_limits.items():
+            self.pstats[self.P.attributes[atr]] = min([lvl, self.pstats[self.P.attributes[atr]]])
+            self.foestats[self.P.attributes[atr]] = min([lvl, self.foestats[self.P.attributes[atr]]])
         # Foe objects
         self.foename = name
         self.foelvl = lvl
         self.foestyle = style
+        self.foestealth = foeStealth
         self.foecateg = self.foeCategory()
         self.enc = encountered # enc of -1 means the player is triggering the encounter
         # Calculate Disadvantages
@@ -596,6 +616,22 @@ class FightPage(FloatLayout):
         self.fightButton.bind(on_press=self.startBattle)
         self.add_widget(self.runButton)
         self.add_widget(self.fightButton)
+        
+        # Determine Stealth Attack
+        if (self.foestealth > 0) and encountered and foeisNPC:
+            r = rbtwn(1, 12)
+            if r <= self.foestealth:
+                dmg = self.foestats[self.P.attributes['Agility']] // 3
+                if dmg > 0:
+                    output(f"Foe inflicts {dmg} to you via a sneak attack!", 'red')
+                    self.pTakesDamage(dmg)
+        elif (encountered == -1) and foeisNPC and (self.P.skills["Stealth"]>0):
+            r = rbtwn(1, 12, None, self.P.skills["Stealth"], "Sneatk Attack ")
+            if r <= self.P.skills["Stealth"]:
+                dmg = self.pstats[self.P.atrributes['Agility']] // 3
+                if dmg > 0:
+                    output(f"You inflict {dmg} via a sneak attack!", 'green')
+                    self.foeTakesDamage(dmg)
     def foeCategory(self):
         differential = np.sum(self.foestats) - np.sum(self.pstats)
         if differential >= 12:
@@ -748,7 +784,7 @@ class FightPage(FloatLayout):
         return x_hint, y_hint
     def endFight(self, ran=False):
         self.fighting = False
-        self.P.parentBoard.game_page.main_screen.current = 'Board'
+        self.P.parentBoard.game_page.main_screen.current = "Board" if self.P.parentBoard.game_page.toggleView.text=="Player Track" else "Player Track"
         self.P.parentBoard.game_page.main_screen.remove_widget(self.P.parentBoard.game_page.fightscreen)
         self.P.paused = False
         hp_dmg = self.P.current[self.P.attributes['Hit Points']] - self.pstats[self.P.attributes['Hit Points']]
@@ -765,12 +801,12 @@ class FightPage(FloatLayout):
             if (self.foestats[self.P.attributes['Hit Points']] == 0) and (callable(self.reward)):
                 # Player must have won -- claim the reward if it was callable
                 self.reward()
-        elif (self.pstats[self.P.attributes['Hit Points']] == 0) and (self.consequence is not None): 
+        elif (ran or (self.pstats[self.P.attributes['Hit Points']] == 0)) and (self.consequence is not None): 
             # They must have fainted and lost the battle
             self.consequence()
-    def foeTakesDamage(self):
+    def foeTakesDamage(self, amt=1):
         if (self.foestats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
-            self.foestats[self.P.attributes['Hit Points']] -= 1
+            self.foestats[self.P.attributes['Hit Points']] = max([0, self.foestats[self.P.attributes['Hit Points']]-amt])
             cell = self.statTable.cells[self.foename][self.P.attributes['Hit Points']]
             cell.text = str(self.foestats[self.P.attributes['Hit Points']])
             cell.background_color = (1, 1, 0.2, 0.6)
@@ -787,7 +823,7 @@ class FightPage(FloatLayout):
                             self.P.addItem(rwd, int(amt))
                 # Training with Sparring partner does not gaurantee you a level increase like with others.
                 levelsup = (self.foecateg/2) ** 2
-                if self.foename == 'Sparring Partner': levelsup *= 0.5
+                if self.foename == 'Sparring Partner': levelsup *= 0.65
                 levelsup += self.P.combatxp # Get any remaining xp from previous fights
                 self.P.combatxp = float(levelsup) - int(levelsup) # Store any remaining xp away
                 self.levelsup = int(levelsup)
@@ -833,9 +869,9 @@ class FightPage(FloatLayout):
             actionGrid(self.valid_attributes, False)
         else:
             self.endFight()
-    def pTakesDamage(self):
+    def pTakesDamage(self, amt=1):
         if (self.pstats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
-            self.pstats[self.P.attributes['Hit Points']] -= 1
+            self.pstats[self.P.attributes['Hit Points']] = max([0, self.pstats[self.P.attributes['Hit Points']]-amt])
             cell = self.statTable.cells[self.P.username][self.P.attributes['Hit Points']]
             cell.text = str(self.pstats[self.P.attributes['Hit Points']])
             cell.background_color = (1, 1, 0.2, 0.6)
@@ -864,10 +900,8 @@ def npc_stats(lvl, fixed=None, maxAtr=None):
     if fixed is not None:
         for atr, fixedlvl in fixed.items():
             if atr != 'Stealth':
+                # Stealth is handled in the encounter function
                 conditions.append(f'a[{P.attributes[atr]}]=={fixedlvl}')
-            else:
-                # [INCOMPLETE] Add a stat for stealth?
-                pass
     while True:
         a = randofsum(lvl, n)
         breakout = True
@@ -880,22 +914,46 @@ def npc_stats(lvl, fixed=None, maxAtr=None):
 
 def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=None, action_amt=1, empty_tile=False, lvlBalance=6, enc=1, consequence=None, background_img=None):
     P = lclPlayer()
-    possibleLvls = rbtwn(lvlrange[0],lvlrange[1],max([1, round((lvlrange[1]-lvlrange[0])/lvlBalance)]))
-    lvl = possibleLvls[np.argsort(np.abs(possibleLvls-np.sum(P.current)))[0]]
+    lvls = []
+    for i in range(party_size):
+        possibleLvls = rbtwn(lvlrange[0],lvlrange[1],max([1, round((lvlrange[1]-lvlrange[0])/lvlBalance)]))
+        lvls.append(possibleLvls[np.argsort(np.abs(possibleLvls-np.sum(P.current)))[0]])
+    stat, Gsum, Gmax = np.zeros((len(P.attributes),),dtype=int), np.zeros((len(P.attributes),),dtype=int), np.zeros((len(P.attributes),),dtype=int)
+    for i in range(party_size):
+        stati = npc_stats(lvls[i])
+        Gsum += stati
+        Gmax = np.max([Gmax, stati], 0)
+    # The Group Level is based on the minumum of the sum and max scores times a logged multiplier
+    for i in range(len(stat)):
+        stat[i] = int(min([Gsum[i], Gmax[i] * (1 + np.log10(party_size))]))
+    lvl = int(np.sum(stat))
     # For rewards go through the dictionary and if value is a list then choose a random result biased toward the level chosen of opponent
     if not callable(reward):
         new_reward = {}
         for rwd, val in reward.items():
             if type(val) is list:
-                lvlpct = (lvl - lvlrange[0])/(lvlrange[1] - lvlrange[0])
-                val = round(lvlpct * (val[1] - val[0]))
+                if party_size == 1:
+                    lvlpct = (lvl - lvlrange[0])/(lvlrange[1] - lvlrange[0])
+                    val = round(lvlpct * (val[1] - val[0]))
+                else:
+                    val = rbtwn(val[0], val[1]) # Otherwise just randomize it
             new_reward[rwd] = val
     else:
         new_reward = reward
     cbstyle = styles[rbtwn(0,len(styles)-1)]
-    output(f'Encounter Lv{lvl} {name} using {cbstyle}','yellow')
+    if (fixed is not None) and ("Stealth" in fixed):
+        if type(fixed['Stealth']) is list:
+            stealth = rbtwn(fixed['Stealth'][0], fixed['Stealth'][1])
+        else:
+            stealth = fixed['Stealth']
+    else:
+        stealth = 0
+    if party_size==1:
+        output(f'Encounter Lv{lvl} {name} using {cbstyle}','yellow')
+    else:
+        output(f'Encounter {party_size} {name}s with combined level of {lvl} using {cbstyle}', 'yellow')
     screen = Screen(name="Battle")
-    screen.add_widget(FightPage(name, cbstyle, lvl, npc_stats(lvl, fixed), enc, reward=new_reward, consume=consume, action_amt=action_amt, foeisNPC=True, consequence=consequence, background_img=background_img))
+    screen.add_widget(FightPage(name, cbstyle, lvl, stat, enc, reward=new_reward, consume=consume, action_amt=action_amt, foeisNPC=True, consequence=consequence, background_img=background_img, foeStealth=stealth))
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
@@ -1232,7 +1290,7 @@ def Train(abilities, master, confirmed, _=None):
     P = lclPlayer()
     if P.paused:
         return
-    usingLesson = True if (abilities == 'stealth') and (master == 'city') and hasattr(P.PlayerTrack.Quest.quests[5, 7], 'used_lesson') and (not P.PlayerTrack.Quest.quests[5, 7].used_lesson) and (P.PlayerTrack.Quest.quests[2, 8].tile == P.currenttile) else False
+    usingLesson = True if (abilities == 'stealth') and (master == 'city') and hasattr(P.PlayerTrack.Quest.quests[5, 7], 'used_lesson') and (not P.PlayerTrack.Quest.quests[5, 7].used_lesson) and (P.PlayerTrack.Quest.quests[2, 8].coord == P.currentcoord) else False
     if not confirmed:
         if master == 'monk':
             cost = 0
@@ -1458,13 +1516,13 @@ def C_oldlibrary(skip=False):
     def hermit_approach(_=None):
         P = lclPlayer()
         persuasion = P.activateSkill('Persuasion')
-        if (P.PlayerTrack.Quest.quests[2, 5].status == 'started') and (P.PlayerTrack.Quest.quests[2, 5].tile == P.currenttile) and (not P.PlayerTrack.Quest.quests[2, 5].has_book):
+        if (P.PlayerTrack.Quest.quests[2, 5].status == 'started') and (P.PlayerTrack.Quest.quests[2, 5].coord == P.currentcoord) and (not P.PlayerTrack.Quest.quests[2, 5].has_book):
             r = rbtwn(1, 5, None, persuasion, 'Persuasion ')
             if r <= persuasion:
                 P.useSkill('Persuasion')
                 output('Successfully persuaded the hermit to show you the book. Go hand the book to the librarian.', 'blue')
                 P.PlayerTrack.Quest.quests[2, 5].has_book = True
-                P.PlayerTrack.Quest.quests[2, 5].tile.color = (1, 1, 1, 1)
+                P.parentBoard.gridtiles[P.PlayerTrack.Quest.quests[2, 5].coord].color = (1, 1, 1, 1)
             else:
                 output("Could not persuade the hermit to show you the book.", 'yellow')
             exitActionLoop()()
@@ -1589,6 +1647,16 @@ def C_wilderness():
             exitActionLoop(amt=0)()
 
 consequences = {'road':C_road, 'plains':C_plains, 'cave':C_cave, 'outpost':C_outpost, 'mountain':C_mountain, 'oldlibrary':C_oldlibrary, 'ruins':C_ruins, 'battle1':C_battlezone, 'battle2':C_battlezone, 'wilderness':C_wilderness}
+consequence_message = {'road': 'Highway Robber encounter chance: (distance to nearest city)/6. Highway Robber Lvl: 3-30. Reward: 0-3 coins. Highway Robber Avoidance: sneak/12.\n\nTrader Chance: 1/6 if no Highway Robber encounter.',
+                       'plains': 'Fatigue Damage: 1. Damage Avoidance: (survival+1)/9.',
+                       'cave': 'HP Damage: 1 in tier1, 3 in tier2, 5 in tier3. Avoidance: (survival+1)/3 in tier1, (survival+1)/5 in tier2, (survival+1)/9 in tier3.\n\nMonster Lvls: 3-20 tier1, 15-40 tier2, 35-60 tier3. Reward: raw meat and hide (varying). Monster Avoidance: (sneak+1)/(4*tier).',
+                       'outpost': 'Bandit encounter chance: 1/3. Bandit Lvl: 15-40. Reward: 2-5 coins. Bandit Avoidance: stealth/12.',
+                       'mountain': 'HP & Fatigue Damage: tier. Damage Avoidance: (survival+1)/3 in tier1. (surval+1)/5 in tier2, (survival+1)/9 in tier3.',
+                       'oldlibrary': 'Hermit encounter chance: 1/4. Hermit Lvl: 55-75. Reward: 5-9 coins. Hermit Avoidance: persuasion/12.',
+                       'ruins': 'HP Damage: 2. Damage Avoidance: survival/12.\n\nOld Wizard encounter Lvl 60-85. Reward: 2 old cloth. Old Wizard Avoidance: persuasion/12.',
+                       'battle1': 'Ninjas: 1/4 chance 1 Ninja Lvl 65-90, 1/4 chance 1 Ninja Lvl 45-70, 1/4 chance 2 Ninjas Lvls 35-60, 1/4 chance 3 Ninjas Lvls 25-50. Reward: varying coins. Ninja Avoidance: stealth/16.',
+                       'battle2': 'Ninjas: 1/4 chance 1 Ninja Lvl 65-90, 1/4 chance 1 Ninja Lvl 45-70, 1/4 chance 2 Ninjas Lvls 35-60, 1/4 chance 3 Ninjas Lvls 25-50. Reward: varying coins. Ninja Avoidance: stealth/16.',
+                       'wilderness': 'HP Damage: 2, Fatigue Damage: 3. Damage Avoidance: survival/14.\n\nWild Vine Monster Lvl 95-120. Reward: 4 bark. Wild Vine Monster Avoidance: stealth/14.'}
 
 # Actions
 KnowledgeBooks = {'critical thinking book':1,'bartering book':2,'persuasion book':2,'crafting book':2,
@@ -1618,14 +1686,14 @@ def Gather(item, discrete):
     def gather(_=None):
         if P.paused:
             return
-        if (P.PlayerTrack.Quest.quests[5, 6].status == 'started') and (P.currenttile == P.PlayerTrack.Quest.quests[1, 8].tile_found) and (not hasattr(P.PlayerTrack.Quest.quests[5, 6], 'killed')):
+        if (P.PlayerTrack.Quest.quests[5, 6].status == 'started') and (P.currentcoord == P.PlayerTrack.Quest.quests[1, 8].coord_found) and (not hasattr(P.PlayerTrack.Quest.quests[5, 6], 'killed')):
             excavating = P.activateSkill("Excavating")
             r = rbtwn(1, 30, None, excavating, "Finding Angry Mammoth ")
             if r <= excavating:
                 def reward(_=None):
                     output("You killed the Mammoth! Go claim your reward from the mayor.", 'blue')
                     P.PlayerTrack.Quest.quests[5, 6].killed = True
-                    P.PlayerTrack.Quest.quests[1, 8].tile_found.color = (1, 1, 1, 1)
+                    P.parentBoard.gridtiles[P.PlayerTrack.Quest.quests[1, 8].coord_found].color = (1, 1, 1, 1)
                 encounter("Mammoth", [150, 150], ['Physical'], reward)
                 return
             else:
@@ -1651,7 +1719,7 @@ def Excavate(result, max_result):
     def excavate(_=None):
         if P.paused:
             return
-        if (P.PlayerTrack.Quest.quests[5, 2].status == 'started') and (P.currenttile == P.PlayerTrack.Quest.quests[5, 2].tile):
+        if (P.PlayerTrack.Quest.quests[5, 2].status == 'started') and (P.currentcoord == P.PlayerTrack.Quest.quests[5, 2].coord):
             output(f"You found the friend! Now go back to {P.birthcity} with him and claim your reward.", 'blue')
             P.PlayerTrack.Quest.quests[5, 2].has_friend = True
             exitActionLoop()()
@@ -1715,7 +1783,7 @@ def A_plains(inspect=False):
         def FindBabyMammoth(_=None):
             output("You found a baby mammoth! Its attracted to your fruit and follows you. Don't lose your fruit!", 'green')
             P.PlayerTrack.Quest.quests[1, 8].has_mammoth = True
-            P.PlayerTrack.Quest.quests[1, 8].tile_found = P.currenttile
+            P.PlayerTrack.Quest.quests[1, 8].coord_found = P.currentcoord
             exitActionLoop()()
         if (P.PlayerTrack.Quest.quests[1, 8].status == 'started') and ('fruit' in P.items):
             exc.pop('Wild Herd')
@@ -2137,18 +2205,31 @@ class Player(Image):
         self.PlayerTrack.Quest.saveTable()
         self.PlayerTrack.craftingTable.saveTable()
         self.PlayerTrack.armoryTable.saveTable()
-        exclusions = {'_coreimage','_loops','_context','_disabled_value','disabled_count','canvas','_proxy_ref','_loop','parentBoard','currenttile', 'mtable', 'PlayerTrack'}
+        exclusions = {'_coreimage','_loops','_context','_disabled_value','_disabled_count','canvas','_proxy_ref','_loop','parentBoard','currenttile', 'mtable', 'PlayerTrack'}
         myVars = {field: self.__dict__[field] for field in set(self.__dict__).difference(exclusions)}
-        with open('saves\\Player.pickle', 'wb') as f:
+        myVars['output messages'] = self.parentBoard.game_page.output.messages[1:]
+        myVars['seed'] = seed
+        myVars['gameEnd'] = gameEnd
+        if not os.path.exists(f'saves\\{self.username}'):
+            os.makedirs(f'saves\\{self.username}')
+        with open(f'saves\\{self.username}\\{save_file}.pickle', 'wb') as f:
             pickle.dump(myVars, f)
     def loadPlayer(self):
-        with open('saves\\Player.pickle', 'rb') as f:
+        with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
             myVars = pickle.load(f)
         for field, value in myVars.items():
+            if field in {'username', 'output messages', 'seed', 'gameEnd'}:
+                continue
             setattr(self, field, value)
+        if 'output messages' in myVars:
+            for msg in myVars['output messages']:
+                self.parentBoard.game_page.output.add_msg(msg)
         self.PlayerTrack.Quest.loadTable()
         self.PlayerTrack.craftingTable.loadTable()
         self.PlayerTrack.armoryTable.loadTable()
+        self.moveto(self.currentcoord, False, True)
+        socket_client.send('[MOVE]', self.currentcoord) # So that everyone else can see the move.
+        self.parentBoard.startRound()
     def updateView(self):
         self.size_hint = (self.imgSize[0]*(self.parentBoard.zoom+1)/xsize, self.imgSize[1]*(self.parentBoard.zoom+1)/ysize)
         self.pos_hint = {'center_x':self.currenttile.centx, 'center_y':self.currenttile.centy}
@@ -2168,6 +2249,8 @@ class Player(Image):
                 consequences[self.currenttile.tile](self.tiered)
             else:
                 consequences[self.currenttile.tile]()
+        elif self.currenttile.tile in cities:
+            city_consequence(self.currenttile.tile)
         else:
             exitActionLoop(None,amt)()
     def go2action(self, param=None):
@@ -2399,12 +2482,45 @@ class Player(Image):
             socket_client.send("[ROUND]",'end')
         elif (self.PlayerTrack.Quest.quests[3, 6].status == 'started') and (self.PlayerTrack.Quest.quests[3, 6].action % 2):
             JoinFight()
+    def GameEnd(self, player_stats):
+        best_total, best_users = -1, []
+        for username, stats in player_stats.items():
+            total = int(np.sum([stats[s] for s in stats]))
+            vals = [f'{s}: {stats[s]}' for s in stats]
+            output(f"{username}| "+', '.join(vals)+f', Total: {total}', 'blue')
+            if total > best_total:
+                best_users = [username]
+                best_total = total
+            elif total == best_total:
+                best_users.append(username)
+        winner = ' AND '.join(best_users)
+        clr = 'green' if self.username in best_users else 'red'
+        self.parentBoard.sendFaceMessage(winner+' Wins the Game!', clr, 60)
+    def checkGameEnd(self):
+        trigger = True
+        all_tracks = np.array([self.Combat, self.Reputation, self.Knowledge, self.Capital])
+        if (4 in gameEnd) and np.any(all_tracks < gameEnd[4]):
+            trigger = False
+        if (3 in gameEnd) and (np.sum(all_tracks >= gameEnd[3])<3):
+            trigger = False
+        if (2 in gameEnd) and (np.sum(all_tracks >= gameEnd[2])<2):
+            trigger = False
+        if (1 in gameEnd) and np.all(all_tracks < gameEnd[1]):
+            trigger = False
+        for track in ['Reputation', 'Combat', 'Capital', 'Combat']:
+            if (track in gameEnd) and (self.__dict__[track] < gameEnd[track]):
+                trigger = False
+        if trigger:
+            output("You Triggered End Game!", 'blue')
+            socket_client.send('[GAME END]', '')
+            socket_client.send('[END STATS]', {'Combat':self.Combat, 'Reputation':self.Reputation, 'Capital':self.Capital, 'Knowledge':self.Knowledge})
     def updateSkill(self, skill, val=1, max_lvl=12):
         lvl_gain = max([0, min([max_lvl - self.skills[skill], val])])
         if lvl_gain != val:
             output(f"Your level in {skill} was not able to level beyond {max_lvl} with this action", 'yellow')
         self.skills[skill] += lvl_gain
         self.Knowledge += lvl_gain
+        self.checkGameEnd()
         if (skill == 'Crafting') and (hasattr(self, 'PlayerTrack')):
             self.PlayerTrack.craftingTable.update_lbls()
     def addXP(self, skill, xp, msg=''):
@@ -2434,6 +2550,7 @@ class Player(Image):
         self.combat[self.attributes[attribute]] += lvl_gain
         self.current[self.attributes[attribute]] += lvl_gain
         self.Combat += lvl_gain
+        self.checkGameEnd()
         self.update_mainStatPage()
     def applyBoost(self, attribute, val=1, update_stats=True):
         index = self.attributes[attribute]
@@ -2470,6 +2587,7 @@ class Player(Image):
                 self.training_allowed[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['home_cap']
+                self.checkGameEnd()
             else:
                 if self.markets[city]:
                     output('You already own a market here!','yellow')
@@ -2478,6 +2596,7 @@ class Player(Image):
                 self.markets[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['market_cap']
+                self.checkGameEnd()
             exitActionLoop()()
         if barter is None:
             output(f"This will cost {cost}. Attempt to Barter (+1 Fatigue)?", 'blue')
@@ -2560,6 +2679,7 @@ class Player(Image):
             self.villages[city]['village3'] = [item, rounds, 1] # Item, Rounds until item is received, number of items to receive
             self.coins -= cost
             self.Capital += 1
+            self.checkGameEnd()
             exitActionLoop(amt=1)()
             return
         categ, price = getItemInfo(item)
@@ -2579,6 +2699,7 @@ class Player(Image):
         self.addItem(item, -1)
         self.villages[city][self.currenttile.tile] = [item, rounds, 2] # A newly produced item and your original (borrowed) item
         self.Capital += 1
+        self.checkGameEnd()
         self.coins -= cost
         exitActionLoop(amt=1)()
     def storeInvestment(self, city, village, item, amt):
@@ -3206,7 +3327,7 @@ class CraftingTable(GridLayout):
             for slot in range(1, 8):
                 self.P.cspace[space][slot-1] = self.cspace[space][slot].text if self.cspace[space][slot].text in gameItems['Crafting'] else None
     def loadTable(self):
-        for space in range(3):
+        for space in range(2):
             for slot in range(1, 8):
                 if self.P.cspace[space][slot-1] is not None:
                     self.confirmed_add_slot(self.P.cspace[space][slot-1], space, slot, False)
@@ -3348,8 +3469,8 @@ def CleanHome(_=None):
     B.count = B.count + 1 if hasattr(B, 'count') else 1
     output(f"You spent an action cleaning the home (Total: {B.count})")
     if B.count >= 4:
-        P.addItem('string')
-        P.addItem('beads')
+        P.addItem('string', 1)
+        P.addItem('beads', 1)
         P.PlayerTrack.Quest.update_quest_status((1, 2), 'complete')
     exitActionLoop()()
     
@@ -3412,7 +3533,7 @@ def SpareWithBoy(_=None):
     P = lclPlayer()
     if P.paused:
         return
-    attack = P.base[P.attributes["Attack"]]
+    attack = P.combat[P.attributes["Attack"]]
     r = rbtwn(1, 5, None, attack, 'Sparring ')
     if r <= attack:
         output("The young warrior is satisfied with your playful duel! Impact stability increases by 1.", 'green')
@@ -3512,8 +3633,8 @@ def LibrariansSecret(_=None):
     P = lclPlayer()
     coord, distance, path = P.currenttile.findNearest('oldlibrary')
     output(f"The old library where they librarian lost his book is tinted green on the map!", 'blue')
-    P.PlayerTrack.Quest.quests[2, 5].tile = P.parentBoard.gridtiles[coord]
-    P.PlayerTrack.Quest.quests[2, 5].tile.color = (1, 1.5, 1, 1)
+    P.PlayerTrack.Quest.quests[2, 5].coord = coord
+    P.parentBoard.gridtiles[coord].color = (1, 1.5, 1, 1)
     P.PlayerTrack.Quest.quests[2, 5].has_book = False
     
 def HandOverBook(_=None):
@@ -3565,10 +3686,10 @@ def PursuadeStealthMaster(_=None):
     elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'has_book') and P.PlayerTrack.Quest.quests[2, 8].has_book:
         output("You already own the book!", 'yellow')
         exitActionLoop(amt=0)()
-    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]>0) and (P.currenttile==P.PlayerTrack.Quest.quests[2, 8].tile):
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]>0) and (P.currentcoord==P.PlayerTrack.Quest.quests[2, 8].coord):
         output(f"You need to wait {P.PlayerTrack.Quest.quests[2, 8].wait_rounds} more rounds for master to write the book", 'yellow')
         exitActionLoop(amt=0)()
-    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]==0) and (P.currenttile==P.PlayerTrack.Quest.quests[2, 8].tile):
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]==0) and (P.currentcoord==P.PlayerTrack.Quest.quests[2, 8].coord):
         P.PlayerTrack.Quest.quests[2, 8].has_book = True
         output("The stealth master hands you the book, now present it to the librarian at home!", 'blue')
         exitActionLoop('minor')()
@@ -3578,7 +3699,7 @@ def PursuadeStealthMaster(_=None):
         if r <= persuasion:
             output("You convinced the master stealth master to write you a special stealth book! Come back in 5 rounds to pick it up!", 'blue')
             P.PlayerTrack.Quest.quests[2, 8].wait_rounds = 5
-            P.PlayerTrack.Quest.quests[2, 8].tile = P.currenttile
+            P.PlayerTrack.Quest.quests[2, 8].coord = P.currentcoord
         else:
             output("You fail to convince the master to write you a book", 'yellow')
         exitActionLoop()()
@@ -4041,7 +4162,7 @@ def PlaceFriend(_=None):
     for tileType in ['randoms', 'ruins', 'battle1', 'battle2', 'wilderness']:
         allPos += positions[tileType]
     randPos = np.random.choice(allPos)
-    P.PlayerTrack.Quest.quests[5, 2].tile = P.parentBoard.gridtiles[randPos]
+    P.PlayerTrack.Quest.quests[5, 2].coord = randPos
     P.PlayerTrack.Quest.quests[5, 2].has_friend = False
     
 def ShowFriend(_=None):
@@ -4112,7 +4233,7 @@ def ConvinceBarterMaster(_=None):
     
 def HighlightMammothTile(_=None):
     P = lclPlayer()
-    P.PlayerTrack.Quest.quests[1, 8].tile_found.color = (1, 1.5, 1, 1)
+    P.parentBoard.gridtiles[P.PlayerTrack.Quest.quests[1, 8].coord_found].color = (1, 1.5, 1, 1)
     output("In case you forgot, the tile you found the baby mammoth is tinted green")
 
 def KilledMammoth(_=None):
@@ -4221,7 +4342,7 @@ class Quest:
             datarow = [Button(text=str(mission), disabled=True, background_disabled_normal='', color=(0,0,0,1))]
             for stage in range(1, 6):
                 row = self.Q[(self.Q['Stage']==stage)&(self.Q['Mission']==mission)]
-                msg = 'Requirement: ' + str(row['Requirements'].iloc[0]) + ' | Failable: ' + str(row['Failable'].iloc[0]) + ' | Reward: ' + str(row['Rewards'].iloc[0]) + '\nProcedure: '+ str(row['Procedure'].iloc[0])
+                msg = f"{row['Name'].iloc[0]}\nRequirement: " + str(row['Requirements'].iloc[0]) + ' | Failable: ' + str(row['Failable'].iloc[0]) + ' | Reward: ' + str(row['Rewards'].iloc[0]) + '\nProcedure: '+ str(row['Procedure'].iloc[0])
                 B = HoverButton(self.questDisplay, msg, text=row['Name'].iloc[0], disabled=False if (stage==1) and self.req_met((stage, mission)) else True)
                 B.mission = mission
                 B.stage = stage
@@ -4252,11 +4373,13 @@ class Quest:
     def loadTable(self):
         for mission in range(1, 9):
             for stage in range(1, 6):
-                for field, value in self.playerTrack.player.reputation[mission-1, stage-1].items():
+                if self.playerTrack.player.reputation[stage-1, mission-1]['status'] != 'not started':
+                    print((stage, mission), self.playerTrack.player.reputation[stage-1, mission-1])
+                for field, value in self.playerTrack.player.reputation[stage-1, mission-1].items():
                     if field == 'status':
                         self.update_quest_status((stage, mission), value, False)
                     else:
-                        setattr(self.quests[mission, stage], field, value)
+                        setattr(self.quests[stage, mission], field, value)
     def req_met(self, quest):
         init_req = eval(quest_req[quest]) if quest in quest_req else True
         inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
@@ -4272,18 +4395,28 @@ class Quest:
             self.quests[quest].color = (1, 1, 1, 1)
             if verbose: output(f"Mission '{self.quests[quest].text}' must be restarted!", 'red')
         elif (new_status == 'failed'):
+            self.quests[quest].disabled = True
             if verbose: output(f"You failed the mission '{self.quests[quest].text}'!", 'red')
             self.quests[quest].background_color = (3, 0, 0, 1.5)
-        elif (new_status == 'complete') and (self.quests[quest].status == 'started'):
+            self.quests[quest].color = (0.6, 0.6, 0.6, 1)
+        elif (new_status == 'complete'):
+            self.quests[quest].disabled = True
             if verbose: output(f"You completed the mission '{self.quests[quest].text}'! Reputation increases by {self.quests[quest].stage}!", 'green')
             self.quests[quest].background_color = (0, 3, 0, 1.5)
-            if verbose: self.playerTrack.player.Reputation += self.quests[quest].stage
+            self.quests[quest].color = (0.6, 0.6, 0.6, 1)
+            if verbose: 
+                self.playerTrack.player.Reputation += self.quests[quest].stage
+                self.playerTrack.player.checkGameEnd()
             self.playerTrack.reputationTab.text = f"Reputation: [color={self.playerTrack.hclr}]{self.playerTrack.player.Reputation}[/color]"
             self.stage_completion[self.quests[quest].stage] += 1
             if verbose:
                 for city in city_info:
                     if self.playerTrack.player.Reputation > city_info[city]['entry']:
                         self.playerTrack.player.entry_allowed[city] = True
+                    if self.playerTrack.player.Reputation > (2*city_info[city]['entry']):
+                        self.playerTrack.player.market_allowed[city] = True
+                    elif self.playerTrack.player.Reputation > (3*city_info[city]['entry']):
+                        self.playerTrack.player.training_allowed[city] = True
         else:
             # Each statement was failed so assume that the status should not be changed
             return
@@ -4386,8 +4519,8 @@ class PlayerTrack(GridLayout):
         for i in range(len(self.player.atrorder)):
             atr = self.player.atrorder[i]
             if atr in {'Attack', 'Technique'}:
-                adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([city[0].upper()+city[1:] for city in adept_loc[self.player.combatstyle]])
-                mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([city[0].upper()+city[1:] for city in master_loc[self.player.combatstyle]])
+                adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in adept_loc[self.player.combatstyle]])
+                mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in master_loc[self.player.combatstyle]])
             else:
                 adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([city[0].upper()+city[1:] for city in adept_loc[atr]])
                 mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([city[0].upper()+city[1:] for city in master_loc[atr]])
@@ -4397,16 +4530,22 @@ class PlayerTrack(GridLayout):
             else:
                 boosts = ''
             msg = adpt+' | '+mstr+boosts
+            current = {'text':str(self.player.current[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}
+            if len(self.player.group) > 0:
+                group_disp = []
+                for warrior, lvls in self.player.group.items():
+                    group_disp.append(f'{warrior}: {lvls[i]}')
+                current['hover'] = (self.combatDisplay, ', '.join(group_disp))
             data.append([{'text':atr,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1),'hover':(self.combatDisplay, msg)},
                          {'text':str(self.player.combat[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
                          {'text':str(self.player.boosts[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
-                         {'text':str(self.player.current[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
+                         current])
         return data
     def get_Knowledge(self):
         data = []
         for skill in self.player.skills:
-            adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([city[0].upper()+city[1:] for city in adept_loc[skill]])
-            mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([city[0].upper()+city[1:] for city in master_loc[skill]])
+            adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in adept_loc[skill]])
+            mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in master_loc[skill]])
             msg = adpt+' | '+mstr
             data.append([{'text':skill,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1),'hover':(self.knowledgeDisplay, msg)},
                          {'text':str(self.player.skills[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
@@ -4420,7 +4559,8 @@ class PlayerTrack(GridLayout):
                 fighting = fighting.union(sk.difference({city}))
         msg = '[color=009e33]Not skirmishing![/color]' if len(fighting) == 0 else '[color=b50400]In skirmish with[/color]: '+', '.join([city[0].upper()+city[1:] for city in fighting])
         reputation = "\n" if self.player.entry_allowed[city] else f"\nEntry Reputation: [color={self.hclr}]{city_info[city]['entry']}[/color] | "
-        msg += f"{reputation}Items Sold: "+', '.join(sorted(city_info[city]['sell']))
+        items_allowed = 'Sold' if self.player.market_allowed[city] else '[color=b50400]Locked[/color]'
+        msg += f"{reputation}Items {items_allowed}: "+', '.join(sorted(city_info[city]['sell']))
         data['hover'] = (self.capitalDisplay, msg)
         data['background_color'] = (1,1,1,0) if len(fighting) == 0 else (1, 0, 0, 0.3)
         return data
@@ -4711,6 +4851,37 @@ def city_trainer(abilities, mastery, _=None):
     actions["Back"] = exitActionLoop(amt=0)
     actionGrid(actions, False)
 
+def city_consequence(city):
+    P = lclPlayer()
+    # Check if tensions exist between the cities
+    if city in Skirmishes[2][P.birthcity]:
+        # Check if currently in skirmish
+        S = frozenset([city, P.birthcity])
+        if S in Skirmishes[0]:
+            # 1/3 probability that hooligan is aggrevated
+            if rbtwn(0,2) == 0:
+                output("Hooligans are aggrevated!", 'yellow')
+                # Check if stealth saves you
+                stealth = P.activateSkill("Stealth")
+                r = rbtwn(0, 12, None, stealth, 'Stealth ')
+                if r <= stealth:
+                    P.useSkill("Stealth")
+                    output("You are able to avoid hooligan's detection!", 'green')
+                else:
+                    persuasion = P.activateSkill("Persuasion")
+                    r = rbtwn(0, 12, None, persuasion, "Persuasion ")
+                    if r <= persuasion:
+                        P.useSkill("Persuasion")
+                        output(f"You are able to convince the hooligan you mean no harm.", 'green')
+                    else:
+                        encounter(f'{city[0].upper()+city[1:]} Hooligan', [15, 80], [cities[city]['Combat Style']], {'coins':[1, 8]})
+                        return
+            else:
+                output(f"Be mindful: Tensions are active between {city} and {P.birthcity}! Hooligans could be aggrevated!", 'yellow')
+        else:
+            output(f"Tensions between {city} and {P.birthciy} are calm at the moment.")
+    exitActionLoop()()
+
 def city_actions(city, _=None):
     P = lclPlayer()
     def Sparring(_=None):
@@ -4729,10 +4900,12 @@ def city_actions(city, _=None):
         P.coins -= 1
         P.recover(2)
     T = game_app.game_page.board_page.citytiles[city]
-    actions = {'Market':partial(Trading, False)}
+    actions = {}
     if P.training_allowed[P.currenttile.tile]:
         actions['Adept'] = partial(city_trainer, T.adept_trainers, 'adept')
         actions['Master'] = partial(city_trainer, T.master_trainers, 'city')
+    if P.market_allowed[P.currenttile.tile]:
+        actions['Market'] = partial(Trading, False)
     if (P is not None) and (P.currenttile.tile == 'scetcher'):
         actions['Duel'] = Duelling
     elif (P is not None) and (P.birthcity == city): 
@@ -4756,7 +4929,7 @@ def city_actions(city, _=None):
         actions["Add Warrior to Group"] = ConvinceWarriorToJoin
     if (P.PlayerTrack.Quest.quests[5, 5].status == 'started') and (P.currenttile.tile == 'demetry'):
         actions["Convince Bartering Master"] = ConvinceBarterMaster
-    if (P.PlayerTrack.Quest.quests[5, 7].status=='started') and (P.currenttile == P.PlayerTrack.Quest.quests[2, 8].tile):
+    if (P.PlayerTrack.Quest.quests[5, 7].status=='started') and (P.currentcoord == P.PlayerTrack.Quest.quests[2, 8].coord):
         actions["Approach Stealth Master"] = AskMasterStealthForMayor
     actionGrid(actions, True)
 
@@ -4903,6 +5076,12 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         if self.parentBoard.inspect_mode:
             if self.tile in avail_actions:
                 self.parentBoard.game_page.inspectTile(*avail_actions[self.tile](inspect=True))
+            if self.tile in consequence_message:
+                self.parentBoard.game_page.consequenceDisplay.text = consequence_message[self.tile]
+            elif (self.tile in Skirmishes[2][self.parentBoard.localPlayer.birthcity]):
+                self.parentBoard.game_page.consequenceDisplay.text = 'Hooligan encounter chance: 1/3. Hooligan Lvl: 15-80. Reward: 1-8 coins. Hooligan Avoidance: (stealth+1)/13, if fails then (persuasion+1)/13.'
+            else:
+                self.paretnBoard.game_page.consequenceDisplay.text = ''
         else:
             if self.parentBoard.localPlayer.paused:
                 return
@@ -4928,15 +5107,13 @@ class BoardPage(FloatLayout):
         self.localPlayer = None
         self.startLblMsgs = []
         self.startLblTimes = []
+        self.startLblLast = []
         for tiletype in positions:
             if tiletype == 'randoms':
                 continue
             for x, y in positions[tiletype]: self.add_tile(tiletype, x, y)
-        np.random.seed(seed)
-        randomChoice = np.random.choice(randoms*int(np.ceil(len(positions['randoms'])/len(randoms))), len(positions['randoms']))
-        for i in range(len(positions['randoms'])):
-            x, y = positions['randoms'][i]
-            self.add_tile(randomChoice[i], x, y)
+        self.semiRandomTileDistribution()
+        #self.completeRandomTileDistribution()
         for T in self.gridtiles.values():
             if T.tile in cities:
                 self.citytiles[T.tile] = T
@@ -4949,6 +5126,33 @@ class BoardPage(FloatLayout):
         self.inspectButton = Button(text='Inspect', pos_hint={'x':0.07,'y':0}, size_hint=(0.06, 0.03))
         self.inspectButton.bind(on_press=self.toggleInspect)
         self.add_widget(self.inspectButton)
+    def completeRandomTileDistribution(self):
+        np.random.seed(seed)
+        randomChoice = np.random.choice(randoms*int(np.ceil(len(positions['randoms'])/len(randoms))), len(positions['randoms']))
+        for i in range(len(positions['randoms'])):
+            x, y = positions['randoms'][i]
+            self.add_tile(randomChoice[i], x, y)
+    def semiRandomTileDistribution(self):
+        print(seed)
+        np.random.seed(seed)
+        randQ = randoms*int(np.ceil(len(positions['randoms'])/len(randoms)))
+        coordQ = deepcopy(positions['randoms'])
+        coord = coordQ.pop()
+        while randQ:
+            nxt = randQ.pop(0)
+            same = 0
+            neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if coord[1] % 2 else -1, 1], [1 if coord[1] % 2 else -1, -1]]
+            for neighbor in neighbors:
+                n = (coord[0]+neighbor[0], coord[1]+neighbor[1])
+                if (n in self.gridtiles) and (self.gridtiles[n].tile == nxt):
+                    same += 1
+            if np.random.rand() < ((1/10) ** same):
+                self.add_tile(nxt, coord[0], coord[1])
+                if len(coordQ) == 0:
+                    break
+                coord = coordQ.pop()
+            else:
+                randQ.append(nxt)
     def add_tile(self, tiletype, x, y):
         T = Tile(tiletype, x, y)
         self.gridtiles[(x,y)] = T
@@ -5022,6 +5226,10 @@ class BoardPage(FloatLayout):
                 T.adept_trainers = adept
                 T.master_trainers = master
             
+            # Check to see if we are loading the player
+            if os.path.exists(f'saves\\{username}\\{load_file}.pickle'):
+                self.localPlayer.loadPlayer()
+            
             # Begin city action loop
             self.localPlayer.go2action()
             
@@ -5045,12 +5253,14 @@ class BoardPage(FloatLayout):
         if msg is not None:
             self.startLblMsgs.append(msg)
             self.startLblTimes.append(timeNow)
-        max_i = -1
+            self.startLblLast.append(scheduleTime)
+        dlt_i = []
         for i in range(len(self.startLblTimes)):
-            if (timeNow - self.startLblTimes[i]) > scheduleTime:
-                max_i = i
-        self.startLblMsgs = self.startLblMsgs[(max_i+1):]
-        self.startLblTimes = self.startLblTimes[(max_i+1):]
+            if (timeNow - self.startLblTimes[i]) > self.startLblLast[i]:
+                dlt_i.append(i)
+        self.startLblMsgs = list(np.delete(self.startLblMsgs, dlt_i))
+        self.startLblTimes = list(np.delete(self.startLblTimes, dlt_i))
+        self.startLblLast = list(np.delete(self.startLblLast, dlt_i))
         self.startLabel.text = '\n'.join(self.startLblMsgs)
         if msg is not None: 
             if msg == 'Start Round!': msg = '\n'+msg
@@ -5080,8 +5290,9 @@ class BoardPage(FloatLayout):
             P.updateView()
     def toggleInspect(self, _=None):
         self.inspect_mode = not self.inspect_mode
-        self.inspectButton.text = 'Move' if self.inspect_mode else 'Inspect'
+        self.inspectButton.text = 'Take Action' if self.inspect_mode else 'Inspect'
         self.game_page.outputscreen.current = 'Inspect' if self.inspect_mode else 'Actions'
+        self.game_page.secondscreen.current = 'Consequence' if self.inspect_mode else 'Action Grid'
 
 class ScrollLabel(Label, HoverBehavior):
     def __init__(self, **kwargs):
@@ -5149,10 +5360,21 @@ class GamePage(GridLayout):
         self.inspectView = Table(header = ['Excavate For', 'Base\nProbability', 'Your Max\nProbability'], data=[], header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True, pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y))
         screen.add_widget(self.inspectView)
         self.outputscreen.add_widget(screen)
+        
+        self.secondscreen = ScreenManager()
+        screen = Screen(name='Action Grid')
         self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
         self.recover_button = Button(text='Rest (2)')
         # Button is bound after local player is detected
         self.actionButtons = [self.recover_button]
+        screen.add_widget(self.actionGrid)
+        self.secondscreen.add_widget(screen)
+        screen = Screen(name='Consequence')
+        self.consequenceDisplay = Button(text='', disabled=True, background_disabled_normal='', color=(0,0,0,1), pos_hint={'x':0,'y':(input_y+label_y+stat_y)}, size_hint_y=action_y)
+        self.consequenceDisplay.text_size = self.consequenceDisplay.size
+        self.consequenceDisplay.bind(pos=self.update_bkgSize, size=self.update_bkgSize)
+        screen.add_widget(self.consequenceDisplay)
+        self.secondscreen.add_widget(screen)
         self.statGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y)},size_hint_y=stat_y,cols=4)
         self.display_page = ScrollLabel(text='',pos_hint={'x':0,'y':input_y},color=(1,1,1,0.8),size_hint=(1,label_y),markup=True)
         self.display_page.text_size = self.display_page.size
@@ -5166,7 +5388,7 @@ class GamePage(GridLayout):
         # Append the widgets
         self.right_line.add_widget(self.toggleView)
         self.right_line.add_widget(self.outputscreen)
-        self.right_line.add_widget(self.actionGrid)
+        self.right_line.add_widget(self.secondscreen)
         self.right_line.add_widget(self.display_page)
         self.right_line.add_widget(self.new_message)
         self.add_widget(self.right_line)
@@ -5199,6 +5421,7 @@ class GamePage(GridLayout):
         self.outrect.pos = self.output.pos
         self.display_page.text_size = self.display_page.size
         self.output.text_size = self.output.size
+        self.consequenceDisplay.text_size = self.consequenceDisplay.size
     def update_output(self, message, color=None):
         if color is None:
             message = message
@@ -5210,16 +5433,16 @@ class GamePage(GridLayout):
         #self.output.text += '\n' + message
         self.output.add_msg(message)
     def update_display(self, username, message):
-        if message[0]=='\n':
-            message = message[1:]
+#        if message[0]=='\n':
+#            message = message[1:]
         clr = get_hexcolor((131,215,190)) if username == self.board_page.localuser else get_hexcolor((211, 131, 131))
         #self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
-        self.display_page.add_msg(f'\n|[color={clr}]{username}[/color]| ' + message)
+        self.display_page.add_msg(f'|[color={clr}]{username}[/color]| ' + message)
     def on_key_down(self, instance, keyboard, keycode, text, modifiers):
         # We want to take an action only when Enter key is being pressed, and send a message
         if keycode == 40:
             # Send Message
-            message = self.new_message.text
+            message = self.new_message.text.replace('\n','')
             self.new_message.text = ''
             if message:
                 self.update_display(self.board_page.localuser, message)
@@ -5310,31 +5533,231 @@ class LaunchPage(GridLayout):
         self.cols = 1
         self.username = game_app.connect_page.username.text
         self.usernames, self.ready = [self.username], {self.username:0}
-        self.label = Label(text=f'[color=000000]{self.username}: Not Ready[/color]', height=Window.size[1]*0.9, size_hint_y=None, markup=True)
-        self.add_widget(self.label)
+        superGrid = GridLayout(cols=2,height=Window.size[1]*0.9, size_hint_y=None)
+        
+        settingsGrid = GridLayout(cols=1)
+        settingsGrid.add_widget(Button(text="Local Settings", font_size=16, color=(0.2, 0.2, 0.4, 1), underline=True, disabled=True, background_disabled_normal='', background_color=(0.92, 0.92, 0.92, 1), height=Window.size[1]*0.05, size_hint_y=None))
+        playerSettings = GridLayout(cols=2)
+        self.auto_resize_lbl = Button(text="Auto Resize:\nTrue", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.auto_resize_input = Button(text="Toggle")
+        self.auto_resize_input.bind(on_press=self.auto_resize)
+        playerSettings.add_widget(self.auto_resize_lbl)
+        playerSettings.add_widget(self.auto_resize_input)
+        
+        settingsGrid.add_widget(playerSettings)
+        settingsGrid.add_widget(Button(text="Global Settings", font_size=16, color=(0.2, 0.2, 0.4, 1), underline=True, disabled=True, background_disabled_normal='', background_color=(0.92, 0.92, 0.92, 1), height=Window.size[1]*0.05, size_hint_y=None))
+        
+        gameSettings = GridLayout(cols=2)
+        self.npc_difficulty_lbl = Button(text="[color=000000]NPC Difficulty:[/color]\n[color=ffb700]Moderate[/color]", color=(0,0,0,1), disabled=True, background_disabled_normal='',markup=True)
+        self.npc_difficulty_input = TextInput()
+#        dropdown = DropDown()
+#        validArgs = ['Very Easy', 'Easy', 'Moderate', 'Hard', 'Very Hard']
+#        for index in range(5):
+#            btn = Button(text=validArgs[index], color=(1, 1, 1, 1))
+#            btn.bind(on_press=lambda btn: dropdown.select(btn.text))
+#            dropdown.add_widget(btn)
+#        self.npc_difficulty_input = Button(text='Moderate', color=(1, 1, 1, 1))
+#        self.npc_difficulty_input.bind(on_release=dropdown.open)
+#        dropdown.bind(on_select=lambda instance, x: setattr(self.npc_difficulty_input, 'text', x))
+        
+        gameSettings.add_widget(self.npc_difficulty_lbl)
+        gameSettings.add_widget(self.npc_difficulty_input)
+        self.seed_lbl = Button(text="Seed:\nNone", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.seed_input = TextInput()
+        gameSettings.add_widget(self.seed_lbl)
+        gameSettings.add_widget(self.seed_input)
+        self.load_lbl = Button(text="Load:\nNone", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.load_input = TextInput()
+        gameSettings.add_widget(self.load_lbl)
+        gameSettings.add_widget(self.load_input)
+        self.save_lbl = Button(text="Save:\nNone", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.save_input = TextInput()
+        gameSettings.add_widget(self.save_lbl)
+        gameSettings.add_widget(self.save_input)
+        self.end_lbl = Button(text="Game End:\n2:100", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.end_input = TextInput()
+        gameSettings.add_widget(self.end_lbl)
+        gameSettings.add_widget(self.end_input)
+        
+        settingsGrid.add_widget(gameSettings)
+        self.submitButton = Button(text="Request Changes", height=Window.size[1]*0.05, size_hint_y=None, background_color=(0, 2, 0.9, 1))
+        self.submitButton.bind(on_press=self.submitChange)
+        settingsGrid.add_widget(self.submitButton)
+        
+        lobbyGrid = GridLayout(cols=1)
+        lobbyGrid.add_widget(Button(text="Lobby", font_size=16, color=(0.2, 0.2, 0.4, 1), underline=True, disabled=True, background_disabled_normal='', background_color=(0.96, 1, 1, 1), height=Window.size[1]*0.05, size_hint_y=None))
+        self.label = Button(text=f'[color=000000]{self.username}: Not Ready[/color]', markup=True, disabled=True, background_disabled_normal='', background_color=(0.96, 1, 1, 1))#, height=Window.size[1]*0.9, size_hint_y=None
+        lobbyGrid.add_widget(self.label)
+        superGrid.add_widget(lobbyGrid)
+        superGrid.add_widget(settingsGrid)
+        self.add_widget(superGrid)
         self.readyButton = Button(text="Ready Up")
         self.readyButton.bind(on_press=self.update_self)
         self.add_widget(self.readyButton)
         socket_client.start_listening(self.incoming_message, show_error)
         socket_client.send("[LAUNCH]","Listening")
-    def check_launch(self):
+    def check_launch(self, _=None):
         all_ready = True
         for value in self.ready.values():
             if value == 0:
                 all_ready = False
                 break
         if all_ready:
+            # Create GamePage here to take advantage of seed.
+#            game_app.game_page = GamePage()
+#            screen = Screen(name='Game')
+#            screen.add_widget(game_app.game_page)
+#            game_app.screen_manager.add_widget(screen)
+            game_app.start_game_page()
+            
+            #def bootup(_=None):
             game_launched[0] = True
-            game_app.screen_manager.current = 'Birth City Chooser'
-    def refresh_label(self):
+            if os.path.exists(f'saves\\{self.username}\\{load_file}.pickle'):
+                with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
+                    playerInfo = pickle.load(f)
+                socket_client.send("[CLAIM]",playerInfo['birthcity'])
+                game_app.chooseCity_page.make_claim(self.username, playerInfo['birthcity'])
+                game_app.screen_manager.current = 'Game'
+            else:
+                game_app.screen_manager.current = 'Birth City Chooser'
+            #Clock.schedule_once(bootup, 5)
+    def refresh_label(self, _=None):
         self.label.text = '[color=000000]'+'\n'.join([self.usernames[i]+': '+['Not Ready', 'Ready'][self.ready[self.usernames[i]]] for i in range(len(self.usernames))])+'[/color]'
         self.check_launch()
+        #Clock.schedule_once(self.check_launch, 0.5)
+    def auto_resize(self, instance):
+        global auto_resize
+        if self.auto_resize_lbl.text == "Auto Resize:\nTrue":
+            self.auto_resize_lbl.text = "Auto Resize:\nFalse"
+            auto_resize = False
+        else:
+            self.auto_resize_lbl.text = "Auto Resize:\nTrue"
+            auto_resize = True
+    def npc_difficulty(self, new=None):
+        new = self.npc_difficulty_input.text if new is None else new
+        validArgs = {'very easy':['Very Easy','[color=43dc00]'], 'easy':['Easy','[color=438700]'], 'moderate':['Moderate','[color=ffb700]'], 'hard':['Hard','[color=ff0700]'], 'very hard':['Very Hard','[color=850700]']}
+        if new != '':
+            self.npc_difficulty_input.text = ''
+            if new.lower() in validArgs:
+                self.npc_difficulty_lbl.text = f'[color=000000]NPC Difficulty:[/color]\n{validArgs[new.lower()][1]}{validArgs[new.lower()][0]}[/color]'
+                if self.ready[self.username]:
+                    self.update_self()
+                return new
+        return False
+    def seed(self, new=None):
+        global seed
+        new = self.seed_input.text if new is None else new
+        if new != '':
+            self.seed_input.text = ''
+            try:
+                seed = int(new)
+                self.seed_lbl.text = f'Seed:\n{seed}'
+                if self.ready[self.username]:
+                    self.update_self()
+                return seed
+            except ValueError:
+                pass
+        return False
+    def load(self, new=None):
+        global load_file
+        new = self.load_input.text if new is None else new
+        if new != '':
+            self.load_input.text = ''
+            load_file = new
+            self.load_lbl.text = f'Load:\n{load_file}'
+            if load_file == 'None':
+                self.load_lbl.background_color = (1, 1, 1, 1)
+            elif os.path.exists(f'saves\\{self.username}\\{load_file}.pickle'):
+                # If loading, then the board has to be the same, so receive seed data -- this will create issues if the files are on different games
+                with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
+                    playerInfo = pickle.load(f)
+                d = self.seed(playerInfo['seed'])
+                if d: socket_client.send('[SEED]', d)
+                s = self.save(load_file)
+                if s: socket_client.send('[SAVE]', s)
+                e = self.gameEnd(playerInfo['gameEnd'])
+                if e: socket_client.send('[END SETTING]', e)
+                self.load_lbl.background_color = (0.8, 1, 0.8, 1)
+            else:
+                self.load_lbl.background_color = (1, 0.8, 0.8, 1)
+            if self.ready[self.username]:
+                self.update_self()
+            return load_file
+        return False
+        # [INCOMPLETE] Need to check each player to see if they have the correct data saved
+    def save(self, new=None):
+        global save_file
+        new = self.save_input.text if new is None else new
+        if new != '':
+            self.save_input.text = ''
+            save_file = new
+            self.save_lbl.text = f'Save:\n{save_file}'
+            if self.ready[self.username]:
+                self.update_self()
+            return save_file
+        return False
+    def gameEnd(self, new=None):
+        global gameEnd
+        new = self.end_input.text if new is None else new
+        if new != '':
+            valid = True
+            params = new.replace(' ','').split(',')
+            potential, texts = {}, []
+            for p in params:
+                psplit = p.split(':')
+                if len(psplit) != 2:
+                    valid = False
+                    break
+                setting, spec = psplit
+                if not isint(spec):
+                    valid = False
+                    break
+                spec = int(spec)
+                if int(spec) > 120:
+                    valid = False
+                    break
+                if isint(setting) and (int(setting) <= 4) and (int(setting) >= 1):
+                    setting = int(setting)
+                elif setting.lower() in {'reputation', 'combat', 'capital', 'knowledge'}:
+                    setting = setting.lower()[0].upper()+setting.lower()[1:]
+                else:
+                    valid = False
+                    break
+                potential[setting] = spec
+                texts.append(f'{setting}:{spec}')
+            if valid:
+                gameEnd = potential
+                self.end_lbl.text = 'Game End:\n'+', '.join(texts)
+                return new
+        return False
+    def submitChange(self, instance):
+        n = self.npc_difficulty()
+        if n: socket_client.send('[DIFFICULTY]', n)
+        d = self.seed()
+        if d: socket_client.send('[SEED]', d)
+        l = self.load()
+        if l: socket_client.send('[LOAD]', l)
+        s = self.save()
+        if s: socket_client.send('[SAVE]', s)
+        e = self.gameEnd()
+        if e: socket_client.send('[END SETTING]', e)
     def incoming_message(self, username, category, message):
         if category == '[LAUNCH]':
             if username not in self.ready:
                 self.usernames.append(username)
             self.ready[username] = 1 if message == 'Ready' else 0
-            self.refresh_label()
+            #self.refresh_label()
+            Clock.schedule_once(self.refresh_label, 0.5)
+        elif category == '[DIFFICULTY]':
+            self.npc_difficulty(message)
+        elif category == '[SEED]':
+            self.seed(message)
+        elif category == '[LOAD]':
+            self.load(message)
+        elif category == '[SAVE]':
+            self.save(message)
+        elif category == '[END SETTING]':
+            self.gameEnd(message)
         elif (category == '[CONNECTION]') and (message == 'Closed'):
             self.usernames.remove(username)
             self.ready.pop(username)
@@ -5382,29 +5805,55 @@ class LaunchPage(GridLayout):
         elif category == '[MARKET]':
             Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.02)
         elif category == '[EFFICIENCY]':
-            output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
-            capital_info[message]['efficiency'] += 1
+            def run(_):
+                output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
+                capital_info[message]['efficiency'] += 1
+            Clock.schedule_once(run, 0.1)
         elif category == '[DISCOUNT]':
-            output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
-            capital_info[message]['discount'] += 1
+            def run(_):
+                output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
+                capital_info[message]['discount'] += 1
+            Clock.schedule_once(run, 0.1)
         elif category == '[TRADER ALLOWED]':
-            output(f"{username} convinced traders to start appearing in {message}! (1/8 chance)", 'blue')
-            capital_info[message]['trader allowed'] = True
+            def run(_):
+                output(f"{username} convinced traders to start appearing in {message}! (1/8 chance)", 'blue')
+                capital_info[message]['trader allowed'] = True
+            Clock.schedule_once(run, 0.1)
         elif category == '[REDUCED TENSION]':
-            output(f"{username} reduced the tensions between {' and '.join(list(message[0]))} by a factor of {message[1]}!", 'blue')
-            Skirmishes[1][message[0]] += message[1]
+            def run(_):
+                output(f"{username} reduced the tensions between {' and '.join(list(message[0]))} by a factor of {message[1]}!", 'blue')
+                Skirmishes[1][message[0]] += message[1]
+            Clock.schedule_once(run, 0.1)
         elif category == '[CAPACITY]':
-            output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
-            IncreaseCapacity(message[0], message[1])
-    def update_self(self, _):
+            def run(_):
+                output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
+                IncreaseCapacity(message[0], message[1])
+            Clock.schedule_once(run, 0.1)
+        elif category == '[GAME END]':
+            def run(_):
+                P = lclPlayer()
+                output(f"{username} Triggered End Game!", 'blue')
+                socket_client.send('[END STATS]', {'Combat':P.Combat, 'Reputation':P.Reputation, 'Capital':P.Capital, 'Knowledge':P.Knowledge})
+            Clock.schedule_once(run, 0.1)
+        elif category == '[FINAL END STATS]':
+            def run(_):
+                P = lclPlayer()
+                P.GameEnd(message)
+            Clock.schedule_once(run, 0.1)
+    def update_self(self, _=None):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready
         if self.ready[self.username]:
+            self.label.background_color = (0.3, 1, 0.3, 1)
             socket_client.send("[LAUNCH]","Ready")
             self.readyButton.text = "Not Ready Anymore" 
         else:
+            def blue_screen(_=None):
+                self.label.background_color = (0.96, 1, 1, 1)
+            self.label.background_color = (1, 0.3, 0.3, 1)
             socket_client.send("[LAUNCH]","Not Ready")
             self.readyButton.text = "Ready Up"
+            Clock.schedule_once(blue_screen, 0.3)
         self.refresh_label()
             
         
@@ -5472,7 +5921,7 @@ class ConnectPage(GridLayout):
         port = self.port.text
         ip = self.ip.text
         username = self.username.text
-        with open("prev_details.txt","w") as f:
+        with open("saves\\prev_details.txt","w") as f:
             f.write(f"{ip},{port},{username}")
         # Create info string, update InfoPage with a message and show it
         info = f"Joining {ip}:{port} as {username}"
@@ -5532,6 +5981,9 @@ class EpicApp(App):
         screen = Screen(name='Birth City Chooser')
         screen.add_widget(self.chooseCity_page)
         self.screen_manager.add_widget(screen)
+        
+    def start_game_page(self):
+        Window.clearcolor = (1, 1, 1, 1)
         
         # The Game Page
         self.game_page = GamePage()
