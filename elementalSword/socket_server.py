@@ -125,7 +125,6 @@ connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
                          [10,10, 8, 0, 0, 0, 0, 3, 6, 0, 0, 0, 2, 8],
                          [ 0,12, 0, 0, 0, 0, 0, 7, 0, 0, 0, 6, 0,10],
                          [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
-Skirmishes = [None, {}]
 city_sell = {'anafola':['raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'],
              'benfriege':['raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'],
              'demetry':['raw meat', 'cooked meat', 'fruit', 'string', 'beads', 'hide', 'sand', 'clay', 'leather', 'ceramic', 'glass', 'gems', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'tungsten', 'bartering book', 'crafting book'],
@@ -140,6 +139,21 @@ city_sell = {'anafola':['raw fish', 'cooked fish', 'string', 'beads', 'sand', 's
              'tamariza':['fruit', 'string', 'beads', 'bark', 'rubber', 'iron', 'nickel', 'chromium', 'heating book'],
              'tutalu':['raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'],
              'zinzibar':['raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum']}
+city_labor = {'anafola':{'Persuasion':5, 'Excavating':5},
+             'benfriege':{'Critical Thinking':5, 'Persuasion':5, 'Crafting':8, 'Survival':5},
+             'demetry':{'Bartering':8, 'Crafting':5},
+             'enfeir':{'Critical Thinking':5, 'Heating':5, 'Smithing':5, 'Stealth':8},
+             'fodker':{'Bartering':5, 'Smithing':5},
+             'glaser':{'Critical Thinking':5, 'Persuasion':5, 'Crafting':5, 'Survival':5, 'Excavating':5},
+             'kubani':{'Critical Thinking':5, 'Bartering':5, 'Crafting':5, 'Gathering':5},
+             'pafiz':{'Persuasion':8, 'Crafting':5, 'Heating':5, 'Gathering':5},
+             'scetcher':{'Smithing':5, 'Stealth':5},
+             'starfex':{'Heating':5, 'Gathering':5, 'Excavating':5},
+             'tamarania':{'Smithing':8},
+             'tamariza':{'Critical Thinking':5, 'Persuasion':5, 'Heating':5},
+             'tutalu':{'Smtihing':5, 'Excavating':5},
+             'zinzibar':{'Persuasion':5, 'Smithing':5, 'Survival':8}}
+skills = ['Persuasion', 'Critical Thinking', 'Heating', 'Survival', 'Smithing', 'Crafting', 'Excavating', 'Stealth', 'Gathering', 'Bartering']
 
 def conn2set():
     P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
@@ -149,6 +163,7 @@ def conn2set():
             if P[i][j] > 0:
                 S[frozenset([cities[i], cities[j]])] = P[i][j]
     return S
+Skirmishes = [conn2set(), {}]
 def getSkirmish():
     for S in Skirmishes[0]:
         if S in Skirmishes[1]:
@@ -167,8 +182,22 @@ def getTodaysMarket(max_items=6):
     for city in city_sell:
         city_markets[city] = set(np.random.choice(city_sell[city], max_items))
     return city_markets
+def rbtwn(mn, mx):
+    return np.random.choice(np.arange(mn, mx+1))
+def getTodaysJobs():
+    city_jobs = {}
+    for city in city_labor:
+        s = set()
+        for skill in skills:
+            val = city_labor[city][skill] if skill in city_labor[city] else 2
+            if rbtwn(1, 10) <= val:
+                s.add(skill)
+        city_jobs[city] = s
+    return city_jobs
+            
 
 def updateServer(username, category, msg):
+    global Skirmishes
     if category == '[LAUNCH]':
         if msg == 'Listening':
             if len(client_gameStatus) == 1:
@@ -202,7 +231,6 @@ def updateServer(username, category, msg):
                     break
             if all_ready:
                 game_launched[0] = True
-                Skirmishes[0] = conn2set()
         elif msg == 'Not Ready':
             client_gameStatus[username]['ready'] = False
     elif category == '[CLAIM]':
@@ -215,6 +243,8 @@ def updateServer(username, category, msg):
         default_save[0] = msg
     elif category == '[LOAD]':
         default_load[0] = msg
+    elif category == '[LOAD SKIRMISHES]':
+        Skirmishes = msg
     elif category == '[END SETTING]':
         gameEnd[0] = msg
     elif (category == '[ROUND]') and (msg == 'end'):
@@ -231,7 +261,7 @@ def updateServer(username, category, msg):
                 if 'round end' in client_gameStatus[username]: 
                     client_gameStatus[username]['round end'] = False
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
-                sendMessage('[SERVER]', username, '[MARKET]', getTodaysMarket())
+                sendMessage('[SERVER]', username, '[MARKET]', [getTodaysMarket(), getTodaysJobs()])
     elif category == '[REDUCED TENSION]':
         Skirmishes[0][msg[0]] += msg[1]
     elif category == '[END STATS]':
@@ -269,6 +299,7 @@ def close_socket(notified_socket):
         seed[0] = None
         default_save[0] = None
         default_load[0] = None
+        Skirmishes[0] = conn2set()
         print("All connections closed. Resetting Stats.")
     else:
         for username in client_code:

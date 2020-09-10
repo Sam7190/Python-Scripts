@@ -41,6 +41,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 
 # Settings
+npcDifficulty = 3
 seed = None
 auto_resize = True
 save_file = None
@@ -227,6 +228,13 @@ class HitBox(Button):
             # Allow for a 1% bias correction to the model to avoid 100% click rates, and allow for reduce click probability as a function of volley number and order count
             click_prob.append(AI.cmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, (0.08 * vgID/len(group2boxes))*(self.fpage.order_refresh_count // 3)])))
             dodge_prob.append(AI.dmdl.predict_proba(data)[:,1][0]*0.99*(1 - min([0.8, (0.1 * vgID/len(group2boxes))*(self.fpage.order_refresh_count // 3)])))
+            # Apply NPC Difficulty to Click probability
+            if npcDifficulty < 3:
+                click_prob[-1] *= (1 / (2.5 - (1 - npcDifficulty)))
+                dodge_prob[-1] *= (1 / (2.5 - (1 - npcDifficulty)))
+            else:
+                click_prob[-1] **= (1 / (npcDifficulty-2))
+                dodge_prob[-1] **= (1 / (npcDifficulty-2))
         for vgID, boxIDs in sorted(group2boxes.items()):
             clicked_fake = True
             while clicked_fake and (len(boxIDs)>0):
@@ -331,9 +339,11 @@ class DefBox(Button):
         self.fpage.add_widget(self.RT)
         self.fpage.add_widget(self.FT)
     def npcAttacks(self):
-        Atk = np.max(rbtwn(0, self.fpage.foestats[self.fpage.P.attributes['Attack']])) # Attack chosen technique amt of times, then max is chosen
+        trials = max([1, self.fpage.foestats[self.fpage.P.attributes['Technique']] * (2 ** (npcDifficulty-3))])
+        Atk = np.max(rbtwn(0, self.fpage.foestats[self.fpage.P.attributes['Attack']], trials)) # Attack chosen technique amt of times, then max is chosen
         if Atk > self.fpage.foestats[self.fpage.P.attributes['Stability']]:
-            if rbtwn(0,1)==0:
+            stability_impacted = max([1, npcDifficulty-2])
+            if rbtwn(0,stability_impacted)==0:
                 # Lack of stability effected foe's attack
                 Atk = self.fpage.foestats[self.fpage.P.attributes['Stability']]
         if self.fpage.logDef:
@@ -351,11 +361,13 @@ class DefBox(Button):
                 fakes[np.random.choice(np.arange(len(normalizedCoords)-1), cunning, False)] = True
             positions, sizes = [], []
             technique = self.fpage.foestats[self.fpage.P.attributes['Technique']]
+            trials = max([max([1, npcDifficulty-1]), (2 ** (npcDifficulty-4))])
+            centricity = 0.2 + 0.2*(5-npcDifficulty)
             for coord in normalizedCoords:
-                shiftedCoord = [coord[0]**0.5 if coord[0]>=0.5 else (1 - (1 - coord[0])**0.5),
-                                coord[1]**0.5 if coord[1]>=0.5 else (1 - (1 - coord[1])**0.5)]
+                shiftedCoord = [coord[0]**centricity if coord[0]>=0.5 else (1 - (1 - coord[0])**centricity),
+                                coord[1]**centricity if coord[1]>=0.5 else (1 - (1 - coord[1])**centricity)]
                 # Arbitrarily give technique 3 chances to take effect and pick largest outcome
-                tApplied = np.max(rbtwn(0, technique, max([2, technique//2])))
+                tApplied = np.max(rbtwn(0, technique, trials))
                 size = (self.boxMaxScale - tApplied*self.techniqueScale, self.boxMaxScale - tApplied*self.techniqueScale)
                 rawpos = [shiftedCoord[0]*hitBox_x - size[0]/2, shiftedCoord[1]*hitBox_y - size[1]/2] # This will be shifted by 0.02 once technique size is applied
                 positions.append((float(rawpos[0])+xshift*self.fpage.size[0], float(rawpos[1])+yshift*self.fpage.size[1]))
@@ -1032,6 +1044,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     P.tiered = tier if tier > 1 else False
                     P.go2action(tier)
                 P.started_round = False
+                print(f"Taking {amt} in starting action!")
             else:
                 if consume == 'road':
                     P.road_moves -= amt
@@ -1047,8 +1060,8 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     else:
                         P.update_mainStatPage()
                 elif amt>0:
+                    print(f"Taking {amt} of fatigue!")
                     P.takeAction(amt)
-                
                 if empty_tile: P.currenttile.empty_tile()
                 if (consume is None) or ('tiered' not in consume):
                     P.go2action()
@@ -1799,13 +1812,13 @@ def A_pond(inspect=False):
         return exc, 12
     else:
         P = lclPlayer()
-        if (P.PlayerTrack.Quest.quests[2, 4].status == 'started') and (P.currenttile == P.PlayerTrack.Quest.quests[2, 4].pond):
+        if (P.PlayerTrack.Quest.quests[2, 4].status == 'started') and (P.currentcoord == P.PlayerTrack.Quest.quests[2, 4].pond):
             # The player encounters Serpent Mother instead
             def Reward(_=None):
                 # Companion leaves and player gets scales and raw fish
                 P.group.pop("Companion")
                 P.PlayerTrack.Quest.update_quest_status((2, 4), 'complete')
-                P.PlayerTrack.Quest.quests[2, 4].pond.color = (1,1,1,1)
+                P.parentBoard.gridtiles[P.PlayerTrack.Quest.quests[2, 4].pond].color = (1,1,1,1)
                 P.addItem('scales', 3)
                 P.addItem('raw fish', 2)
             exc.pop('Giant Serpent')
@@ -2155,6 +2168,7 @@ class Player(Image):
         self.training_discount = False
         
         self.coins = cities[self.birthcity]['Coins']
+        self.working = [None, 0]
         self.paralyzed_rounds = 0
         self.tiered = False
         self.cspace = [[None]*7, [None]*7]
@@ -2210,20 +2224,26 @@ class Player(Image):
         myVars['output messages'] = self.parentBoard.game_page.output.messages[1:]
         myVars['seed'] = seed
         myVars['gameEnd'] = gameEnd
+        myVars['capital info'] = capital_info
+        myVars['skirmishes'] = [Skirmishes[1], Skirmishes[0]]
         if not os.path.exists(f'saves\\{self.username}'):
             os.makedirs(f'saves\\{self.username}')
         with open(f'saves\\{self.username}\\{save_file}.pickle', 'wb') as f:
             pickle.dump(myVars, f)
     def loadPlayer(self):
+        global Skirmishes, capital_info
         with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
             myVars = pickle.load(f)
         for field, value in myVars.items():
-            if field in {'username', 'output messages', 'seed', 'gameEnd'}:
+            if field in {'username', 'output messages', 'seed', 'gameEnd', 'capital_info', 'skirmishes'}:
                 continue
             setattr(self, field, value)
         if 'output messages' in myVars:
             for msg in myVars['output messages']:
                 self.parentBoard.game_page.output.add_msg(msg)
+        capital_info = myVars['capital info']
+        Skirmishes[0] = myVars['skirmishes'][1] # They are opposites in the server.
+        Skirmishes[1] = myVars['skirmishes'][0]
         self.PlayerTrack.Quest.loadTable()
         self.PlayerTrack.craftingTable.loadTable()
         self.PlayerTrack.armoryTable.loadTable()
@@ -2482,6 +2502,8 @@ class Player(Image):
             socket_client.send("[ROUND]",'end')
         elif (self.PlayerTrack.Quest.quests[3, 6].status == 'started') and (self.PlayerTrack.Quest.quests[3, 6].action % 2):
             JoinFight()
+        elif self.working[0] is not None:
+            perform_labor()
     def GameEnd(self, player_stats):
         best_total, best_users = -1, []
         for username, stats in player_stats.items():
@@ -3625,8 +3647,8 @@ def MotherSerpent(_=None):
     P = lclPlayer()
     coord, distance, path = P.currenttile.findNearest('pond')
     output(f"The pond where the Mother Serpent lives is tinted green on the map!", 'blue')
-    P.PlayerTrack.Quest.quests[2, 4].pond = P.parentBoard.gridtiles[coord]
-    P.PlayerTrack.Quest.quests[2, 4].pond.color = (1, 1.5, 1, 1)
+    P.PlayerTrack.Quest.quests[2, 4].pond = coord
+    P.parentBoard.gridtiles[coord].color = (1, 1.5, 1, 1)
     P.group["Companion"] = npc_stats(35)
     
 def LibrariansSecret(_=None):
@@ -4850,6 +4872,45 @@ def city_trainer(abilities, mastery, _=None):
     actions = {ability:partial(Train, ability, mastery, False) for ability in abilities}
     actions["Back"] = exitActionLoop(amt=0)
     actionGrid(actions, False)
+    
+skill_users = {'Persuasion':'Politician', 'Critical Thinking':'Librarian', 'Heating':'Chef', 'Survival':'Explorer', 'Smithing':'Smith', 'Crafting':'Innovator', 'Excavating':'Miner', 'Stealth':'General', 'Gathering':'Huntsman', 'Bartering':'Merchant'}
+
+def perform_labor(skill=None, _=None):
+    P = lclPlayer()
+    if skill is not None:
+        P.working = [skill, 1]
+    else:
+        P.working[1] += 1
+    if P.working[1] >= 4:
+        skill = P.working[0]
+        P.coins += P.skills[skill]//2
+        P.addXP(skill, 0 if P.skills[skill] > 7 else P.skills[skill]//2)
+        P.working = [None, 0]
+        exitActionLoop(amt=4)()
+    else:
+        P.takeAction(0)
+
+def confirm_labor(skill, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    payment = P.skills[skill]//2
+    if payment == 0:
+        output(f"You need at least level 2 {skill} for them to hire you!", 'yellow')
+        return
+    xp = 0 if P.skills[skill] > 7 else P.skills[skill]//2
+    output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
+    actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False)
+
+def city_labor(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    output("The following people are looking for assistants today:", 'blue')
+    actions = {'Cancel':exitActionLoop(amt=0)}
+    for skill in P.currenttile.city_jobs:
+        actions[skill_users[skill]] = partial(confirm_labor, skill)
+    actionGrid(actions, False)
 
 def city_consequence(city):
     P = lclPlayer()
@@ -4906,6 +4967,7 @@ def city_actions(city, _=None):
         actions['Master'] = partial(city_trainer, T.master_trainers, 'city')
     if P.market_allowed[P.currenttile.tile]:
         actions['Market'] = partial(Trading, False)
+        actions['Job Postings'] = city_labor
     if (P is not None) and (P.currenttile.tile == 'scetcher'):
         actions['Duel'] = Duelling
     elif (P is not None) and (P.birthcity == city): 
@@ -4947,6 +5009,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.trader_wares = set()
         self.trader_wares_label = None
         self.city_wares = set()
+        self.city_jobs = set()
         self.adept_trainers = set()
         self.master_trainers = set()
         self.neighbors = set()
@@ -5117,8 +5180,14 @@ class BoardPage(FloatLayout):
         for T in self.gridtiles.values():
             if T.tile in cities:
                 self.citytiles[T.tile] = T
-                # Initial markets will be different for local players
+                # Initial markets / job postings will be different for local players
                 T.city_wares = set(np.random.choice(list(city_info[T.tile]['sell']), 6))
+                jobs, trns = set(), {8:5, 12:8, 4:2}
+                for skill in skill_users:
+                    val = trns[city_info[T.tile][skill]] if skill in city_info[T.tile] else 2
+                    if rbtwn(1, 10) <= val:
+                        jobs.add(skill)
+                T.city_jobs = jobs
             T.set_neighbors()
         self.zoomButton = Button(text="Zoom", pos_hint={'x':0,'y':0}, size_hint=(0.06, 0.03))
         self.zoomButton.bind(on_press=self.updateView)
@@ -5185,11 +5254,16 @@ class BoardPage(FloatLayout):
             self.localPlayer.started_round = True
             if (self.localPlayer.PlayerTrack.Quest.quests[3, 6].status=='started') and (self.localPlayer.PlayerTrack.Quest.quests[3, 6].action % 2):
                 JoinFight()
+            elif (self.localPlayer.working[0] is not None):
+                self.localPlayer.started_round = False
+                perform_labor()
             else:
                 self.localPlayer.go2consequence(0)
-    def update_market(self, city_markets, _=None):
+    def update_market(self, update, _=None):
+        city_markets, city_jobs = update
         for city, T in self.citytiles.items():
             T.city_wares = city_markets[city]
+            T.city_jobs = city_jobs[city]
     def add_player(self, username, birthcity):
         self.Players[username] = Player(self, username, birthcity)
         self.add_widget(self.Players[username])
@@ -5634,12 +5708,14 @@ class LaunchPage(GridLayout):
             self.auto_resize_lbl.text = "Auto Resize:\nTrue"
             auto_resize = True
     def npc_difficulty(self, new=None):
+        global npcDifficulty
         new = self.npc_difficulty_input.text if new is None else new
-        validArgs = {'very easy':['Very Easy','[color=43dc00]'], 'easy':['Easy','[color=438700]'], 'moderate':['Moderate','[color=ffb700]'], 'hard':['Hard','[color=ff0700]'], 'very hard':['Very Hard','[color=850700]']}
+        validArgs = {'very easy':['Very Easy','[color=43dc00]',1], 'easy':['Easy','[color=438700]',2], 'moderate':['Moderate','[color=ffb700]',3], 'hard':['Hard','[color=ff0700]',4], 'very hard':['Very Hard','[color=850700]',5]}
         if new != '':
             self.npc_difficulty_input.text = ''
             if new.lower() in validArgs:
                 self.npc_difficulty_lbl.text = f'[color=000000]NPC Difficulty:[/color]\n{validArgs[new.lower()][1]}{validArgs[new.lower()][0]}[/color]'
+                npcDifficulty = validArgs[new.lower()][2]
                 if self.ready[self.username]:
                     self.update_self()
                 return new
@@ -5669,14 +5745,6 @@ class LaunchPage(GridLayout):
                 self.load_lbl.background_color = (1, 1, 1, 1)
             elif os.path.exists(f'saves\\{self.username}\\{load_file}.pickle'):
                 # If loading, then the board has to be the same, so receive seed data -- this will create issues if the files are on different games
-                with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
-                    playerInfo = pickle.load(f)
-                d = self.seed(playerInfo['seed'])
-                if d: socket_client.send('[SEED]', d)
-                s = self.save(load_file)
-                if s: socket_client.send('[SAVE]', s)
-                e = self.gameEnd(playerInfo['gameEnd'])
-                if e: socket_client.send('[END SETTING]', e)
                 self.load_lbl.background_color = (0.8, 1, 0.8, 1)
             else:
                 self.load_lbl.background_color = (1, 0.8, 0.8, 1)
@@ -5728,6 +5796,8 @@ class LaunchPage(GridLayout):
             if valid:
                 gameEnd = potential
                 self.end_lbl.text = 'Game End:\n'+', '.join(texts)
+                if self.ready[self.username]:
+                    self.update_self()
                 return new
         return False
     def submitChange(self, instance):
@@ -5735,12 +5805,23 @@ class LaunchPage(GridLayout):
         if n: socket_client.send('[DIFFICULTY]', n)
         d = self.seed()
         if d: socket_client.send('[SEED]', d)
-        l = self.load()
-        if l: socket_client.send('[LOAD]', l)
         s = self.save()
         if s: socket_client.send('[SAVE]', s)
         e = self.gameEnd()
         if e: socket_client.send('[END SETTING]', e)
+        l = self.load()
+        if l: 
+            socket_client.send('[LOAD]', l)
+            if os.path.exits('saves\\{self.username}\\{l}.pickle'):
+                with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
+                    playerInfo = pickle.load(f)
+                d = self.seed(playerInfo['seed'])
+                if d: socket_client.send('[SEED]', d)
+                s = self.save(load_file)
+                if s: socket_client.send('[SAVE]', s)
+                e = self.gameEnd(playerInfo['gameEnd'])
+                if e: socket_client.send('[END SETTING]', e)
+                socket_client.send('[LOAD SKIRMISHES]', playerInfo['skirmishes'])
     def incoming_message(self, username, category, message):
         if category == '[LAUNCH]':
             if username not in self.ready:
