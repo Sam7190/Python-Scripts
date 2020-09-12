@@ -1008,8 +1008,8 @@ def isbetween(mn, mx, numb):
 def output(message, color=None):
     game_app.game_page.update_output(message, color)
     print(message)
-def actionGrid(funcDict, save_rest):
-    game_app.game_page.make_actionGrid(funcDict, save_rest)
+def actionGrid(funcDict, save_rest, occupied=True):
+    game_app.game_page.make_actionGrid(funcDict, save_rest, occupied)
 def check_paralysis():
     P = lclPlayer()
     paralyzed = False
@@ -1111,7 +1111,7 @@ def sellItem(item, to_trader, barter=None, _=None):
         sellprice = sellPrice[price]
     if (barter is None) and (not P.activated_bartering):
         output("Would you like to barter?",'blue')
-        actionGrid({'Yes':partial(sellItem, item, to_trader, True), 'No':partial(sellItem, item, to_trader, False), 'Cancel':exitActionLoop(amt=0)}, False)
+        actionGrid({'Yes':partial(sellItem, item, to_trader, True), 'No':partial(sellItem, item, to_trader, False), 'Cancel':exitActionLoop(amt=0)}, False, False)
     elif barter == True:
         P.activated_bartering = True
         bartering = P.activateSkill("Bartering")
@@ -1132,7 +1132,7 @@ def sellItem(item, to_trader, barter=None, _=None):
             getItem(item, -1, 'minor', False, 1)()
         else:
             output("You failed to barter, sell anyway?", 'yellow')
-            actionGrid({'Yes':partial(sellItem, item, to_trader, False), 'No':exitActionLoop('minor', 0, False)}, False)
+            actionGrid({'Yes':partial(sellItem, item, to_trader, False), 'No':exitActionLoop('minor', 0, False)}, False, False)
     else:
         sellprice += P.bartering_mode
         output(f"Sold {item} for {sellprice}.")
@@ -1343,7 +1343,7 @@ def Train(abilities, master, confirmed, _=None):
             cost = '('+', '.join(costs)+')'
             abilities = leftoverabilities
         output(f"Would you like to train at cost of {cost} coins?", 'blue')
-        game_app.game_page.make_actionGrid({'Yes':(lambda _:Train(abilities, master, True)), 'No':exitActionLoop(amt=0 if master in {'adept','city'} else 1)}, False)
+        game_app.game_page.make_actionGrid({'Yes':(lambda _:Train(abilities, master, True)), 'No':exitActionLoop(amt=0 if master in {'adept','city'} else 1)}, False, False if master in {'adept', 'city'} else True)
     elif type(abilities) is not str:
         output("Which skill would you like to train?", 'blue')
         game_app.game_page.make_actionGrid({ability:(lambda _:Train(ability, master, confirmed)) for ability in abilities})
@@ -2123,13 +2123,13 @@ adept_loc, master_loc = get_inverse_city_info()
                 
 
 class Player(Image):
-    def __init__(self, board, username, birthcity, is_human=True, **kwargs):
+    def __init__(self, board, username, birthcity, **kwargs):
         super().__init__(**kwargs)
         self.source = f'images\\characters\\{birthcity}.png'
         self.parentBoard = board
         self.username = username
         self.birthcity = birthcity
-        self.is_human = is_human
+        self.is_trading = False
         self.imgSize = pilImage.open(self.source).size
         
         # Player Victory Points
@@ -2299,7 +2299,7 @@ class Player(Image):
                 return
         if (not skip_check) and (self.currenttile.tile != 'road') and (self.currenttile.tile not in cities) and (nxt.tile=='road'):
             output("Move there on same action (+2 Fatigue)?", 'blue')
-            actionGrid({'Yes':(lambda _:self.moveto(coord,trigger_consequence,3)),'No':(lambda _:self.moveto(coord,trigger_consequence,2))}, False)
+            actionGrid({'Yes':(lambda _:self.moveto(coord,trigger_consequence,3)),'No':(lambda _:self.moveto(coord,trigger_consequence,2))}, False, False)
         else:
             if skip_check != True:
                 socket_client.send('[MOVE]',coord)
@@ -2351,6 +2351,9 @@ class Player(Image):
                 self.takeDamage(0,1)
             if trigger_consequence:
                 self.go2consequence()
+        if self != self.parentBoard.localPlayer:
+            # Check for player interactions
+            self.parentBoard.game_page.check_players()
     def add_PlayerTrack(self):
         self.PlayerTrack = PlayerTrack(self)
         screen = Screen(name='Player Track')
@@ -3041,7 +3044,7 @@ class ArmoryTable(GridLayout):
             output("Space is already empty!", 'yellow')
         elif not confirmed:
             output(f"Would you like to remove and destroy this item?", "blue")
-            actionGrid({"Yes":partial(self.rmv_slot, space, slot, True), "No":exitActionLoop(amt=0)}, False)
+            actionGrid({"Yes":partial(self.rmv_slot, space, slot, True), "No":exitActionLoop(amt=0)}, False, False)
         else:
             prev = None
             for i in np.arange(slot, 3 if space==0 else 5)[::-1]:
@@ -3149,7 +3152,7 @@ class ArmoryTable(GridLayout):
             clr = 'ffff75' if self.P.bartering_mode == 0 else '00ff75'
             actionGrid({f'Rent Facility: [color={clr}]{rentalcost}[/color]':partial(self.add_slot, item, space, rentalcost),
                         f'Hire Smither Lv{smitherslvl}: [color={clr}]{fullcost}[/color]':partial(self.add_slot, item, space, fullcost),
-                        'Cancel':exitActionLoop(amt=0)}, False)
+                        'Cancel':exitActionLoop(amt=0)}, False, False)
         else:
             if self.P.coins < cost:
                 output("Insufficient funds!", 'yellow')
@@ -3196,7 +3199,7 @@ class ArmoryTable(GridLayout):
         sellprice = self.sell_value(space)
         if (barter is None) and (not self.P.activated_bartering):
             output("Would you like to barter?",'blue')
-            actionGrid({'Yes':partial(self.sell_craft, space, True), 'No':partial(self.sell_craft, space, False), 'Cancel':exitActionLoop(amt=0)}, False)
+            actionGrid({'Yes':partial(self.sell_craft, space, True), 'No':partial(self.sell_craft, space, False), 'Cancel':exitActionLoop(amt=0)}, False, False)
         elif barter == True:
             self.P.activated_bartering = True
             bartering = self.P.activateSkill("Bartering")
@@ -3215,7 +3218,7 @@ class ArmoryTable(GridLayout):
                 self.rmv(space, True)
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
-                actionGrid({'Yes':partial(self.sell, space, False), 'No':exitActionLoop('minor', 0, False)}, False)
+                actionGrid({'Yes':partial(self.sell, space, False), 'No':exitActionLoop('minor', 0, False)}, False, False)
         else:
             sellprice += self.P.bartering_mode
             output(f"Sold smithed piece for {sellprice}.")
@@ -3330,7 +3333,7 @@ class CraftingTable(GridLayout):
             self.reassign_lbl(space, slot)
         elif not confirmed:
             output(f"Would you like to remove and destroy this item?", "blue")
-            actionGrid({"Yes":partial(self.rmv_slot, space, slot, True), "No":exitActionLoop(amt=0)}, False)
+            actionGrid({"Yes":partial(self.rmv_slot, space, slot, True), "No":exitActionLoop(amt=0)}, False, False)
         else:
             prev = None
             for i in np.arange(slot, 8)[::-1]:
@@ -3371,7 +3374,7 @@ class CraftingTable(GridLayout):
             return
         if space is None:
             output("Which craft would you like to add it to?", 'blue')
-            actionGrid({'Craft 1':partial(self.add_craft, item, 0), 'Craft 2':partial(self.add_craft, item, 1), 'Cancel':exitActionLoop(amt=0)}, False)
+            actionGrid({'Craft 1':partial(self.add_craft, item, 0), 'Craft 2':partial(self.add_craft, item, 1), 'Cancel':exitActionLoop(amt=0)}, False, False)
         else:
             if self.space_items[space] == 0:
                 self.cspace[space][1].text = item
@@ -3418,7 +3421,7 @@ class CraftingTable(GridLayout):
         sellprice = self.sell_value(space)
         if (barter is None) and (not self.P.activated_bartering):
             output("Would you like to barter?",'blue')
-            actionGrid({'Yes':partial(self.sell_craft, space, True), 'No':partial(self.sell_craft, space, False), 'Cancel':exitActionLoop(amt=0)}, False)
+            actionGrid({'Yes':partial(self.sell_craft, space, True), 'No':partial(self.sell_craft, space, False), 'Cancel':exitActionLoop(amt=0)}, False, False)
         elif barter == True:
             self.P.activated_bartering = True
             bartering = self.P.activateSkill("Bartering")
@@ -3437,7 +3440,7 @@ class CraftingTable(GridLayout):
                 self.rmv_craft(space, True)
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
-                actionGrid({'Yes':partial(self.sell_craft, space, False), 'No':exitActionLoop('minor', 0, False)}, False)
+                actionGrid({'Yes':partial(self.sell_craft, space, False), 'No':exitActionLoop('minor', 0, False)}, False, False)
         else:
             sellprice += self.P.bartering_mode
             output(f"Sold craft {space+1} for {sellprice}.")
@@ -4713,7 +4716,7 @@ class PlayerTrack(GridLayout):
                         if self.player.paused:
                             return
                         output("Choose to Eat or Heat:", 'blue')
-                        actionGrid({'Eat': partial(self.player.eat, item), 'Heat': partial(heatitem, item)}, False)
+                        actionGrid({'Eat': partial(self.player.eat, item), 'Heat': partial(heatitem, item)}, False, False)
                     usebutton = {'text':'Eat/Heat', 'func':eat_or_heat}
                 else:
                     usebutton = {'text':'Eat', 'func':partial(self.player.eat, item)}
@@ -4726,7 +4729,7 @@ class PlayerTrack(GridLayout):
                     if self.player.paused:
                         return
                     output("Choose to Craft or Heat:", 'blue')
-                    actionGrid({'Heat':partial(heatitem, item), 'Craft':partial(self.player.PlayerTrack.craftingTable.add_craft, item, None)}, False)
+                    actionGrid({'Heat':partial(heatitem, item), 'Craft':partial(self.player.PlayerTrack.craftingTable.add_craft, item, None)}, False, False)
                 usebutton = {'text':'Craft/Heat', 'func':craft_or_heat}
             elif (categ == 'Crafting') and (item not in noncraftableItems):
                 usebutton = {'text':'Craft', 'func':partial(self.player.PlayerTrack.craftingTable.add_craft, item, None)}
@@ -4755,10 +4758,12 @@ class TradePage(FloatLayout):
         super().__init__(**kwargs)
         self.P = lclPlayer()
         self.P.paused = True
+        self.P.is_trading = username
         self.O = username
-        self.trading = True
         self.training = False
-        self.confirmed = False
+        self.is_trainee = False
+        self.pconfirmed = False
+        self.oconfirmed = False
         self.items = deepcopy(self.P.items)
         self.adept, self.master = {}, {}
         for skill, lvl in self.P.skills.items():
@@ -4786,7 +4791,7 @@ class TradePage(FloatLayout):
         self.pimg = Image(source=psource, pos_hint={'x':0, 'y':y_bottom}, size_hint=(x_person, y_person))
         self.add_widget(self.pimg)
         # Plot Other Player
-        osource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.foename].birthcity}.png'
+        osource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.O].birthcity}.png'
         self.oimg = Image(source=osource, pos_hint={'right':1, 'y':y_bottom}, size_hint=(x_person, y_person))
         self.add_widget(self.oimg)
         
@@ -4796,27 +4801,28 @@ class TradePage(FloatLayout):
         
         slot_shape = (7, 3)
         self.offered = [{}, {}]
-        self.invoffered = [{}, {}]
         self.slots = [np.empty(slot_shape,dtype=object), np.empty(slot_shape,dtype=object)]
         for i in range(slot_shape[0]):
             for j in range(slot_shape[1]):
-                self.slots[0][i,j] = Button(text='', disabled=True)
-                self.slots[0][i,j].amt = 0
-                self.slots[0][i,j].offered = None
-                self.slots[0][i,j].bind(on_press=partial(self.remove, i, j))
-                self.slots[1][i,j] = Button(text='', disabled=True, background_disabled_normal='', background_color=(0.3, 0.3, 0.3, 0.7), color=(1, 1, 1, 1))
-                self.slots[1][i,j].amt = 0
-                self.slots[1][i,j].offered = None
-                pGrid.add_widget(self.slots[0][i,j])
-                oGrid.add_widget(self.slots[1][i,j])
+                for side in [0, 1]:
+                    self.slots[side][i,j] = Button(text='', disabled=True)
+                    self.slots[side][i,j].amt = 0
+                    self.slots[side][i,j].offered = None
+                    if side == 0:
+                        self.slots[side][i, j].bind(on_press=partial(self.remove, i, j, 0))
+                        pGrid.add_widget(self.slots[side][i, j])
+                    else:
+                        oGrid.add_widget(self.slots[side][i, j])
         
         self.confirm = Button(text='Accept', color=(0.3, 1, 0.3, 1), background_color=(1.3, 1.5, 1.3, 1))
         self.confirm.bind(on_press=self.make_confirmation)
         self.decline = Button(text='Decline', color=(1, 0.3, 0.3, 1), background_color=(1.5, 1.3, 1.3, 1))
         self.decline.bind(on_press=self.reject_proposal)
         self.abort = Button(text='Abort', color=(0.8, 0, 0, 1), background_color=(1.7, 1.4, 1.4, 1))
-        self.abort.bind(on_press=self.quit_trade)
+        self.abort.bind(on_press=partial(self.quit_trade, 0, True))
         self.display = Button(text='', color=(0, 0, 0, 1), background_color=(1, 1, 1, 1), disabled=True, background_disabled_normal='')
+        self.display.text_size = self.display.size
+        self.display.bind(size=self.update_bkgSize)
         mGrid.add_widget(Widget())
         mGrid.add_widget(self.confirm)
         mGrid.add_widget(Widget())
@@ -4831,7 +4837,7 @@ class TradePage(FloatLayout):
         coinGrid.add_widget(Button(text="Add Coins:", disabled=True, background_disabled_normal='', color=(0,0,0,1)))
         for add in [1, 5, 25]:
             B = Button(text=f'+{add}', font_size=16, background_color=(1, 1, 0, 1))
-            B.bind(on_press=partial(self.add_coins, add))
+            B.bind(on_press=partial(self.add_coins, add, 0, None))
             coinGrid.add_widget(B)
         
         itemGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom-(y_bottom/3)}, size_hint=(1, buffer*y_bottom/3))
@@ -4839,7 +4845,7 @@ class TradePage(FloatLayout):
         self.item_buttons = {}
         for item in self.items:
             B = Button(text=f'{item}: {self.items[item]}')
-            B.bind(on_press=partial(self.add_item, item))
+            B.bind(on_press=partial(self.add_item, item, 0, None))
             self.item_buttons[item] = B
             itemGrid.add_widget(B)
             
@@ -4847,11 +4853,11 @@ class TradePage(FloatLayout):
         trainGrid.add_widget(Button(text='Offer Training:', disabled=True, background_disabled_normal='', color=(0,0,0,1)))
         for ability in self.adept:
             B = Button(text=f'Adept\n{ability}', background_color=(0.5, 0, 1, 1))
-            B.bind(on_press=partial(self.add_train, ability, 0))
+            B.bind(on_press=partial(self.add_train, ability, 0, 0, None))
             trainGrid.add_widget(B)
         for ability in self.master:
             B = Button(text=f'Master\n{ability}', background_color=(1, 1.5, 0, 1))
-            B.bind(on_press=partial(self.add_train, ability, 1))
+            B.bind(on_press=partial(self.add_train, ability, 1, 0, None))
             trainGrid.add_widget(B)
         
         self.add_widget(pGrid)
@@ -4860,41 +4866,174 @@ class TradePage(FloatLayout):
         self.add_widget(coinGrid)
         self.add_widget(itemGrid)
         self.add_widget(trainGrid)
+    def update_bkgSize(self, instance, value):
+        self.display.text_size = self.display.size
+    def training_failure(self, msg='Training was unsuccessful', clr='red', _=None):
+        output(msg, clr)
+        self.refresh("Training was unsuccessful.", 3, (0.7, 0, 0, 1))
+        self.P.takeAction()
+    def receive_training(self, _=None):
+        if self.P.actions <= 0:
+            # They must have trained already and therefore they must decline
+            self.reject_proposal()
+            output("You have already ended the round. Cannot conduct training!", 'yellow')
+            return
+        ability = self.is_trainee[0]
+        lvl = self.P.get_level(ability)
+        if lvl >= 12:
+            output(f"You have already maxed out {self.is_trainee[0]}!", 'yellow')
+            self.reject_proposal()
+        if not self.is_trainee[1]:
+            # Being taught by adept trainer.
+            if lvl >= 8:
+                output(f"Your level is too high to be taught by this trainer!", 'yellow')
+                self.reject_proposal()
+            elif rbtwn(1,10) <= self.P.fatigue:
+                self.training_failure("You were unable to keep up with training.",'red')
+                socket_client.send('[TRADE]', [self.O, 'training failure'])
+            elif rbtwn(1,3) == 1:
+                output(f"You successfully leveled up in {ability}",'green')
+                self.P.levelup(ability,1,8)
+                socket_client.send('[TRADE]', [self.O, 'training success'])
+                self.complete_trade()
+            else:
+                critthink = self.P.activateSkill('Critical Thinking')
+                if rbtwn(1,12) <= critthink:
+                    self.P.useSkill('Critical Thinking')
+                    output(f"You successfully leveled up in {ability}",'green')
+                    self.P.levelup(ability,1,8)
+                    socket_client.send('[TRADE]', [self.O, 'training success'])
+                    self.complete_trade()
+                else:
+                    self.training_failure()
+                    socket_client.send('[TRADE]', [self.O, 'training failure'])
+        else:
+            # Being taught by master trainer.
+            if rbtwn(2, 10) <= self.P.fatigue:
+                self.training_failure("You were unable to keep up with training.",'red')
+                socket_client.send('[TRADE]', [self.O, 'training failure'])
+            elif lvl < 8:
+                output(f"You successfully leveled up in {ability}",'green')
+                self.P.levelup(ability,1)
+                socket_client.send('[TRADE]', [self.O, 'training success'])
+                self.complete_trade()
+            elif rbtwn(1,4) == 1:
+                output(f"You successfully leveled up in {ability}",'green')
+                self.P.levelup(ability,1)
+                socket_client.send('[TRADE]', [self.O, 'training success'])
+                self.complete_trade()
+            else:
+                critthink = self.P.activateSkill('Critical Thinking')
+                if rbtwn(1,16) <= critthink:
+                    self.P.useSkill('Critical Thinking', 2, 7)
+                    output(f"You successfully leveled up in {ability}",'green')
+                    self.P.levelup(ability,1)
+                    socket_client.send('[TRADE]', [self.O, 'training success'])
+                    self.complete_trade()
+                else:
+                    self.training_failure()
+                    socket_client.send('[TRADE]', [self.O, 'training failure'])
+    def complete_trade(self, _=None):
+        consume = 'minor'
+        for item, slot in self.offered[0].items():
+            if type(item) is tuple:
+                # Assumption is that training has been completed.
+                consume = None
+            elif item == 'coins':
+                self.P.coins -= self.slots[0][slot].amt
+            else:
+                self.P.items.addItem(item, -self.slots[0][slot].amt)
+        for item, slot in self.offered[1].items():
+            if type(item) is tuple:
+                consume = None
+            elif item == 'coins':
+                self.P.coins += self.slots[1][slot].amt
+            else:
+                self.P.items.addItem(item, self.slots[0][slot].amt)
+        self.quit_trade(amt=consume)
     def make_confirmation(self, _=None):
-        pass
+        if self.P.actions > 0:
+            # Offer can only be accepted if they have actions remaining.
+            self.pconfirmed = True
+            self.confirm.disabled = True
+            if self.oconfirmed and self.training:
+                if self.is_trainee:
+                    self.receive_training()
+            elif self.oconfirmed:
+                self.complete_trade()
+            else:
+                self.display_msg(f"Awaiting {self.O} to accept offer.", None)
+            socket_client.send('[TRADE]', [self.O, 'confirmed'])
+        else:
+            self.display_msg("You have no actions left! Either wait for the round to start or quit trade!", 10, (0.7, 0, 0, 1))
+            socket_client.send('[TRADE]', [self.O, 'no actions'])
+    def other_confirmation(self, _=None):
+        self.oconfirmed = True
+        if self.pconfirmed and self.training:
+            if self.is_trainee:
+                self.receive_training()
+        elif self.pconfirmed:
+            self.complete_trade()
+        else:
+            self.display_msg(f"{self.O} has accepted the offer!", None, (0, 0.7, 0, 1))
+    def refresh(self, message='An update has been made.', delay=10, color=(0,0,0,1), _=None):
+        self.pconfirmed = False
+        self.confirm.disabled = False
+        self.oconfirmed = False
+        self.display_msg('')
+        if message is not None:
+            self.display_msg(message, delay, color)
     def reject_proposal(self, _=None):
-        pass
-    def quit_trade(self, _=None):
-        pass
+        self.refresh('You rejected the offer!', 10, (0.7, 0, 0, 1))
+        socket_client.send('[TRADE]', [self.O, 'decline'])
+    def receive_rejection(self, _=None):
+        self.refresh(f'{self.O} rejected the offer!', 10, (0.7, 0, 0, 1))
+    def quit_trade(self, amt=0, send=False, _=None):
+        if send:
+            output(f"Trading with {self.O} has been aborted.")
+            socket_client.send('[TRADE]', [self.O, 'abort'])
+        self.P.trading = False
+        self.P.parentBoard.game_page.main_screen.current = "Board" if self.P.parentBoard.game_page.toggleView.text=="Player Track" else "Player Track"
+        self.P.parentBoard.game_page.main_screen.remove_widget(self.P.parentBoard.game_page.tradescreen)
+        self.P.paused = False
+        exitActionLoop(amt=amt)()
     def display_msg(self, msg, delay=None, color=(0, 0, 0, 1)):
+        previous_message, previous_color = self.display.text, self.display.color
+        if delay is not None:
+            self.display.override = True
+        else:
+            self.display.override = False
         def clear(_=None):
-            self.display.text = ''
+            if self.display.override:
+                self.display.text = previous_message
+                self.display.color = previous_color
         self.display.text = msg
         self.display.color = color
         if delay is not None: Clock.schedule_once(clear, delay)
     def remove(self, i, j, side=0, _=None):
-        if 'Training' in self.slots[side][i, j].text:
+        if type(self.slots[side][i, j].offered) is tuple:
             self.training = False
             self.confirm.text = 'Accept'
         if side == 0:
-            socket_client.send('[TRADE]', [self.O, None, -1, (i, j)])
-            if not ('Coin' in self.slots[side][i, j].text):
-                L = self.slots[side][i, j].text.split(' ')
-                item = L[1] if self.slots[side][i, j].amt <= 1 else L[1][:-1]
+            socket_client.send('[TRADE]', [self.O, self.slots[side][i, j].offered, -1, (i, j)])
+            if (type(self.slots[side][i, j].offered) is str) and not (self.slots[side][i, j].offered=='coins'):
+                # Assume it must be an item
+                item = self.slots[side][i, j].offered
                 self.items[item] += self.slots[side][i, j].amt
                 self.item_buttons[item].text = f'{item}: {self.items[item]}'
                 self.item_buttons[item].disabled = False
+        self.refresh()
         self.slots[side][i, j].amt = 0
         self.slots[side][i, j].text = ''
         self.slots[side][i, j].disabled = True
         self.offered[side].pop(self.slots[side][i, j].offered)
         self.slots[side][i, j].offered = None
     def findNearestEmpty(self, side):
-        for j in range(len(self.slots[side].T)):
-            for i in range(len(self.slots[side])):
+        for i in range(len(self.slots[side])):
+            for j in range(len(self.slots[side][i])):
                 if self.slots[side][i, j].text == '':
                     return (i, j)
-        self.display_msg("You cannot make anymore offers to the trade! Try removing some!", 1, (0.7, 0.7, 0, 1))
+        self.display_msg("You cannot make anymore offers to the trade! Try removing some!", 10, (0.7, 0.7, 0, 1))
         return False
     def add_coins(self, amt, side=0, slot=None, _=None):
         if slot is None:
@@ -4904,6 +5043,7 @@ class TradePage(FloatLayout):
                 slot = self.findNearestEmpty(side)
                 if not slot: return
         if not ((side == 0) and (self.P.coins < (amt + self.slots[side][slot].amt))):
+            self.refresh()
             self.slots[side][slot].amt += amt
             self.slots[side][slot].text = f"{self.slots[side][slot].amt} Coin{'' if self.slots[side][slot].amt==1 else 's'}"
             self.slots[side][slot].offered = 'coins'
@@ -4912,7 +5052,7 @@ class TradePage(FloatLayout):
                 self.slots[side][slot].disabled = False
                 socket_client.send('[TRADE]', [self.O, 'coins', amt, slot])
         else:
-            self.display_msg("You do not have enough coin to make that offer!", 1, (0.7, 0.7, 0, 1))
+            self.display_msg("You do not have enough coin to make that offer!", 10, (0.7, 0.7, 0, 1))
     def add_item(self, item, side=0, slot=None, _=None):
         if slot is None:
             if item in self.offered[side]:
@@ -4921,6 +5061,7 @@ class TradePage(FloatLayout):
                 slot = self.findNearestEmpty(side)
                 if not slot: return
         if not ((side == 0) and (self.items[item] <= 0)):
+            self.refresh()
             self.slots[side][slot].amt += 1
             self.slots[side][slot].text = f"{self.slots[side][slot].amt} {item}{'' if self.slots[side][slot].amt==1 else 's'}"
             self.slots[side][slot].offered = item
@@ -4933,14 +5074,15 @@ class TradePage(FloatLayout):
                     self.item_buttons[item].disabled = True
                 socket_client.send('[TRADE]', [self.O, item, 1, slot])
         else:
-            self.display_msg("You cannot offer any more of that item!", 1, (0.7, 0.7, 0, 1))
+            self.display_msg("You cannot offer any more of that item!", 10, (0.7, 0.7, 0, 1))
     def add_train(self, ability, master, side=0, slot=None, _=None):
         if self.training:
-            self.display_msg("You cannot train more than one at a time!", 1, (0.7, 0.7, 0, 1))
+            self.display_msg("You cannot train more than one at a time!", 10, (0.7, 0.7, 0, 1))
             return
         if slot is None:
             slot = self.findNearestEmpty(side)
             if not slot: return
+        self.refresh()
         self.training = True
         self.confirm.text = 'Train'
         self.slots[side][slot].amt = master
@@ -4949,18 +5091,44 @@ class TradePage(FloatLayout):
         self.offered[side][(ability, master)] = slot
         if side == 0:
             self.slots[side][slot].disabled = False
-            socket_client.send('[TRADE]', [self.O, ability, master, slot])
+            socket_client.send('[TRADE]', [self.O, (ability, master), None, slot])
+        else:
+            self.is_trainee = (ability, master)
         
 def player_trade(username, _=None):
     P = lclPlayer()
-    if P.paused:
-        return
     screen = Screen(name="Trade")
-    screen.add_widget(TradePage)
+    screen.add_widget(TradePage(username))
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Trade"
     P.parentBoard.game_page.tradescreen = screen
-
+    
+def player_confirm_trade(username, _=None):
+    P = lclPlayer()
+    def reject_trade(_=None):
+        output(f"{username} attempted to trade with you but was rejected.", 'yellow')
+        socket_client.send('[TRADE]', {username: 'reject'})
+        exitActionLoop(amt=0)()
+    def start_trade(_=None):
+        if P.parentBoard.Players[username].currenttile == P.currenttile:
+            # Make sure they are still on the same tile
+            socket_client.send('[TRADE]', {username: 'start'})
+            player_trade(username)
+        else:
+            output(f"You and {username} are no longer on the same tile. Cannot trade.", 'yellow')
+            reject_trade()
+    if P.paused or P.parentBoard.game_page.occupied:
+        reject_trade()
+    else:
+        output(f"{username} wants to trade with you. Conduct trade?", 'blue')
+        actionGrid({'Yes': start_trade, 'No': reject_trade}, False)
+    
+def player_ask_trade(username, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    output(f"Sending trade request to {username}.", 'blue')
+    socket_client.send('[TRADE]', {username: 'ask'})
 
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
@@ -5114,7 +5282,7 @@ def confirm_labor(skill, _=None):
         return
     xp = 0 if P.skills[skill] > 7 else P.skills[skill]//2
     output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
-    actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False)
+    actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
 
 def city_labor(_=None):
     P = lclPlayer()
@@ -5653,6 +5821,7 @@ class GamePage(GridLayout):
         screen = Screen(name='Action Grid')
         self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
         self.recover_button = Button(text='Rest (2)')
+        self.occupied = False
         # Button is bound after local player is detected
         self.actionButtons = [self.recover_button]
         screen.add_widget(self.actionGrid)
@@ -5683,23 +5852,40 @@ class GamePage(GridLayout):
         # Any keyboard press will trigger the event:
         Window.bind(on_key_down=self.on_key_down)
     def switchView(self, instance):
-        if self.main_screen.current != 'Battle':
+        if self.main_screen.current not in {'Battle', 'Trade'}:
             self.main_screen.current = self.toggleView.text
             self.toggleView.text = "Board" if self.toggleView.text=="Player Track" else "Player Track"
-    def make_actionGrid(self, funcDict, save_rest=False):
-        self.clear_actionGrid(save_rest)
+    def make_actionGrid(self, funcDict, save_rest=False, occupied=True):
+        self.clear_actionGrid(save_rest, occupied)
         for txt, func in funcDict.items():
             B = Button(text=txt, markup=True)
             B.bind(on_press=func)
             self.actionButtons.append(B)
             self.actionGrid.add_widget(B)
-    def clear_actionGrid(self, save_rest=False):
+    def check_players(self):
+        if (not self.occupied) and (self.board_page.localPlayer is not None):
+            Bs = []
+            for user in self.board_page.Players:
+                if user == self.board_page.localPlayer.username:
+                    continue
+                elif self.board_page.Players[user].currenttile == self.board_page.localPlayer.currenttile:
+                    def view_player(user, _=None):
+                        actionGrid({'Trade/Train': partial(player_ask_trade, user),
+                                    'Back': exitActionLoop(amt=0)}, False, False)
+                    B = Button(text=user)
+                    B.bind(on_press=partial(view_player, user))
+                    Bs.append(B)
+            self.actionButtons += Bs
+            for B in Bs:
+                self.actionGrid.add_widget(B)
+    def clear_actionGrid(self, save_rest=False, occupied=True):
         for B in self.actionButtons:
             self.actionGrid.remove_widget(B)
+        self.occupied = True if (not save_rest) and occupied else False
         if save_rest:
-            self.actionButtons = [self.recover_button]#, self.eat_button]
+            self.actionButtons = [self.recover_button] 
             self.actionGrid.add_widget(self.recover_button)
-            #self.actionGrid.add_widget(self.eat_button)
+            self.check_players()
         else:
             self.actionButtons = []
     def update_bkgSize(self, instance, value):
@@ -5850,15 +6036,15 @@ class LaunchPage(GridLayout):
         
         gameSettings.add_widget(self.npc_difficulty_lbl)
         gameSettings.add_widget(self.npc_difficulty_input)
-        self.seed_lbl = Button(text="Seed:\nNone", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.seed_lbl = Button(text="Seed:\nWARNING: Not Connected!", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
         self.seed_input = TextInput()
         gameSettings.add_widget(self.seed_lbl)
         gameSettings.add_widget(self.seed_input)
-        self.load_lbl = Button(text="Load:\nNone", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.load_lbl = Button(text="Load:\nWARNING: Not Connected!", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
         self.load_input = TextInput()
         gameSettings.add_widget(self.load_lbl)
         gameSettings.add_widget(self.load_input)
-        self.save_lbl = Button(text="Save:\nNone", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.save_lbl = Button(text="Save:\nWARNING: Not Connected!", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
         self.save_input = TextInput()
         gameSettings.add_widget(self.save_lbl)
         gameSettings.add_widget(self.save_input)
@@ -5879,7 +6065,7 @@ class LaunchPage(GridLayout):
         superGrid.add_widget(lobbyGrid)
         superGrid.add_widget(settingsGrid)
         self.add_widget(superGrid)
-        self.readyButton = Button(text="Ready Up")
+        self.readyButton = Button(text= "Play Single Player")
         self.readyButton.bind(on_press=self.update_self)
         self.add_widget(self.readyButton)
         socket_client.start_listening(self.incoming_message, show_error)
@@ -6044,6 +6230,7 @@ class LaunchPage(GridLayout):
     def LAUNCH(self, username, message):
         if username not in self.ready:
             self.usernames.append(username)
+            if self.readyButton.text == 'Play Single Player': self.readyButton.text = 'Ready Up'
         self.ready[username] = 1 if message == 'Ready' else 0
         #self.refresh_label()
         Clock.schedule_once(self.refresh_label, 0.5)
@@ -6098,8 +6285,10 @@ class LaunchPage(GridLayout):
         elif type(message[1]) is str:
             Clock.schedule_once(clockedPurchase, 0.1)
         elif message[1] == 0:
-            P = lclPlayer()
-            Clock.schedule_once(partial(P.remove_trader, True), 0.1)
+            def run(_):
+                P = lclPlayer()
+                P.remove_trade(True)
+            Clock.schedule_once(run, 0.1)
     def SKIRMISH(self, username, message):
         Skirmishes[0] = message
         Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
@@ -6131,7 +6320,47 @@ class LaunchPage(GridLayout):
             IncreaseCapacity(message[0], message[1])
         Clock.schedule_once(run, 0.1)
     def TRADE(self, username, message):
-        pass
+        def run(_):
+            P = lclPlayer()
+            # Make sure both players are trading with each other before delivering updated trade
+            if (type(message) is dict) and (P.username in message):
+                if message[P.username] == 'ask':
+                    player_confirm_trade(username)
+                elif message[P.username] == 'reject':
+                    output(f"{username} either rejected or is currently unable to trade.", 'yellow')
+                    exitActionLoop(amt=0)()
+                    return
+                elif message[P.username] == 'start':
+                    player_trade(username)
+            elif (P is not None) and (P.is_trading == username) and (P.username == message[0]) and (P.parentBoard.game_page.main_screen.current == 'Trade'):
+                T = P.parentBoard.game_page.tradescreen.children[0]
+                if len(message) == 4:
+                    this_username, offer, amt, slot = message
+                    if amt == -1:
+                        T.remove(slot[0], slot[1], 1, slot)
+                    elif type(offer) is tuple:
+                        T.add_train(offer[0], offer[1], 1, slot)
+                    elif offer == 'coins':
+                        T.add_coins(amt, 1, slot)
+                    else:
+                        T.add_item(offer, 1, slot)
+                elif message[1] == 'confirmed':
+                    print("going into confirm")
+                    T.other_confirmation()
+                elif message[1] == 'decline':
+                    T.receive_rejection()
+                elif message[1] == 'abort':
+                    output(f"{username} aborted the trade!", 'yellow')
+                    T.quit_trade(0)
+                elif message[1] == 'no actions':
+                    T.display_msg(f"{username} is out of actions. Either wait for round to start or quit trade!", 3, (0.7, 0, 0, 1))
+                elif message[1] == 'training failure':
+                    T.training_failure()
+                elif message[1] == 'training success':
+                    T.complete_trade()
+            else:
+                print((P is not None) , (P.is_trading == username) , (P.username in message) , (P.parentBoard.game_page.main_screen.current == 'Trade'))
+        Clock.schedule_once(run, 0.1)
     def GAME_END(self, username, message):
         def run(_):
             P = lclPlayer()
@@ -6144,106 +6373,9 @@ class LaunchPage(GridLayout):
             P.GameEnd(message)
         Clock.schedule_once(run, 0.1)
     def incoming_message(self, username, category, message):
-        if category == '[LAUNCH]':
-            if username not in self.ready:
-                self.usernames.append(username)
-            self.ready[username] = 1 if message == 'Ready' else 0
-            #self.refresh_label()
-            Clock.schedule_once(self.refresh_label, 0.5)
-        elif category == '[DIFFICULTY]':
-            self.npc_difficulty(message)
-        elif category == '[SEED]':
-            self.seed(message)
-        elif category == '[LOAD]':
-            self.load(message, send=False)
-        elif category == '[SAVE]':
-            self.save(message)
-        elif category == '[END SETTING]':
-            self.gameEnd(message)
-        elif (category == '[CONNECTION]') and (message == 'Closed'):
-            self.usernames.remove(username)
-            self.ready.pop(username)
-            print(f'{username} Lost Connection!')
-            output(f'{username} Lost Connection!')
-            if game_launched[0] == False:
-                self.refresh_label()
-        elif category == '[CLAIM]':
-            output(f"{username} claimed {message}")
-            def clockedClaim(_):
-                game_app.chooseCity_page.make_claim(username, message)
-            #game_app.chooseCity_page.make_claim(username, message)
-            Clock.schedule_once(clockedClaim, 0.1)
-        elif category == '[MOVE]':
-            def clockedMove(_):
-                game_app.game_page.board_page.Players[username].moveto(message, False, True)
-            Clock.schedule_once(clockedMove, 0.2)
-        elif category == '[CHAT]':
-            def clockedChat(_):
-                game_app.game_page.update_display(username, message)
-            Clock.schedule_once(clockedChat, 0.2)
-        elif category == '[EMPTY]':
-            def emptyTile(_):
-                game_app.game_page.board_page.gridtiles[message].empty_tile(recvd=True)
-            Clock.schedule_once(emptyTile, 0.2)
-        elif (category == '[ROUND]') and (message == 'end'):
-            def pauseUser(_):
-                game_app.game_page.board_page.Players[username].pause()
-            Clock.schedule_once(pauseUser, 0.2)
-        elif (category == '[TRADER]'):
-            def clockedTrader(_):
-                game_app.game_page.board_page.gridtiles[message[0]].trader_appears(recvd=message[1])
-            def clockedPurchase(_):
-                game_app.game_page.board_page.gridtiles[message[0]].buy_from_trader(message[1], recvd=True)
-            if type(message[1]) is set:
-                Clock.schedule_once(clockedTrader, 0.2)
-            elif type(message[1]) is str:
-                Clock.schedule_once(clockedPurchase, 0.1)
-            elif message[1] == 0:
-                P = lclPlayer()
-                Clock.schedule_once(partial(P.remove_trader, True), 0.1)
-        elif category == '[SKIRMISH]':
-            Skirmishes[0] = message
-            Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
-        elif category == '[MARKET]':
-            Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.02)
-        elif category == '[EFFICIENCY]':
-            def run(_):
-                output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
-                capital_info[message]['efficiency'] += 1
-            Clock.schedule_once(run, 0.1)
-        elif category == '[DISCOUNT]':
-            def run(_):
-                output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
-                capital_info[message]['discount'] += 1
-            Clock.schedule_once(run, 0.1)
-        elif category == '[TRADER ALLOWED]':
-            def run(_):
-                output(f"{username} convinced traders to start appearing in {message}! (1/8 chance)", 'blue')
-                capital_info[message]['trader allowed'] = True
-            Clock.schedule_once(run, 0.1)
-        elif category == '[REDUCED TENSION]':
-            def run(_):
-                output(f"{username} reduced the tensions between {' and '.join(list(message[0]))} by a factor of {message[1]}!", 'blue')
-                Skirmishes[1][message[0]] += message[1]
-            Clock.schedule_once(run, 0.1)
-        elif category == '[CAPACITY]':
-            def run(_):
-                output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
-                IncreaseCapacity(message[0], message[1])
-            Clock.schedule_once(run, 0.1)
-        elif category == '[TRADE]':
-            pass
-        elif category == '[GAME END]':
-            def run(_):
-                P = lclPlayer()
-                output(f"{username} Triggered End Game!", 'blue')
-                socket_client.send('[END STATS]', {'Combat':P.Combat, 'Reputation':P.Reputation, 'Capital':P.Capital, 'Knowledge':P.Knowledge})
-            Clock.schedule_once(run, 0.1)
-        elif category == '[FINAL END STATS]':
-            def run(_):
-                P = lclPlayer()
-                P.GameEnd(message)
-            Clock.schedule_once(run, 0.1)
+        funcAttr = category[1:-1].replace(' ','_')
+        if hasattr(self, funcAttr):
+            getattr(self, funcAttr)(username, message)
     def update_self(self, _=None):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready
@@ -6256,7 +6388,7 @@ class LaunchPage(GridLayout):
                 self.label.background_color = (0.96, 1, 1, 1)
             self.label.background_color = (1, 0.3, 0.3, 1)
             socket_client.send("[LAUNCH]","Not Ready")
-            self.readyButton.text = "Ready Up"
+            self.readyButton.text = "Play Single Player" if len(self.ready)==1 else "Ready Up"
             Clock.schedule_once(blue_screen, 0.3)
         self.refresh_label()
             
