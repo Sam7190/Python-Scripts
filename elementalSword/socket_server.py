@@ -31,6 +31,7 @@ gameEnd = [None]
 hostname = socket.gethostname()
 ## getting the IP address using socket.gethostbyname() method
 IP = socket.gethostbyname(hostname)
+#IP = '64.112.179.113'
 
 
 # Create a socket

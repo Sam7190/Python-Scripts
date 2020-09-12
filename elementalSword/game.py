@@ -267,6 +267,10 @@ class HitBox(Button):
                 # Any remaining ids must be fake, so remove them
                 self.npcClickBox(i, None, 0.3 + 0.3*vgID, 0.3)
             #Clock.schedule_once(partial(self.removeBox, i, damageNPC), 0.3 + 0.3*vgID)
+        try:
+            vgID
+        except NameError:
+            vgID = 0
         Clock.schedule_once(self.fpage.nextAttack, 0.9 + 0.3*vgID)
     def countDown(self, instance=None):
         if self.attackEnded:
