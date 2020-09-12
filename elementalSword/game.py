@@ -536,10 +536,13 @@ class FightPage(FloatLayout):
             output(f"Activating Logged Def, Player Lv.{np.sum(self.pstats)}, NPC Lv.{np.sum(self.foestats)}")
         else:
             self.pstats, Gsum = deepcopy(self.P.current), np.zeros((len(self.P.attributes),),dtype=int)
-            for Name, G in self.P.group.items():
-                output(f"Level {np.sum(G)} {Name} boosts stats. Combined stat is maximum of each attribute.")
-                self.pstats = np.max([self.pstats, G], 0)
-                Gsum += G
+            if (len(self.P.group) > 0) and name in {'Duelist', 'Sparring Partner'}:
+                output("Your group does not battle with you.", 'yellow')
+            else:
+                for Name, G in self.P.group.items():
+                    output(f"Level {np.sum(G)} {Name} boosts stats. Combined stat is maximum of each attribute.")
+                    self.pstats = np.max([self.pstats, G], 0)
+                    Gsum += G
             # Apply algorithmic boost for party size - minimum of sum and logged multiplier
             for i in range(len(self.pstats)):
                 self.pstats[i] = int(min([self.pstats[i]+Gsum[i], self.pstats[i]*(1 + np.log10(len(self.P.group)+1))]))
@@ -4752,7 +4755,9 @@ class TradePage(FloatLayout):
         super().__init__(**kwargs)
         self.P = lclPlayer()
         self.P.paused = True
+        self.O = username
         self.trading = True
+        self.training = False
         self.confirmed = False
         self.items = deepcopy(self.P.items)
         self.adept, self.master = {}, {}
@@ -4761,6 +4766,12 @@ class TradePage(FloatLayout):
                 self.master.add(skill)
             elif lvl >= 8:
                 self.adept.add(skill)
+        for atr in self.P.attributes:
+            lvl = self.P.combat[self.P.attributes[atr]]
+            if lvl >= 12:
+                self.master.add(atr)
+            elif lvl >= 8:
+                self.adept.add(atr)
         
         bkgSource = f'images\\resized\\background\\{self.P.currenttile.tile}.png' if (self.P.currenttile.tile+'.png') in os.listdir('images\\background') else f'images\\resized\\background\\{self.P.currenttile.tile[:-1]}.png'
         self.add_widget(Image(source=bkgSource, pos=(0,0), size_hint=(1,1)))
@@ -4775,35 +4786,181 @@ class TradePage(FloatLayout):
         self.pimg = Image(source=psource, pos_hint={'x':0, 'y':y_bottom}, size_hint=(x_person, y_person))
         self.add_widget(self.pimg)
         # Plot Other Player
-        fsource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.foename].birthcity}.png'
-        self.oimg = Image(source=fsource, pos_hint={'right':1, 'y':y_bottom}, size_hint=(x_person, y_person))
-        self.add_widget(self.fimg)
+        osource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.foename].birthcity}.png'
+        self.oimg = Image(source=osource, pos_hint={'right':1, 'y':y_bottom}, size_hint=(x_person, y_person))
+        self.add_widget(self.oimg)
         
-        self.pGrid = GridLayout(cols=3, pos_hint={'x':x_person, 'y':y_bottom}, size_hint=(x_grid, y_grid))
-        self.mGrid = GridLayout(cols=1, pos_hint={'x':(x_person+x_grid), 'y':y_bottom}, size_hint=(x_middle, y_middle))
-        self.oGrid = GridLayout(cols=3, pos_hint={'right':(1-x_person),'y':y_bottom}, size_hint=(x_grid, y_grid))
+        pGrid = GridLayout(cols=3, pos_hint={'x':x_person, 'y':y_bottom}, size_hint=(x_grid, y_grid))
+        mGrid = GridLayout(cols=1, pos_hint={'x':(x_person+x_grid), 'y':y_bottom}, size_hint=(x_middle, y_middle))
+        oGrid = GridLayout(cols=3, pos_hint={'right':(1-x_person),'y':y_bottom}, size_hint=(x_grid, y_grid))
         
         slot_shape = (7, 3)
-        self.pGrid.slots = np.empty(slot_shape,dtype=object)
-        self.oGrid.slots = np.empty(slot_shape,dtype=object)
+        self.offered = [{}, {}]
+        self.invoffered = [{}, {}]
+        self.slots = [np.empty(slot_shape,dtype=object), np.empty(slot_shape,dtype=object)]
         for i in range(slot_shape[0]):
             for j in range(slot_shape[1]):
-                self.pGrid.slots[i,j] = Button(text='', disabled=True)
-                self.pGrid.slots[i,j].bind(on_press=partial(self.remove, i, j))
-                self.oGrid.slots[i,j] = Button(text='', disabled=True, background_disabled_normal='', background_color=(0.3, 0.3, 0.3, 0.7), color=(1, 1, 1, 1))
-                self.pGrid.add_widget(self.pGrid.slots[i,j])
-                self.oGrid.add_widget(self.oGrid.slots[i,j])
+                self.slots[0][i,j] = Button(text='', disabled=True)
+                self.slots[0][i,j].amt = 0
+                self.slots[0][i,j].offered = None
+                self.slots[0][i,j].bind(on_press=partial(self.remove, i, j))
+                self.slots[1][i,j] = Button(text='', disabled=True, background_disabled_normal='', background_color=(0.3, 0.3, 0.3, 0.7), color=(1, 1, 1, 1))
+                self.slots[1][i,j].amt = 0
+                self.slots[1][i,j].offered = None
+                pGrid.add_widget(self.slots[0][i,j])
+                oGrid.add_widget(self.slots[1][i,j])
         
-        self.confirm = Button(text='Confirm', color=(0.3, 1, 0.3, 1), background_color=(1.3, 1.5, 1.3, 1))
+        self.confirm = Button(text='Accept', color=(0.3, 1, 0.3, 1), background_color=(1.3, 1.5, 1.3, 1))
+        self.confirm.bind(on_press=self.make_confirmation)
         self.decline = Button(text='Decline', color=(1, 0.3, 0.3, 1), background_color=(1.5, 1.3, 1.3, 1))
+        self.decline.bind(on_press=self.reject_proposal)
         self.abort = Button(text='Abort', color=(0.8, 0, 0, 1), background_color=(1.7, 1.4, 1.4, 1))
-    def add_coins(self, amt, _=None):
-        pass
-    def add_item(self, item, _=None):
-        pass
-    def add_train(self, ability, _=None):
-        pass
+        self.abort.bind(on_press=self.quit_trade)
+        self.display = Button(text='', color=(0, 0, 0, 1), background_color=(1, 1, 1, 1), disabled=True, background_disabled_normal='')
+        mGrid.add_widget(Widget())
+        mGrid.add_widget(self.confirm)
+        mGrid.add_widget(Widget())
+        mGrid.add_widget(self.decline)
+        mGrid.add_widget(Widget())
+        mGrid.add_widget(Widget())
+        mGrid.add_widget(self.abort)
+        mGrid.add_widget(self.display)
         
+        buffer, max_col = 0.95, 11
+        coinGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom}, size_hint=(1, buffer*y_bottom/3))
+        coinGrid.add_widget(Button(text="Add Coins:", disabled=True, background_disabled_normal='', color=(0,0,0,1)))
+        for add in [1, 5, 25]:
+            B = Button(text=f'+{add}', font_size=16, background_color=(1, 1, 0, 1))
+            B.bind(on_press=partial(self.add_coins, add))
+            coinGrid.add_widget(B)
+        
+        itemGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom-(y_bottom/3)}, size_hint=(1, buffer*y_bottom/3))
+        itemGrid.add_widget(Button(text='Add Item:', disabled=True, background_disabled_normal='', color=(0,0,0,1)))
+        self.item_buttons = {}
+        for item in self.items:
+            B = Button(text=f'{item}: {self.items[item]}')
+            B.bind(on_press=partial(self.add_item, item))
+            self.item_buttons[item] = B
+            itemGrid.add_widget(B)
+            
+        trainGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom-2*(y_bottom/3)}, size_hint=(1, buffer*y_bottom/3))
+        trainGrid.add_widget(Button(text='Offer Training:', disabled=True, background_disabled_normal='', color=(0,0,0,1)))
+        for ability in self.adept:
+            B = Button(text=f'Adept\n{ability}', background_color=(0.5, 0, 1, 1))
+            B.bind(on_press=partial(self.add_train, ability, 0))
+            trainGrid.add_widget(B)
+        for ability in self.master:
+            B = Button(text=f'Master\n{ability}', background_color=(1, 1.5, 0, 1))
+            B.bind(on_press=partial(self.add_train, ability, 1))
+            trainGrid.add_widget(B)
+        
+        self.add_widget(pGrid)
+        self.add_widget(mGrid)
+        self.add_widget(oGrid)
+        self.add_widget(coinGrid)
+        self.add_widget(itemGrid)
+        self.add_widget(trainGrid)
+    def make_confirmation(self, _=None):
+        pass
+    def reject_proposal(self, _=None):
+        pass
+    def quit_trade(self, _=None):
+        pass
+    def display_msg(self, msg, delay=None, color=(0, 0, 0, 1)):
+        def clear(_=None):
+            self.display.text = ''
+        self.display.text = msg
+        self.display.color = color
+        if delay is not None: Clock.schedule_once(clear, delay)
+    def remove(self, i, j, side=0, _=None):
+        if 'Training' in self.slots[side][i, j].text:
+            self.training = False
+            self.confirm.text = 'Accept'
+        if side == 0:
+            socket_client.send('[TRADE]', [self.O, None, -1, (i, j)])
+            if not ('Coin' in self.slots[side][i, j].text):
+                L = self.slots[side][i, j].text.split(' ')
+                item = L[1] if self.slots[side][i, j].amt <= 1 else L[1][:-1]
+                self.items[item] += self.slots[side][i, j].amt
+                self.item_buttons[item].text = f'{item}: {self.items[item]}'
+                self.item_buttons[item].disabled = False
+        self.slots[side][i, j].amt = 0
+        self.slots[side][i, j].text = ''
+        self.slots[side][i, j].disabled = True
+        self.offered[side].pop(self.slots[side][i, j].offered)
+        self.slots[side][i, j].offered = None
+    def findNearestEmpty(self, side):
+        for j in range(len(self.slots[side].T)):
+            for i in range(len(self.slots[side])):
+                if self.slots[side][i, j].text == '':
+                    return (i, j)
+        self.display_msg("You cannot make anymore offers to the trade! Try removing some!", 1, (0.7, 0.7, 0, 1))
+        return False
+    def add_coins(self, amt, side=0, slot=None, _=None):
+        if slot is None:
+            if 'coins' in self.offered[side]:
+                slot = self.offered[side]['coins']
+            else:
+                slot = self.findNearestEmpty(side)
+                if not slot: return
+        if not ((side == 0) and (self.P.coins < (amt + self.slots[side][slot].amt))):
+            self.slots[side][slot].amt += amt
+            self.slots[side][slot].text = f"{self.slots[side][slot].amt} Coin{'' if self.slots[side][slot].amt==1 else 's'}"
+            self.slots[side][slot].offered = 'coins'
+            self.offered[side]['coins'] = slot
+            if side == 0:
+                self.slots[side][slot].disabled = False
+                socket_client.send('[TRADE]', [self.O, 'coins', amt, slot])
+        else:
+            self.display_msg("You do not have enough coin to make that offer!", 1, (0.7, 0.7, 0, 1))
+    def add_item(self, item, side=0, slot=None, _=None):
+        if slot is None:
+            if item in self.offered[side]:
+                slot = self.offered[side][item]
+            else:
+                slot = self.findNearestEmpty(side)
+                if not slot: return
+        if not ((side == 0) and (self.items[item] <= 0)):
+            self.slots[side][slot].amt += 1
+            self.slots[side][slot].text = f"{self.slots[side][slot].amt} {item}{'' if self.slots[side][slot].amt==1 else 's'}"
+            self.slots[side][slot].offered = item
+            self.offered[side][item] = slot
+            if side == 0:
+                self.items[item] -= 1
+                self.item_buttons[item].text = f'{item}: {self.items[item]}'
+                self.slots[side][slot].disabled = False
+                if self.items[item] <= 0:
+                    self.item_buttons[item].disabled = True
+                socket_client.send('[TRADE]', [self.O, item, 1, slot])
+        else:
+            self.display_msg("You cannot offer any more of that item!", 1, (0.7, 0.7, 0, 1))
+    def add_train(self, ability, master, side=0, slot=None, _=None):
+        if self.training:
+            self.display_msg("You cannot train more than one at a time!", 1, (0.7, 0.7, 0, 1))
+            return
+        if slot is None:
+            slot = self.findNearestEmpty(side)
+            if not slot: return
+        self.training = True
+        self.confirm.text = 'Train'
+        self.slots[side][slot].amt = master
+        self.slots[side][slot].text = "{'Master' if master else 'Adept'} {ability}\nTraining"
+        self.slots[side][slot].offered = (ability, master)
+        self.offered[side][(ability, master)] = slot
+        if side == 0:
+            self.slots[side][slot].disabled = False
+            socket_client.send('[TRADE]', [self.O, ability, master, slot])
+        
+def player_trade(username, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    screen = Screen(name="Trade")
+    screen.add_widget(TradePage)
+    P.parentBoard.game_page.main_screen.add_widget(screen)
+    P.parentBoard.game_page.main_screen.current = "Trade"
+    P.parentBoard.game_page.tradescreen = screen
+
 
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
@@ -5884,6 +6041,108 @@ class LaunchPage(GridLayout):
             self.seed_input.text = ''
             self.save_input.text = ''
             self.end_input.text = ''
+    def LAUNCH(self, username, message):
+        if username not in self.ready:
+            self.usernames.append(username)
+        self.ready[username] = 1 if message == 'Ready' else 0
+        #self.refresh_label()
+        Clock.schedule_once(self.refresh_label, 0.5)
+    def DIFFICULTY(self, username, message):
+        self.npc_difficulty(message)
+    def SEED(self, username, message):
+        self.seed(message)
+    def LOAD(self, username, message):
+        self.load(message, send=False)
+    def SAVE(self, username, message):
+        self.save(message)
+    def END_SETTING(self, username, message):
+        self.gameEnd(message)
+    def CONNECTION(self, username, message):
+        if message == 'Closed':
+            self.usernames.remove(username)
+            self.ready.pop(username)
+            print(f'{username} Lost Connection!')
+            output(f'{username} Lost Connection!')
+            if game_launched[0] == False:
+                self.refresh_label()
+    def CLAIM(self, username, message):
+        output(f"{username} claimed {message}")
+        def clockedClaim(_):
+            game_app.chooseCity_page.make_claim(username, message)
+        #game_app.chooseCity_page.make_claim(username, message)
+        Clock.schedule_once(clockedClaim, 0.1)
+    def MOVE(self, username, message):
+        def clockedMove(_):
+            game_app.game_page.board_page.Players[username].moveto(message, False, True)
+        Clock.schedule_once(clockedMove, 0.2)
+    def CHAT(self, username, message):
+        def clockedChat(_):
+            game_app.game_page.update_display(username, message)
+        Clock.schedule_once(clockedChat, 0.2)
+    def EMPTY(self, username, message):
+        def emptyTile(_):
+            game_app.game_page.board_page.gridtiles[message].empty_tile(recvd=True)
+        Clock.schedule_once(emptyTile, 0.2)
+    def ROUND(self, username, message):
+        if message == 'end':
+            def pauseUser(_):
+                game_app.game_page.board_page.Players[username].pause()
+            Clock.schedule_once(pauseUser, 0.2)
+    def TRADER(self, username, message):
+        def clockedTrader(_):
+            game_app.game_page.board_page.gridtiles[message[0]].trader_appears(recvd=message[1])
+        def clockedPurchase(_):
+            game_app.game_page.board_page.gridtiles[message[0]].buy_from_trader(message[1], recvd=True)
+        if type(message[1]) is set:
+            Clock.schedule_once(clockedTrader, 0.2)
+        elif type(message[1]) is str:
+            Clock.schedule_once(clockedPurchase, 0.1)
+        elif message[1] == 0:
+            P = lclPlayer()
+            Clock.schedule_once(partial(P.remove_trader, True), 0.1)
+    def SKIRMISH(self, username, message):
+        Skirmishes[0] = message
+        Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
+    def MARKET(self, username,message):
+        Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.02)
+    def EFFICIENCY(self, username, message):
+        def run(_):
+            output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
+            capital_info[message]['efficiency'] += 1
+        Clock.schedule_once(run, 0.1)
+    def DISCOUNT(self, username, message):
+        def run(_):
+            output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
+            capital_info[message]['discount'] += 1
+        Clock.schedule_once(run, 0.1)
+    def TRADER_ALLOWED(self, username, message):
+        def run(_):
+            output(f"{username} convinced traders to start appearing in {message}! (1/8 chance)", 'blue')
+            capital_info[message]['trader allowed'] = True
+        Clock.schedule_once(run, 0.1)
+    def REDUCED_TENSION(self, username, message):
+        def run(_):
+            output(f"{username} reduced the tensions between {' and '.join(list(message[0]))} by a factor of {message[1]}!", 'blue')
+            Skirmishes[1][message[0]] += message[1]
+        Clock.schedule_once(run, 0.1)
+    def CAPACITY(self, username, message):
+        def run(_):
+            output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
+            IncreaseCapacity(message[0], message[1])
+        Clock.schedule_once(run, 0.1)
+    def TRADE(self, username, message):
+        pass
+    def GAME_END(self, username, message):
+        def run(_):
+            P = lclPlayer()
+            output(f"{username} Triggered End Game!", 'blue')
+            socket_client.send('[END STATS]', {'Combat':P.Combat, 'Reputation':P.Reputation, 'Capital':P.Capital, 'Knowledge':P.Knowledge})
+        Clock.schedule_once(run, 0.1)
+    def FINAL_END_STATS(self, username, message):
+        def run(_):
+            P = lclPlayer()
+            P.GameEnd(message)
+        Clock.schedule_once(run, 0.1)
     def incoming_message(self, username, category, message):
         if category == '[LAUNCH]':
             if username not in self.ready:
@@ -5972,6 +6231,8 @@ class LaunchPage(GridLayout):
                 output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
                 IncreaseCapacity(message[0], message[1])
             Clock.schedule_once(run, 0.1)
+        elif category == '[TRADE]':
+            pass
         elif category == '[GAME END]':
             def run(_):
                 P = lclPlayer()
