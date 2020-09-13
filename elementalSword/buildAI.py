@@ -22,7 +22,7 @@ def trainLoc(length, prc=trainprc):
     I = np.random.choice(np.arange(length), int(length*prc))
     z[I] = True
 
-def loadData(filename='log\\DefenseLog.csv'):
+def loadData(filename='data\\DefenseLog.csv'):
     D = pd.read_csv(filename)
     T = D[D.columns[:training_cols]]
     return T, D['clicked'], D['dodged']

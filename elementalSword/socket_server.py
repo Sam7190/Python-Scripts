@@ -11,7 +11,7 @@ import pickle
 import datetime
 import numpy as np
 
-HEADER_LENGTH = 10
+HEADER_LENGTH = 20
 PORT = 1234
 
 # List of connected clients - socket as a key, user header and name as data
@@ -31,7 +31,7 @@ gameEnd = [None]
 hostname = socket.gethostname()
 ## getting the IP address using socket.gethostbyname() method
 #IP = socket.gethostbyname(hostname)
-IP = 'ec2-3-133-139-92.us-east-2.compute.amazonaws.com'
+IP = ""#'ec2-3-133-139-92.us-east-2.compute.amazonaws.com'
 
 
 # Create a socket
@@ -179,10 +179,11 @@ def getSkirmish():
     for S in popS:
         Skirmishes[1].pop(S)
 def getTodaysMarket(max_items=6):
-    city_markets = {}
+    city_markets, S = {}, []
     for city in city_sell:
         city_markets[city] = set(np.random.choice(city_sell[city], max_items))
-    return city_markets
+        S.append(f'{city},'+','.join(list(city_markets[city])))
+    return '|'.join(S)
 def rbtwn(mn, mx):
     return np.random.choice(np.arange(mn, mx+1))
 def getTodaysJobs():
@@ -258,11 +259,17 @@ def updateServer(username, category, msg):
         if all_ended:
             all_ended = False
             getSkirmish()
+            todaysMarket = getTodaysMarket()
+            todaysJobs = getTodaysJobs()
             for username in client_gameStatus:
                 if 'round end' in client_gameStatus[username]: 
                     client_gameStatus[username]['round end'] = False
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
-                sendMessage('[SERVER]', username, '[MARKET]', [getTodaysMarket(), getTodaysJobs()])
+                sendMessage('[SERVER]', username, '[JOBS]', todaysJobs)
+                sendMessage('[SERVER]', username, '[MARKET]', todaysMarket)
+                #for city in todaysMarket:
+                #    sendMessage('[SERVER]', username, '[MARKET]', [city, todaysMarket[city]])
+                #sendMessage('[SERVER]', username, '[MARKET]', [getTodaysMarket(), getTodaysJobs()])
     elif category == '[REDUCED TENSION]':
         Skirmishes[0][msg[0]] += msg[1]
     elif category == '[END STATS]':

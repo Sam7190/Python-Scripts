@@ -12,6 +12,7 @@ import os
 import sys
 import csv
 import pickle
+import logging
 from inspect import currentframe, getframeinfo
 from collections import Counter
 from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
@@ -243,12 +244,12 @@ class HitBox(Button):
                 click_i = np.argmax(click_ps)
                 i = boxIDs.pop(click_i)
                 click_p, dodge_p = click_prob[i], dodge_prob[i]
-                print("Click Probability", click_p, self.fakes[i])
+                logging.info(f"Click Probability {click_p} {self.fakes[i]}")
                 clickType = None
                 if np.random.rand() <= click_p:
                     if not self.fakes[i]: clicked_fake = False
                     # This means the AI "clicked" the box - now check to see if they would have "dodged" the box
-                    print("Clicked", "Dodge Probability", dodge_p, self.fakes[i])
+                    logging.info(f"Clicked! Dodge Probability {dodge_p} {self.fakes[i]}")
                     if np.random.rand() <= dodge_p:
                         # AI dodges the box -- pass because nothing happens
                         clickType = 'dodge'
@@ -262,6 +263,7 @@ class HitBox(Button):
                 elif not self.fakes[i]:
                     # NPC takes damage because the box is not a fake
                     clickType = 'hit'
+                logging.info(f"Click Type: {clickType}")
                 self.npcClickBox(i, clickType, 0.3 + 0.3*vgID, 0.3)
             for i in boxIDs:
                 # Any remaining ids must be fake, so remove them
@@ -556,6 +558,8 @@ class FightPage(FloatLayout):
         for atr, lvl in hard_limits.items():
             self.pstats[self.P.attributes[atr]] = min([lvl, self.pstats[self.P.attributes[atr]]])
             self.foestats[self.P.attributes[atr]] = min([lvl, self.foestats[self.P.attributes[atr]]])
+        logging.info(f"Player Stats: {self.pstats}")
+        logging.info(f"Foe Stats: {self.foestats}")
         # Foe objects
         self.foename = name
         self.foelvl = lvl
@@ -824,47 +828,52 @@ class FightPage(FloatLayout):
             # They must have fainted and lost the battle
             self.consequence()
     def foeTakesDamage(self, amt=1):
+        def Reward():
+            # Get reward
+            if not callable(self.reward):
+                for rwd, amt in self.reward.items():
+                    if rwd == 'coins':
+                        output(f"Rewarded {int(amt)} coin!", 'green')
+                        self.P.coins += int(amt)
+                    else:
+                        # Assumption: If not coins, then must be an item
+                        output(f"Rewarded {int(amt)} {rwd}!", 'green')
+                        self.P.addItem(rwd, int(amt))
+            # Training with Sparring partner does not gaurantee you a level increase like with others.
+            levelsup = (self.foecateg/2) ** 2
+            if self.foename == 'Sparring Partner': levelsup *= 0.65
+            levelsup += self.P.combatxp # Get any remaining xp from previous fights
+            self.P.combatxp = float(levelsup) - int(levelsup) # Store any remaining xp away
+            self.levelsup = int(levelsup)
+            if self.levelsup > 0:
+                critthink = self.P.activateSkill('Critical Thinking')
+                r = rbtwn(1, 12, None, critthink, 'Critical Thinking ')
+                if r <= critthink:
+                    self.P.useSkill('Critical Thinking')
+                    self.prompt_levelup()
+                    # prompt_levelup should end the fight once attributes are chosen.
+                else:
+                    for i in range(self.levelsup):
+                        self.check_valid_levelup()
+                        if len(self.valid_attributes) == 0:
+                            continue
+                        random_atr = list(self.valid_attributes.keys())[rbtwn(0, len(self.valid_attributes)-1)]
+                        output(f"Leveling up {random_atr}!", 'green')
+                        self.P.updateAttribute(random_atr)
+                    self.endFight()
+            else:
+                output(f"You don't level up, level up remainder: {round(self.P.combatxp,2)}", 'yellow')
+                self.endFight()
+        logging.info(f"Foe is taking damage. Prior HP - {self.foestats[self.P.attributes['Hit Points']]}")
         if (self.foestats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
             self.foestats[self.P.attributes['Hit Points']] = max([0, self.foestats[self.P.attributes['Hit Points']]-amt])
             cell = self.statTable.cells[self.foename][self.P.attributes['Hit Points']]
             cell.text = str(self.foestats[self.P.attributes['Hit Points']])
             cell.background_color = (1, 1, 0.2, 0.6)
             if self.foestats[self.P.attributes['Hit Points']] == 0:
-                # Get reward
-                if not callable(self.reward):
-                    for rwd, amt in self.reward.items():
-                        if rwd == 'coins':
-                            output(f"Rewarded {int(amt)} coin!", 'green')
-                            self.P.coins += int(amt)
-                        else:
-                            # Assumption: If not coins, then must be an item
-                            output(f"Rewarded {int(amt)} {rwd}!", 'green')
-                            self.P.addItem(rwd, int(amt))
-                # Training with Sparring partner does not gaurantee you a level increase like with others.
-                levelsup = (self.foecateg/2) ** 2
-                if self.foename == 'Sparring Partner': levelsup *= 0.65
-                levelsup += self.P.combatxp # Get any remaining xp from previous fights
-                self.P.combatxp = float(levelsup) - int(levelsup) # Store any remaining xp away
-                self.levelsup = int(levelsup)
-                if self.levelsup > 0:
-                    critthink = self.P.activateSkill('Critical Thinking')
-                    r = rbtwn(1, 12, None, critthink, 'Critical Thinking ')
-                    if r <= critthink:
-                        self.P.useSkill('Critical Thinking')
-                        self.prompt_levelup()
-                        # prompt_levelup should end the fight once attributes are chosen.
-                    else:
-                        for i in range(self.levelsup):
-                            self.check_valid_levelup()
-                            if len(self.valid_attributes) == 0:
-                                continue
-                            random_atr = list(self.valid_attributes.keys())[rbtwn(0, len(self.valid_attributes)-1)]
-                            output(f"Leveling up {random_atr}!", 'green')
-                            self.P.updateAttribute(random_atr)
-                        self.endFight()
-                else:
-                    output(f"You don't level up, level up remainder: {round(self.P.combatxp,2)}", 'yellow')
-                    self.endFight()
+                Reward()
+        elif (self.foestats[self.P.attributes['Hit Points']] == 0) and (self.fighting):
+            Reward()
     def levelup(self, atr, _=None):
         if self.levelsup > 0:
             output(f"Leveling up {atr}!", 'green')
@@ -889,6 +898,7 @@ class FightPage(FloatLayout):
         else:
             self.endFight()
     def pTakesDamage(self, amt=1):
+        logging.info(f"Player is taking damage. Prior HP - {self.pstats[self.P.attributes['Hit Points']]}")
         if (self.pstats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
             self.pstats[self.P.attributes['Hit Points']] = max([0, self.pstats[self.P.attributes['Hit Points']]-amt])
             cell = self.statTable.cells[self.P.username][self.P.attributes['Hit Points']]
@@ -1011,7 +1021,7 @@ def isbetween(mn, mx, numb):
 
 def output(message, color=None):
     game_app.game_page.update_output(message, color)
-    print(message)
+    logging.info(message)
 def actionGrid(funcDict, save_rest, occupied=True):
     game_app.game_page.make_actionGrid(funcDict, save_rest, occupied)
 def check_paralysis():
@@ -1051,7 +1061,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     P.tiered = tier if tier > 1 else False
                     P.go2action(tier)
                 P.started_round = False
-                print(f"Taking {amt} in starting action!")
+                if game_launched[0]: logging.info(f"Taking {amt} in starting action!")
             else:
                 if consume == 'road':
                     P.road_moves -= amt
@@ -1067,7 +1077,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     else:
                         P.update_mainStatPage()
                 elif amt>0:
-                    print(f"Taking {amt} of fatigue!")
+                    if game_launched[0]: logging.info(f"Taking {amt} of fatigue!")
                     P.takeAction(amt)
                 if empty_tile: P.currenttile.empty_tile()
                 if (consume is None) or ('tiered' not in consume):
@@ -2173,6 +2183,7 @@ class Player(Image):
         self.group = {}
         self.has_warrior = 0
         self.training_discount = False
+        self.round_num = 0
         
         self.coins = cities[self.birthcity]['Coins']
         self.working = [None, 0]
@@ -2420,8 +2431,7 @@ class Player(Image):
         self.update_mainStatPage()
     def pause(self):
         self.paused = True
-        if self == self.parentBoard.localPlayer:
-            output("Round End")
+        output(f"{self.username} Ended Round")
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
@@ -4406,12 +4416,11 @@ class Quest:
         for mission in range(1, 9):
             for stage in range(1, 6):
                 if self.playerTrack.player.reputation[stage-1, mission-1]['status'] != 'not started':
-                    print((stage, mission), self.playerTrack.player.reputation[stage-1, mission-1])
-                for field, value in self.playerTrack.player.reputation[stage-1, mission-1].items():
-                    if field == 'status':
-                        self.update_quest_status((stage, mission), value, False)
-                    else:
-                        setattr(self.quests[stage, mission], field, value)
+                    for field, value in self.playerTrack.player.reputation[stage-1, mission-1].items():
+                        if field == 'status':
+                            self.update_quest_status((stage, mission), value, False)
+                        else:
+                            setattr(self.quests[stage, mission], field, value)
     def req_met(self, quest):
         init_req = eval(quest_req[quest]) if quest in quest_req else True
         inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
@@ -4525,7 +4534,6 @@ class PlayerTrack(GridLayout):
             for tB in self.tabs.children:
                 tB.disabled = True if tB == tabButton else False
                 tB.color = (0, 0, 0, 1) if tB == tabButton else (1, 1, 1, 1)
-            #print(tabButton.color)
         self.tabs = GridLayout(cols=5, height=0.07*Window.size[1], size_hint_y=None)
         self.tab_color = (0.1, 0.6, 0.5, 1)
         self.combatTab = Button(text=f"Combat: [color={self.hclr}]{player.Combat}[/color]",markup=True,background_color=self.tab_color)
@@ -5588,7 +5596,6 @@ class BoardPage(FloatLayout):
             x, y = positions['randoms'][i]
             self.add_tile(randomChoice[i], x, y)
     def semiRandomTileDistribution(self):
-        print(seed)
         np.random.seed(seed)
         randQ = randoms*int(np.ceil(len(positions['randoms'])/len(randoms)))
         coordQ = deepcopy(positions['randoms'])
@@ -5615,6 +5622,7 @@ class BoardPage(FloatLayout):
         self.add_widget(T)
     def startRound(self):
         self.localPlayer.savePlayer()
+        logging.info("Player saved.")
         for P in self.Players.values():
             P.paused = False
         if self.localPlayer.dueling_hiatus > 0:
@@ -5625,7 +5633,8 @@ class BoardPage(FloatLayout):
         if (self.localPlayer.PlayerTrack.Quest.quests[2, 8].status=='started') and hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds'):
             if P.PlayerTrack.Quest.quests[2, 8].wait_rounds > 0:
                 P.PlayerTrack.Quest.quests[2, 8].wait_rounds -= 1
-        self.sendFaceMessage('Start Round!')
+        self.localPlayer.round_num += 1
+        self.sendFaceMessage(f'Start Round {self.localPlayer.round_num}!')
         if self.localPlayer.has_warrior:
             self.localPlayer.has_warrior -= 1
             if self.localPlayer.has_warrior == 0:
@@ -5637,6 +5646,7 @@ class BoardPage(FloatLayout):
         self.localPlayer.update_mainStatPage()
         paralyzed = check_paralysis()
         if not paralyzed: 
+            logging.info("Player not paralyzed.")
             self.localPlayer.started_round = True
             if (self.localPlayer.PlayerTrack.Quest.quests[3, 6].status=='started') and (self.localPlayer.PlayerTrack.Quest.quests[3, 6].action % 2):
                 JoinFight()
@@ -5645,10 +5655,15 @@ class BoardPage(FloatLayout):
                 perform_labor()
             else:
                 self.localPlayer.go2consequence(0)
-    def update_market(self, update, _=None):
-        city_markets, city_jobs = update
+    def update_market(self, city_markets, _=None):
+#        for city, T in self.citytiles.items():
+#            T.city_wares = city_markets[city]
+        by_city = city_markets.split('|')
+        for i in range(len(by_city)):
+            market = by_city[i].split(',')
+            self.citytiles[market[0]].city_wares = set(market[1:])
+    def update_jobs(self, city_jobs, _=None):
         for city, T in self.citytiles.items():
-            T.city_wares = city_markets[city]
             T.city_jobs = city_jobs[city]
     def add_player(self, username, birthcity):
         self.Players[username] = Player(self, username, birthcity)
@@ -5723,7 +5738,7 @@ class BoardPage(FloatLayout):
         self.startLblLast = list(np.delete(self.startLblLast, dlt_i))
         self.startLabel.text = '\n'.join(self.startLblMsgs)
         if msg is not None: 
-            if msg == 'Start Round!': msg = '\n'+msg
+            if msg == f'Start Round {self.localPlayer.round_num}!': msg = '\n'+msg
             output(msg, clr)
         def clear_lbl(_):
             self.sendFaceMessage()
@@ -5803,8 +5818,10 @@ class GamePage(GridLayout):
         input_y, label_y, stat_y, action_y, output_y, toggle_y = 0.05, 0.25, 0.1, 0.2, 0.35, 0.05
         self.stat_ypos, self.stat_ysize = input_y+label_y, stat_y
         self.right_line = RelativeLayout(size_hint_x=self.right_line_x)
-        self.toggleView = Button(text="Player Track",pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(1,toggle_y),background_color=(0, 0.4, 0.4, 1))
+        self.toggleView = Button(text="Player Track",pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.8,toggle_y),background_color=(0, 0.4, 0.4, 1))
         self.toggleView.bind(on_press=self.switchView)
+        self.flagButton = Button(text="Flag",pos_hint={'x':0.8,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.2,toggle_y),background_color=(0.7, 0, 0, 1))
+        self.flagButton.bind(on_press=self.flagPosition)
         self.outputscreen = ScreenManager()
         screen = Screen(name='Actions')
         self.output = ScrollLabel(text='',pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y),color=(0.1,0.1,0.1,0.8),valign='bottom',halign='left',markup=True)
@@ -5848,6 +5865,7 @@ class GamePage(GridLayout):
         self.new_message = TextInput(pos_hint={'x':0,'y':0},size_hint=(1,input_y))
         # Append the widgets
         self.right_line.add_widget(self.toggleView)
+        self.right_line.add_widget(self.flagButton)
         self.right_line.add_widget(self.outputscreen)
         self.right_line.add_widget(self.secondscreen)
         self.right_line.add_widget(self.display_page)
@@ -5855,6 +5873,8 @@ class GamePage(GridLayout):
         self.add_widget(self.right_line)
         # Any keyboard press will trigger the event:
         Window.bind(on_key_down=self.on_key_down)
+    def flagPosition(self, instance):
+        if game_launched[0]: logging.warning("User RED FLAG!")
     def switchView(self, instance):
         if self.main_screen.current not in {'Battle', 'Trade'}:
             self.main_screen.current = self.toggleView.text
@@ -6090,6 +6110,10 @@ class LaunchPage(GridLayout):
             
             #def bootup(_=None):
             game_launched[0] = True
+            if not os.path.exists(f'log\\{self.username}'):
+                os.makedirs(f'log\\{self.username}')
+            game_launched.append(Logger(f'log\\{self.username}\\{save_file}.log'))
+            game_launched[1].logger.info("Initializing Logger")
             if os.path.exists(f'saves\\{self.username}\\{load_file}.pickle'):
                 with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
                     playerInfo = pickle.load(f)
@@ -6252,7 +6276,6 @@ class LaunchPage(GridLayout):
         if message == 'Closed':
             self.usernames.remove(username)
             self.ready.pop(username)
-            print(f'{username} Lost Connection!')
             output(f'{username} Lost Connection!')
             if game_launched[0] == False:
                 self.refresh_label()
@@ -6294,10 +6317,14 @@ class LaunchPage(GridLayout):
                 P.remove_trade(True)
             Clock.schedule_once(run, 0.1)
     def SKIRMISH(self, username, message):
-        Skirmishes[0] = message
-        Clock.schedule_once(partial(game_app.game_page.board_page.localPlayer.getIncome), 0.2)
-    def MARKET(self, username,message):
-        Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.02)
+        def run(_):
+            Skirmishes[0] = message
+            game_app.game_page.board_page.localPlayer.getIncome()
+        Clock.schedule_once(run, 0.2)
+    def MARKET(self, username, message):
+        Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.01)
+    def JOBS(self, username, message):
+        Clock.schedule_once(partial(game_app.game_page.board_page.update_jobs, message), 0.02)
     def EFFICIENCY(self, username, message):
         def run(_):
             output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
@@ -6349,7 +6376,6 @@ class LaunchPage(GridLayout):
                     else:
                         T.add_item(offer, 1, slot)
                 elif message[1] == 'confirmed':
-                    print("going into confirm")
                     T.other_confirmation()
                 elif message[1] == 'decline':
                     T.receive_rejection()
@@ -6362,8 +6388,6 @@ class LaunchPage(GridLayout):
                     T.training_failure()
                 elif message[1] == 'training success':
                     T.complete_trade()
-            else:
-                print((P is not None) , (P.is_trading == username) , (P.username in message) , (P.parentBoard.game_page.main_screen.current == 'Trade'))
         Clock.schedule_once(run, 0.1)
     def GAME_END(self, username, message):
         def run(_):
@@ -6379,7 +6403,10 @@ class LaunchPage(GridLayout):
     def incoming_message(self, username, category, message):
         funcAttr = category[1:-1].replace(' ','_')
         if hasattr(self, funcAttr):
+            logging.info(f'{username} {funcAttr}')
             getattr(self, funcAttr)(username, message)
+        else:
+            logging.info(f'IGNORED: {username} {category} {message}')
     def update_self(self, _=None):
         self.ready[self.username] = 1 - self.ready[self.username]
         # send the message to the server that they are ready
@@ -6395,7 +6422,20 @@ class LaunchPage(GridLayout):
             self.readyButton.text = "Play Single Player" if len(self.ready)==1 else "Ready Up"
             Clock.schedule_once(blue_screen, 0.3)
         self.refresh_label()
-        
+
+class Logger:
+    def __init__(self, filename):
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.INFO)
+        # create file handler which logs even debug messages
+        fh = logging.FileHandler(filename)
+        fh.setLevel(logging.INFO)
+        # create formatter and add it to the handlers
+        formatter = logging.Formatter('[%(lineno)d] %(asctime)s %(levelname)-8s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
+        fh.setFormatter(formatter)
+        # add the handlers to logger
+        self.logger.addHandler(fh)
+
 # Simple information/error page
 class InfoPage(GridLayout):
     def __init__(self, **kwargs):
