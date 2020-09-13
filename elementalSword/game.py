@@ -986,6 +986,56 @@ def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
+    
+def player_fight(username, stats, encounter):
+    P = lclPlayer()
+    def consequence():
+        if P.item_count > 0:
+            L, p, total = list(P.items), [], 0
+            for item in L:
+                categ, price = getItemInfo(item)
+                total += price
+            for item in L:
+                categ, price = getItemInfo(item)
+                p.append(price / total)
+            item = np.random.choice(L, p=p)
+    screen = Screen(name="Battle")
+    screen.add_widget(FightPage(username, P.parentBoard.Players[username].combatstyle, int(np.sum(stats)), stats, encounter, {}, consequence=consequence, foeisNPC=False))
+    P.parentBoard.game_page.main_screen.add_widget(screen)
+    P.parentBoard.game_page.main_screen.current = "Battle"
+    P.parentBoard.game_page.fightscreen = screen
+
+def player_attempt_fight(username, excavating, stats, _=None):
+    P = lclPlayer()
+    def engage_fight(encounter='engaged', _=None):
+        socket_client.send('[FIGHT]', {username: encounter, 'stats':P.current})
+        enc = -1 if encounter=='encountered' else 0
+        player_fight(username, stats, enc)
+    def evade_fight(_=None):
+        stealth = P.activateSkill("Stealth")
+        r = rbtwn(0, int(excavating*(16/12)), None, stealth, "Evasion ")
+        if r <= stealth:
+            P.useSkill("Stealth")
+            output("You successfully evaded the battle!", 'green')
+            socket_client.send('[FIGHT]', {username: 'evaded'})
+            exitActionLoop(amt=0)()
+        else:
+            output(f"You are unable to evade! You are encountered by {username}!", 'yellow')
+            engage_fight('encountered')
+    if P.paused or P.parentBoard.game_page.occupied:
+        output(f"{username} attempted to fight you but was rejected due to your status.", 'yellow')
+        socket_client.send('[FIGHT]', {username: 'reject'})
+        exitActionLoop(amt=0)()
+    else:
+        output(f"{username} has declared to fight you. What would you like to do?", 'blue')
+        actionGrid({"Evade":evade_fight, "Engage":engage_fight}, False)
+
+def player_declare_fight(username, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    output(f"Sending fight declaration to {username}", 'blue')
+    socket_client.send('[FIGHT]', {username: 'declare', 'agility': P.skills["Excavating"], 'stats': P.current})
 
 def resize_img(source, scale=3, saveto=None, overwrite=False):
     saveto = os.path.dirname(os.path.dirname(source))+'\\resized\\'+'\\'.join(source.split('\\')[-2:]) if saveto is None else saveto
