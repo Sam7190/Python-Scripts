@@ -1,5 +1,6 @@
 import numpy as np
 from copy import deepcopy as dc
+from inspect import currentframe, getframeinfo
 
 agility = 2
 cunning = 0
@@ -987,5 +988,6 @@ def computeAction(recursion, direct=False):
     fatigue[1] = None
     if recursion:
         computeAction(recursion)
-    
-computeAction(True, True)
+
+frameinfo = getframeinfo(currentframe())
+#computeAction(True, True)

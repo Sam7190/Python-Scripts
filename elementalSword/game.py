@@ -12,7 +12,7 @@ import os
 import sys
 import csv
 import pickle
-import joblib
+from inspect import currentframe, getframeinfo
 from collections import Counter
 from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
 from copy import deepcopy
@@ -422,7 +422,7 @@ class DefBox(Button):
         if total > 0: d2g /= total
         clicked = 1 if self.live_rects[i]['state'] in {'blocked', 'dodged'} else 0
         dodged = 1 if self.live_rects[i]['state'] == 'dodged' else 0
-        with open('log\\DefenseLog.csv', 'a', newline='') as f:
+        with open('data\\DefenseLog.csv', 'a', newline='') as f:
             fcsv = csv.writer(f)
             fcsv.writerow([self.foeagility, self.stability, self.dodging, vg, len(self.volley_group[vg]), tApplied, d2p, d2c, d2g, 0.96 if self.live_rects[i]['fake'] else (self.mxOpacity-self.dOpacity*self.cunning), clicked, dodged])
     def defendVolley(self, instance=None):
@@ -4365,7 +4365,7 @@ class Quest:
     def __init__(self, playerTrack):
         self.playerTrack = playerTrack
         qgrid = GridLayout(cols=1)
-        self.Q = pd.read_csv('log\\QuestTable.csv')
+        self.Q = pd.read_csv('data\\QuestTable.csv')
         self.questDisplay = Button(text='', height=Window.size[1]*0.15,size_hint_y=None,color=(0,0,0,1),markup=True,background_color=(1,1,1,0))
         self.questDisplay.text_size = self.questDisplay.size
         self.questDisplay.bind(size=self.update_bkgSize)
@@ -6395,7 +6395,6 @@ class LaunchPage(GridLayout):
             self.readyButton.text = "Play Single Player" if len(self.ready)==1 else "Ready Up"
             Clock.schedule_once(blue_screen, 0.3)
         self.refresh_label()
-            
         
 # Simple information/error page
 class InfoPage(GridLayout):
