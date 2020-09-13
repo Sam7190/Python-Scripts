@@ -567,6 +567,10 @@ class FightPage(FloatLayout):
         self.foestealth = foeStealth
         self.foecateg = self.foeCategory()
         self.enc = encountered # enc of -1 means the player is triggering the encounter
+        # If fighting between people objects
+        self.pconfirmed = False
+        self.foeconfirmed = False
+        
         # Calculate Disadvantages
         self.p_affected_stats = set()
         self.f_affected_stats = set()
@@ -690,12 +694,24 @@ class FightPage(FloatLayout):
         self.order_idx = -1
     def startBattle(self, instance=None):
         if self.foeisNPC:
-            self.msgBoard.text = ''
-            #self.remove_widget(self.runButton)
-            self.remove_widget(self.fightButton)
-            self.nextAttack(0)
+            self.confirmBattle()
         else:
-            pass
+            self.pconfirmed = True
+            socket_client.send('[FIGHT]', [self.foename, 'confirmed'])
+            if self.foeconfirmed:
+                self.confirmBattle()
+            else:
+                self.msgBoard.text = f"Awaiting for {self.foename} to Start Fight"
+    def foeconfirm(self, _=None):
+        self.foeconfirmed = True
+        if self.pconfirmed:
+            self.confirmBattle()
+        else:
+            self.msgBoard.text = f"{self.foename} is Ready to Fight"
+    def confirmBattle(self, _=None):
+        self.msgBoard.text = ''
+        self.remove_widget(self.fightButton)
+        self.nextAttack(0)
     def nextAttack(self, delay=1.2, _=None):
         if hasattr(self, 'atkButton'):
             self.remove_widget(self.atkButton)
@@ -6443,7 +6459,11 @@ class LaunchPage(GridLayout):
                     else:
                         output(f"Plundered {message[P.username][1]} {message[P.username][0]}!", 'green')
                         P.addItem(message[P.username][0], message[P.username][1])
-            
+            elif (type(message) is list) and (P.username==message[0]):
+                F = P.parentBoard.game_page.fightscreen.children[0]
+                if F.fighting and (F.foename==username):
+                    if message[1] == 'confirm':
+                        F.foeconfirm()
     def TRADE(self, username, message):
         def run(_):
             P = lclPlayer()
