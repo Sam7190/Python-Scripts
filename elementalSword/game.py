@@ -689,10 +689,13 @@ class FightPage(FloatLayout):
         self.fightorder = fighters[order]
         self.order_idx = -1
     def startBattle(self, instance=None):
-        self.msgBoard.text = ''
-        #self.remove_widget(self.runButton)
-        self.remove_widget(self.fightButton)
-        self.nextAttack(0)
+        if self.foeisNPC:
+            self.msgBoard.text = ''
+            #self.remove_widget(self.runButton)
+            self.remove_widget(self.fightButton)
+            self.nextAttack(0)
+        else:
+            pass
     def nextAttack(self, delay=1.2, _=None):
         if hasattr(self, 'atkButton'):
             self.remove_widget(self.atkButton)
@@ -991,16 +994,27 @@ def player_fight(username, stats, encounter):
     P = lclPlayer()
     def consequence():
         if P.item_count > 0:
-            L, p, total = list(P.items), [], 0
+            L, p = list(P.items), []
             for item in L:
                 categ, price = getItemInfo(item)
-                total += price
-            for item in L:
-                categ, price = getItemInfo(item)
-                p.append(price / total)
-            item = np.random.choice(L, p=p)
+                p.append(price)
+            item = np.random.choice(L, p=np.array(p)/np.sum(p))
+            output(f"You lost {item}!", 'red')
+            P.addItem(item, -1)
+            reward = [item, 1]
+        elif P.coins > 0:
+            # 30% Coins Taken
+            amt = max([1, np.round(0.3*P.coins)])
+            reward = ['coins', amt]
+            output("You lost {amt} coin{'s' if amt>1 else ''}!",'red')
+            P.coins -= amt
+        else:
+            reward = []
+        socket_client.send('[FIGHT]', {username: reward})
+    def reward():
+        P.player_fight_hiatus[username] = 3
     screen = Screen(name="Battle")
-    screen.add_widget(FightPage(username, P.parentBoard.Players[username].combatstyle, int(np.sum(stats)), stats, encounter, {}, consequence=consequence, foeisNPC=False))
+    screen.add_widget(FightPage(username, P.parentBoard.Players[username].combatstyle, int(np.sum(stats)), stats, encounter, reward, consequence=consequence, foeisNPC=False))
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
@@ -1034,8 +1048,11 @@ def player_declare_fight(username, _=None):
     P = lclPlayer()
     if P.paused:
         return
+    elif (username in P.player_fight_hiatus) and (P.player_fight_hiatus[username] > 0):
+        output(f"You can't fight them for another {P.player_fight_hiatus[username]} rounds", 'yellow')
+        return
     output(f"Sending fight declaration to {username}", 'blue')
-    socket_client.send('[FIGHT]', {username: 'declare', 'agility': P.skills["Excavating"], 'stats': P.current})
+    socket_client.send('[FIGHT]', {username: 'declare', 'excavating': P.skills["Excavating"], 'stats': P.current})
 
 def resize_img(source, scale=3, saveto=None, overwrite=False):
     saveto = os.path.dirname(os.path.dirname(source))+'\\resized\\'+'\\'.join(source.split('\\')[-2:]) if saveto is None else saveto
@@ -2226,6 +2243,7 @@ class Player(Image):
         self.unsellable = set()
         self.fatigue = 0
         self.dueling_hiatus = 0
+        self.player_fight_hiatus = {}
         self.free_smithing_rent = False
         self.city_discount = 0
         self.city_discount_threshold = float('inf')
@@ -5677,6 +5695,9 @@ class BoardPage(FloatLayout):
             P.paused = False
         if self.localPlayer.dueling_hiatus > 0:
             self.localPlayer.dueling_hiatus -= 1
+        for username, value in self.localPlayer.player_fight_hiatus.items():
+            if value > 0:
+                self.localPlayer.player_fight_hiatus[username] -= 1
         self.localPlayer.unsellable = set()
         self.localPlayer.actions = self.localPlayer.max_actions
         # Update any Quest specs
@@ -6400,19 +6421,42 @@ class LaunchPage(GridLayout):
             output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
             IncreaseCapacity(message[0], message[1])
         Clock.schedule_once(run, 0.1)
+    def FIGHT(self, username, message):
+        def run(_):
+            P = lclPlayer()
+            if (type(message) is dict) and (P.username in message):
+                if message[P.username] == 'declare':
+                    player_attempt_fight(username, message["Excavating"], message['stats'])
+                elif message[P.username] == 'reject':
+                    output(f"{username} is currently unable to fight.", 'yellow')
+                    exitActionLoop(amt=0)()
+                elif message[P.username] == 'evaded':
+                    output(f"{username} evaded the fight.", 'yellow')
+                    P.player_fight_hiatus[username] = 2
+                    exitActionLoop(amt='minor')()
+                elif type(message[P.username]) is int:
+                    player_fight(username, message['stats'], 0 if message[P.username]==0 else 1)
+                elif (type(message[P.username]) is list) and (len(message[P.username])>0):
+                    if 'coins' == message[P.username][0]:
+                        output(f"Plundered {message[P.username][1]} coin{'s' if message[P.username[1]]>1 else ''}!", 'green')
+                        P.coins += message[P.username][1]
+                    else:
+                        output(f"Plundered {message[P.username][1]} {message[P.username][0]}!", 'green')
+                        P.addItem(message[P.username][0], message[P.username][1])
+            
     def TRADE(self, username, message):
         def run(_):
             P = lclPlayer()
-            # Make sure both players are trading with each other before delivering updated trade
+            # Request Trade
             if (type(message) is dict) and (P.username in message):
                 if message[P.username] == 'ask':
                     player_confirm_trade(username)
                 elif message[P.username] == 'reject':
                     output(f"{username} either rejected or is currently unable to trade.", 'yellow')
                     exitActionLoop(amt=0)()
-                    return
                 elif message[P.username] == 'start':
                     player_trade(username)
+            # Make sure both players are trading with each other before delivering updated trade
             elif (P is not None) and (P.is_trading == username) and (P.username == message[0]) and (P.parentBoard.game_page.main_screen.current == 'Trade'):
                 T = P.parentBoard.game_page.tradescreen.children[0]
                 if len(message) == 4:
