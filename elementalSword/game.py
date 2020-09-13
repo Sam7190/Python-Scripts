@@ -2236,6 +2236,7 @@ class Player(Image):
         self.Knowledge = 0
         
         # Constraints
+        self.round_ended = False
         self.paused = False
         self.started_round = False
         self.ate = 0
@@ -2515,14 +2516,15 @@ class Player(Image):
         self.update_mainStatPage()
     def pause(self):
         self.paused = True
+        self.round_ended = True
         output(f"{self.username} Ended Round")
         print(self.parentBoard.Players, game_app.launch_page.usernames)
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
         for P in self.parentBoard.Players.values():
-            print(P.username, P.paused)
-            if not P.paused:
+            print(P.username, P.round_ended)
+            if not P.round_ended:
                 # If someone has not ended the round yet, then wait.
                 return
         # Otherwise start the round

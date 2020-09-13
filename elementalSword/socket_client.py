@@ -3,7 +3,7 @@ import errno
 import pickle
 from threading import Thread
 
-HEADER_LENGTH = 20
+HEADER_LENGTH = 45
 client_socket = None
 joinCategory = '[CONNECTION]'
 

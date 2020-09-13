@@ -11,7 +11,7 @@ import pickle
 import datetime
 import numpy as np
 
-HEADER_LENGTH = 20
+HEADER_LENGTH = 45
 PORT = 1234
 
 # List of connected clients - socket as a key, user header and name as data
