@@ -2516,10 +2516,12 @@ class Player(Image):
     def pause(self):
         self.paused = True
         output(f"{self.username} Ended Round")
+        print(self.parentBoard.Players, game_app.launch_page.usernames)
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
         for P in self.parentBoard.Players.values():
+            print(P.username, P.paused)
             if not P.paused:
                 # If someone has not ended the round yet, then wait.
                 return
