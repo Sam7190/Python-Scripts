@@ -11,7 +11,7 @@ import pickle
 import datetime
 import numpy as np
 
-HEADER_LENGTH = 90
+HEADER_LENGTH = 50
 PORT = 1234
 
 # List of connected clients - socket as a key, user header and name as data
@@ -266,7 +266,7 @@ def updateServer(username, category, msg):
                     client_gameStatus[username]['round end'] = False
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
                 sendMessage('[SERVER]', username, '[JOBS]', todaysJobs)
-                sendMessage('[SERVER]', username, '[MARKET]', todaysMarket)
+                sendMessage('[SERVER]', username, '[MARKET]', np.random.randint(100000))
                 #for city in todaysMarket:
                 #    sendMessage('[SERVER]', username, '[MARKET]', [city, todaysMarket[city]])
                 #sendMessage('[SERVER]', username, '[MARKET]', [getTodaysMarket(), getTodaysJobs()])

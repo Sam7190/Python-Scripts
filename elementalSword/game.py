@@ -5746,13 +5746,10 @@ class BoardPage(FloatLayout):
                 perform_labor()
             else:
                 self.localPlayer.go2consequence(0)
-    def update_market(self, city_markets, _=None):
-#        for city, T in self.citytiles.items():
-#            T.city_wares = city_markets[city]
-        by_city = city_markets.split('|')
-        for i in range(len(by_city)):
-            market = by_city[i].split(',')
-            self.citytiles[market[0]].city_wares = set(market[1:])
+    def update_market(self, market_seed, _=None):
+        np.random.seed(market_seed)
+        for city, D in city_info.items():
+            self.citytiles[city].city_wares = set(np.random.choice(list(D['sell']), 6))
     def update_jobs(self, city_jobs, _=None):
         for city, T in self.citytiles.items():
             T.city_jobs = city_jobs[city]
