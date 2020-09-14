@@ -2514,7 +2514,7 @@ class Player(Image):
         hp_idx = self.attributes['Hit Points']
         self.current[hp_idx] = min([self.combat[hp_idx]+self.boosts[hp_idx], self.current[hp_idx]+hp])
         self.update_mainStatPage()
-    def pause(self):
+    def end_round(self):
         self.paused = True
         self.round_ended = True
         output(f"{self.username} Ended Round")
@@ -2606,7 +2606,7 @@ class Player(Image):
                 self.coins += 15
         self.update_mainStatPage()
         if self.actions <= 0:
-            self.pause()
+            self.end_round()
             socket_client.send("[ROUND]",'end')
         elif (self.PlayerTrack.Quest.quests[3, 6].status == 'started') and (self.PlayerTrack.Quest.quests[3, 6].action % 2):
             JoinFight()
@@ -5713,6 +5713,7 @@ class BoardPage(FloatLayout):
         logging.info("Player saved.")
         for P in self.Players.values():
             P.paused = False
+            P.round_ended = False
         if self.localPlayer.dueling_hiatus > 0:
             self.localPlayer.dueling_hiatus -= 1
         for username, value in self.localPlayer.player_fight_hiatus.items():
@@ -6388,7 +6389,7 @@ class LaunchPage(GridLayout):
     def ROUND(self, username, message):
         if message == 'end':
             def pauseUser(_):
-                game_app.game_page.board_page.Players[username].pause()
+                game_app.game_page.board_page.Players[username].end_round()
             Clock.schedule_once(pauseUser, 0.2)
     def TRADER(self, username, message):
         def clockedTrader(_):
