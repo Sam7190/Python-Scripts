@@ -5435,6 +5435,8 @@ def city_actions(city, _=None):
         if (not P.paused) and (P.dueling_hiatus==0):
             P.dueling_hiatus = 2
             encounter('Duelist', [max([2, sum(P.current)-2]), sum(P.current)+6], ['Physical', 'Elemental', 'Trooper', 'Wizard'], {'coins':int(P.Combat/10)+2}, enc=0)
+        elif P.paused and (P.dueling_hiatus>0):
+            output(f"You still have to wait {P.dueling_hiatus} more rounds to duel!", 'yellow')
     def Inn(_=None):
         if P.paused:
             return
