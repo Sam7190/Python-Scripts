@@ -18,6 +18,7 @@ from collections import Counter
 from functools import partial # This would have made a lot of nested functions unnecessary! (if I had known about it earlier)
 from copy import deepcopy
 import socket_client
+import socket_server
 from time import time
 from win32api import GetSystemMetrics, GetMonitorInfo, MonitorFromPoint
 #import mechanic as mcnc
@@ -6596,7 +6597,16 @@ class ConnectPage(GridLayout):
                 prev_username = d[2]
         else:
             prev_ip, prev_port, prev_username = '','',''
-
+            
+        self.add_widget(Label(text='Username:'))
+        self.username = TextInput(text=prev_username, multiline=False)
+        self.add_widget(self.username)
+        
+        self.add_widget(Widget())
+        playLocally = Button(text="Play Locally", background_color=(1.5, 0.3, 1.5, 1))
+        playLocally.bind(on_press=self.play_local)
+        self.add_widget(playLocally)
+        
         self.add_widget(Label(text='IP:'))  # widget #1, top left
         self.ip = TextInput(text=prev_ip, multiline=False)  # defining self.ip...
         self.add_widget(self.ip) # widget #2, top right
@@ -6605,15 +6615,26 @@ class ConnectPage(GridLayout):
         self.port = TextInput(text=prev_port, multiline=False)
         self.add_widget(self.port)
 
-        self.add_widget(Label(text='Username:'))
-        self.username = TextInput(text=prev_username, multiline=False)
-        self.add_widget(self.username)
-
         # add our button.
-        self.join = Button(text="Join")
+        self.join = Button(text="Play Globally")
         self.join.bind(on_press=self.join_button)
         self.add_widget(Label())  # just take up the spot.
         self.add_widget(self.join)
+        
+    def play_local(self, instance):
+        socket_server.launch_server()
+        def connect(_):
+            port = socket_server.PORT
+            ip = 'localhost'
+            username = self.username.text
+            if not socket_client.connect(ip, port, username, show_error):
+                return
+            # Create chat page and activate it
+            game_app.start_game_screen()
+            game_app.screen_manager.current = 'Launcher'
+        game_app.info_page.update_info("Launching Game Locally...")
+        game_app.screen_manager.current = 'Info'
+        Clock.schedule_once(self.connect, 1)
 
     def join_button(self, instance):
         port = self.port.text
