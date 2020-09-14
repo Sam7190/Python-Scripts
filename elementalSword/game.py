@@ -5750,10 +5750,15 @@ class BoardPage(FloatLayout):
     def update_market(self, market_seed, _=None):
         np.random.seed(market_seed)
         for city, D in city_info.items():
+            # Update Market
             self.citytiles[city].city_wares = set(np.random.choice(list(D['sell']), 6))
-    def update_jobs(self, city_jobs, _=None):
-        for city, T in self.citytiles.items():
-            T.city_jobs = city_jobs[city]
+            # Update Jobs
+            s = set()
+            for skill in skill_users:
+                val = round(city_info[city][skill]*5/8) if (skill in city_info[city]) and (city_info[city][skill]>=8) else 2
+                if rbtwn(1, 10) <= val:
+                    s.add(skill)
+            self.citytiles[city].city_jobs = s
     def add_player(self, username, birthcity):
         self.Players[username] = Player(self, username, birthcity)
         self.add_widget(self.Players[username])
@@ -6412,8 +6417,6 @@ class LaunchPage(GridLayout):
         Clock.schedule_once(run, 0.2)
     def MARKET(self, username, message):
         Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.01)
-    def JOBS(self, username, message):
-        Clock.schedule_once(partial(game_app.game_page.board_page.update_jobs, message), 0.02)
     def EFFICIENCY(self, username, message):
         def run(_):
             output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')

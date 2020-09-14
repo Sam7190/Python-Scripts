@@ -259,17 +259,13 @@ def updateServer(username, category, msg):
         if all_ended:
             all_ended = False
             getSkirmish()
-            todaysMarket = getTodaysMarket()
-            todaysJobs = getTodaysJobs()
+            market_seed = np.random.randint(100000)
             for username in client_gameStatus:
                 if 'round end' in client_gameStatus[username]: 
                     client_gameStatus[username]['round end'] = False
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
-                sendMessage('[SERVER]', username, '[JOBS]', todaysJobs)
-                sendMessage('[SERVER]', username, '[MARKET]', np.random.randint(100000))
-                #for city in todaysMarket:
-                #    sendMessage('[SERVER]', username, '[MARKET]', [city, todaysMarket[city]])
-                #sendMessage('[SERVER]', username, '[MARKET]', [getTodaysMarket(), getTodaysJobs()])
+                # Give the same random market seed to each player to generate jobs and markets
+                sendMessage('[SERVER]', username, '[MARKET]', market_seed)
     elif category == '[REDUCED TENSION]':
         Skirmishes[0][msg[0]] += msg[1]
     elif category == '[END STATS]':
