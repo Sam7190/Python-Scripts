@@ -2,7 +2,11 @@
 cd Documents\\GitHub\\Python-Scripts\\elementalSword
 python game.py
 
+# Installations:
+conda install kivy -c conda-forge
+pip install kivymd
 """
+
 
 import buildAI as AI
 import numpy as np
