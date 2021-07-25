@@ -14,7 +14,7 @@ from pynput.keyboard import Listener, KeyCode, Key, Controller as keyboardContro
 preset = Key.f4
 delay = 0.8
 press = 0.05
-inv = 7
+inv = 7.5
 
 mark_position_key = KeyCode(char='0')
 pop_position_key = KeyCode(char='-')
