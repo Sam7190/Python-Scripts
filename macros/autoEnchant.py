@@ -12,7 +12,7 @@ from pynput.mouse import Button, Controller as mouseController
 from pynput.keyboard import Listener, KeyCode, Key, Controller as keyboardController
 
 preset = Key.f5
-shortcut = Key(char='4')
+shortcut = KeyCode(char='4')
 delay = 1.0
 press = 0.05
 inv = 32
@@ -71,8 +71,8 @@ class ClickMouse(threading.Thread):
                 # Assumes already in Bank
                 click_mouse(self.positions[0])
                 quick_press(preset)
-                click_mouse(self.positions[1])
                 quick_press(shortcut)
+                click_mouse(self.positions[1])
                 quick_press(Key.space, end_sleep=False)
                 random_sleep(inv)
             time.sleep(0.1)
