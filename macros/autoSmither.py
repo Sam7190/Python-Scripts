@@ -11,7 +11,7 @@ from pynput.mouse import Button, Controller as mouseController
 from pynput.keyboard import Listener, KeyCode, Key, Controller as keyboardController
 
 
-smith_delay = 28.1 # 35.5
+smith_delay = 35.5 # 28.1 or 35.5
 start_delay = 1
 start_stop_key = KeyCode(char='1')
 exit_key = KeyCode(char='2')

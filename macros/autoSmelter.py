@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sun Jul 25 13:37:19 2021
+Created on Tue Jul 27 10:30:28 2021
 
 @author: samir
 """
@@ -11,12 +11,11 @@ import numpy as np
 from pynput.mouse import Button, Controller as mouseController
 from pynput.keyboard import Listener, KeyCode, Key, Controller as keyboardController
 
-preset = Key.f4
+total_pos = 0
 delay = 0.8
-bank_delay = 1.5
-pos = 0.3
 press = 0.05
-inv = 9
+inv = 50.5
+deposit_key = KeyCode(char='1')
 
 mark_position_key = KeyCode(char='0')
 pop_position_key = KeyCode(char='-')
@@ -28,8 +27,8 @@ def random_delay(delay_speed, proportion):
 
 def random_sleep(delay_speed, proportion=0.3):
     time.sleep(random_delay(delay_speed, proportion))
-    
-def quick_press(key, press=press, delay=delay, end_sleep=True):
+        
+def quick_press(key, press=press, delay=delay, end_sleep=delay):
     if type(key) is list:
         for k in key:
             keyboard.press(k)
@@ -41,11 +40,11 @@ def quick_press(key, press=press, delay=delay, end_sleep=True):
             keyboard.release(k)
     else:
         keyboard.release(key)
-    if end_sleep: random_sleep(delay)
+    if end_sleep: random_sleep(end_sleep)
         
-def click_mouse(position, side=Button.left, pos=pos, end_sleep=delay):
+def click_mouse(position, side=Button.left, delay=delay, end_sleep=delay):
     mouse.position = position
-    random_sleep(pos)
+    random_sleep(delay)
     mouse.click(side)
     if end_sleep: random_sleep(end_sleep)
 
@@ -54,7 +53,8 @@ class ClickMouse(threading.Thread):
         super(ClickMouse, self).__init__()
         self.running = False
         self.program_running = True
-        self.positions = [] # Pos 1: Bank, Pos 2: Amulet, Pos 3: Ball of Wool
+        self.positions = [] # Pos 1: Furnace, Pos 2: Bank, Pos 3: Inv slot
+        self.cur_pos = -1
 
     def start_clicking(self):
         self.running = True
@@ -65,17 +65,21 @@ class ClickMouse(threading.Thread):
     def exit(self):
         self.stop_clicking()
         self.program_running = False
+        
+    def click_mouse(self, side=Button.left, delay=delay, end_sleep=delay):
+        self.cur_pos += 1
+        if self.cur_pos >= len(self.positions):
+            self.cur_pos = 0
+        click_mouse(self.positions[self.cur_pos], side, delay, end_sleep)
 
     def run(self):
         while self.program_running:
             while self.running:
-                # Assumes already in Bank
-                click_mouse(self.positions[0], end_sleep=bank_delay)
-                quick_press(preset)
-                click_mouse(self.positions[1], end_sleep=pos)
-                click_mouse(self.positions[2])
-                quick_press(Key.space, end_sleep=False)
-                random_sleep(inv)
+                # Assumes already at Bank
+                mouse.click(Button.left)
+                random_sleep(delay)
+                quick_press(deposit_key)
+                quick_press(Key.space, end_sleep=inv)
             time.sleep(0.1)
 
 mouse = mouseController()
@@ -92,10 +96,10 @@ def on_press(key):
     elif key == exit_key:
         click_thread.exit()
         listener.stop()
-    elif (key == mark_position_key) and not click_thread.running:
-        if len(click_thread.positions) < 3:
+    elif (key == mark_position_key) and (total_pos > 0) and (not click_thread.running):
+        if len(click_thread.positions) < total_pos:
             click_thread.positions.append(mouse.position)
-    elif (key == pop_position_key) and not click_thread.running:
+    elif (key == pop_position_key) and (total_pos > 0) and (not click_thread.running):
         if len(click_thread.positions) > 0:
             click_thread.positions.pop()
 
