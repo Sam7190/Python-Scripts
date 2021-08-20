@@ -3,12 +3,16 @@ cd Documents\\GitHub\\Python-Scripts\\elementalSword
 python game.py
 
 # Installations:
-conda install kivy -c conda-forge
-pip install kivymd
+conda install kivy -c conda-forge # Install kivy - make sure it is v1.11.1
+pip install kivymd # Install kivymd - make sure it is v0.104.1
 """
+#%% Import Modules
 
-
+# Import helper modules
 import buildAI as AI
+import skillGames
+
+# Import standard modules
 import numpy as np
 import pandas as pd
 from PIL import Image as pilImage
@@ -26,6 +30,8 @@ import socket_server
 from time import time
 from win32api import GetSystemMetrics, GetMonitorInfo, MonitorFromPoint
 #import mechanic as mcnc
+
+# Import kivy modules
 import kivy
 from kivy.app import App
 from kivy.uix.dropdown import DropDown
@@ -45,6 +51,8 @@ from kivymd.uix.behaviors import HoverBehavior
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.clock import Clock
 from kivy.core.window import Window
+
+#%% Settings and Core Functions
 
 # Settings
 npcDifficulty = 3
@@ -82,6 +90,8 @@ def isint(s):
         return int(s) == float(s)
     except ValueError:
         return False
+    
+#%% Fighting System
 
 class HitBox(Button):
     def __init__(self, fpage, **kwargs):
@@ -1011,6 +1021,40 @@ def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
     
+def resize_img(source, scale=3, saveto=None, overwrite=False):
+    saveto = os.path.dirname(os.path.dirname(source))+'\\resized\\'+'\\'.join(source.split('\\')[-2:]) if saveto is None else saveto
+    if overwrite or (not os.path.exists(saveto)):
+        im = pilImage.open(source)
+        im_size = im.size
+        if type(scale) is tuple:
+            float_size = scale
+        else:
+            float_size = im_size[0]*scale, im_size[1]*scale
+        int_size_x, int_size_y = round(float_size[0]), round(float_size[1])
+        new_size = (int_size_x, int_size_y)
+        im_resized = im.resize(new_size, pilImage.ANTIALIAS)
+        im_resized.save(saveto, "PNG")
+    
+def resize_images(new_width, new_height):
+    gsize = new_width, new_height
+    def scale_save(full_imgSource, saveTo):
+        im_size = pilImage.open(full_imgSource).size
+        mx_x, mx_y = gsize[0]*0.3, gsize[1]*0.7 # These ratios are also used in FightPage!
+        scale = min([mx_x / im_size[0], mx_y / im_size[1]]) # For consistent scaling, choose the minumum
+        resize_img(full_imgSource, scale, saveTo)
+    for imgSource in os.listdir('images\\background'):
+        resize_img('images\\background\\'+imgSource, gsize)
+    for npc in os.listdir('images\\npc'):
+        for imgSource in os.listdir('images\\npc\\'+npc):
+            scale_save('images\\npc\\'+npc+'\\'+imgSource, 'images\\resized\\npc\\'+npc+'\\'+imgSource)
+    for imgSource in os.listdir('images\\origsize'):
+        scale_save('images\\origsize\\'+imgSource, None)
+
+def isbetween(mn, mx, numb):
+    return (numb >= mn) * (numb <= mx)
+
+#%% Player to Player Interactions: Fighting
+    
 def player_fight(username, stats, encounter):
     P = lclPlayer()
     def consequence():
@@ -1075,38 +1119,7 @@ def player_declare_fight(username, _=None):
     output(f"Sending fight declaration to {username}", 'blue')
     socket_client.send('[FIGHT]', {username: 'declare', 'excavating': P.skills["Excavating"], 'stats': P.current})
 
-def resize_img(source, scale=3, saveto=None, overwrite=False):
-    saveto = os.path.dirname(os.path.dirname(source))+'\\resized\\'+'\\'.join(source.split('\\')[-2:]) if saveto is None else saveto
-    if overwrite or (not os.path.exists(saveto)):
-        im = pilImage.open(source)
-        im_size = im.size
-        if type(scale) is tuple:
-            float_size = scale
-        else:
-            float_size = im_size[0]*scale, im_size[1]*scale
-        int_size_x, int_size_y = round(float_size[0]), round(float_size[1])
-        new_size = (int_size_x, int_size_y)
-        im_resized = im.resize(new_size, pilImage.ANTIALIAS)
-        im_resized.save(saveto, "PNG")
-    
-def resize_images(new_width, new_height):
-    gsize = new_width, new_height
-    def scale_save(full_imgSource, saveTo):
-        im_size = pilImage.open(full_imgSource).size
-        mx_x, mx_y = gsize[0]*0.3, gsize[1]*0.7 # These ratios are also used in FightPage!
-        scale = min([mx_x / im_size[0], mx_y / im_size[1]]) # For consistent scaling, choose the minumum
-        resize_img(full_imgSource, scale, saveTo)
-    for imgSource in os.listdir('images\\background'):
-        resize_img('images\\background\\'+imgSource, gsize)
-    for npc in os.listdir('images\\npc'):
-        for imgSource in os.listdir('images\\npc\\'+npc):
-            scale_save('images\\npc\\'+npc+'\\'+imgSource, 'images\\resized\\npc\\'+npc+'\\'+imgSource)
-    for imgSource in os.listdir('images\\origsize'):
-        scale_save('images\\origsize\\'+imgSource, None)
-
-def isbetween(mn, mx, numb):
-    return (numb >= mn) * (numb <= mx)
-
+#%% Action Loops
 def output(message, color=None):
     game_app.game_page.update_output(message, color)
     logging.info(message)
@@ -1177,6 +1190,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                     P.go2action(tier)
     return exit_loop
 
+#%% Trading
 def getItem(item, amt=1, consume=None, empty_tile=False, action_amt=1):
     P = lclPlayer()
     def getitem(_=None):
@@ -1310,6 +1324,7 @@ def Trading(trader, _=None):
     if (P.bartering_mode == 0) and (P.activated_bartering==False): actions['Barter'] = activate_bartering
     actionGrid(actions, False)
 
+#%% Item Consumption
 heatableItems = {'raw meat':0, 'raw fish':0, 'hide':5, 'clay':6, 'sand':9, 'bark':12}
 noncraftableItems = {'hide', 'clay', 'sand'}
 
@@ -1404,6 +1419,7 @@ def readbook(book, _=None):
         output("You failed to understand. You can try again.", 'red')
     exitActionLoop('minor')()
 
+#%% Training
 def Train(abilities, master, confirmed, _=None):
     P = lclPlayer()
     if P.paused:
@@ -1523,7 +1539,7 @@ def Train(abilities, master, confirmed, _=None):
                     P.takeAction()
                     Train(abilities, master, False)
 
-# Consequences
+#%% Consequences
 def C_road(action=1):
     P = lclPlayer()
     coord, depth, path = P.currenttile.findNearest(cities)
@@ -1776,7 +1792,7 @@ consequence_message = {'road': 'Highway Robber encounter chance: (distance to ne
                        'battle2': 'Ninjas: 1/4 chance 1 Ninja Lvl 65-90, 1/4 chance 1 Ninja Lvl 45-70, 1/4 chance 2 Ninjas Lvls 35-60, 1/4 chance 3 Ninjas Lvls 25-50. Reward: varying coins. Ninja Avoidance: stealth/16.',
                        'wilderness': 'HP Damage: 2, Fatigue Damage: 3. Damage Avoidance: survival/14.\n\nWild Vine Monster Lvl 95-120. Reward: 4 bark. Wild Vine Monster Avoidance: stealth/14.'}
 
-# Actions
+#%% Actions
 KnowledgeBooks = {'critical thinking book':1,'bartering book':2,'persuasion book':2,'crafting book':2,
                   'heating book':3,'smithing book':2,'stealth book':1,'survival book':3,'gathering book':2,'excavating book':2}
 def getBook(rarity=True):
@@ -2119,6 +2135,7 @@ def A_wilderness(inspect=False):
 
 avail_actions = {'road':A_road,'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}
 
+#%% Game Properties
 food_restore = {'raw meat':(1,0),'cooked meat':(2,0),'well cooked meat':(3,0),
                 'raw fish':(0,1),'cooked fish':(0,2),'well cooked fish':(0,3),
                 'fruit':(1,1)}
@@ -2223,7 +2240,7 @@ def get_inverse_city_info():
     return adept, master
 adept_loc, master_loc = get_inverse_city_info()
                 
-
+#%% Player
 class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
         super().__init__(**kwargs)
@@ -2897,6 +2914,7 @@ class Player(Image):
             self.items.pop(item)
         self.update_mainStatPage()
 
+#%% Player Track: Armory + Crafting
 class HoverButton(Button, HoverBehavior):
     def __init__(self, display, message, **kwargs):
         super().__init__(**kwargs)
@@ -3559,7 +3577,8 @@ class CraftingTable(GridLayout):
             if B.text in gameItems['Crafting']:
                 items.add(B.text)
         return items
-            
+    
+#%% Player Track: Quests
 quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player.max_actions',
              (1, 8): "'fruit' in self.playerTrack.player.items",
              (2, 3): "self.quests[2, 6].status != 'started'",
@@ -4574,6 +4593,7 @@ class Quest:
                     actions[city_quest_actions[quest][0]] = city_quest_actions[quest][2]
         return actions
         
+#%% Player Track: Grid
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
         super().__init__(**kwargs)
@@ -4857,6 +4877,8 @@ class PlayerTrack(GridLayout):
         self.capitalTab.text=f"Capital: [color={self.hclr}]{self.player.Capital}[/color]"
         self.Items.update_data_cells(self.get_Items())
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
+
+#%% Player to Player Interactions: Trading 
 
 class TradePage(FloatLayout):
     def __init__(self, username, **kwargs):
@@ -5235,6 +5257,7 @@ def player_ask_trade(username, _=None):
     output(f"Sending trade request to {username}.", 'blue')
     socket_client.send('[TRADE]', {username: 'ask'})
 
+#%% City and Board Properties
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
           'demetry':{'Combat Style':'Elemental','Coins':9,'Knowledges':[('Bartering',2)],'Combat Boosts':[]},
@@ -6126,6 +6149,7 @@ def notAtWar(skrm):
             s.add(city)
     return set(cities).difference(s)
 
+#%% Game Launch and Server Communication
 class LaunchPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -6631,7 +6655,7 @@ class ConnectPage(GridLayout):
         socket_server.launch_server()
         def connect(_):
             port = socket_server.PORT
-            ip = 'localhost'
+            ip = socket_server.IP # 'localhost'
             username = self.username.text
             if not socket_client.connect(ip, port, username, show_error):
                 return
@@ -6640,7 +6664,7 @@ class ConnectPage(GridLayout):
             game_app.screen_manager.current = 'Launcher'
         game_app.info_page.update_info("Launching Game Locally...")
         game_app.screen_manager.current = 'Info'
-        Clock.schedule_once(self.connect, 1)
+        Clock.schedule_once(connect, 1)
 
     def join_button(self, instance):
         port = self.port.text

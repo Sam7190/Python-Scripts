@@ -31,8 +31,8 @@ gameEnd = [None]
 ## getting the hostname by socket.gethostname() method
 hostname = socket.gethostname()
 ## getting the IP address using socket.gethostbyname() method
-#IP = socket.gethostbyname(hostname)
-IP = ""#'ec2-3-133-139-92.us-east-2.compute.amazonaws.com'
+IP = socket.gethostbyname(hostname)
+#IP = ""#'ec2-3-133-139-92.us-east-2.compute.amazonaws.com'
 
 
 # Create a socket
