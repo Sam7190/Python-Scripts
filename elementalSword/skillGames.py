@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+Q# -*- coding: utf-8 -*-
 """
 Created on Thu Aug 19 15:59:23 2021
 
@@ -27,7 +27,7 @@ from kivy.core.window import Window
 
 
 class BarterPage(FloatLayout):
-    def __init__(self, lvl, **kwargs):
+    def __init__(self, lvl, merchant, tile, **kwargs):
         super().__init__(**kwargs)
         self.playerLvl = lvl
         self.progress = 0
@@ -81,6 +81,12 @@ class BarterPage(FloatLayout):
                                                  'success': 'I am happy to do whatever will help - how about these prices?',
                                                  'inspect': "Doesn't usually hurt or help the haggle, but when it works, it works well."},
                         
+                        'Remain Silent':        {'init':    '...',
+                                                 'regular': 'Is there any way I can be of service?',
+                                                 'failure': 'If you are just here to loaf around, then go somewhere else!',
+                                                 'success': 'How about a reduction in price for you?',
+                                                 'inspect': 'This can only fail if the conversation has dragged on too long.'},
+                        
                         'Buy in Bulk (3+)':     {'init':    'I wish to buy in bulk - what bulk deals will you give me?',
                                                  'regular': 'My prices are already adjusted to bulk orders.',
                                                  'failure': 'What do I look like to you, a warehouse?',
@@ -93,3 +99,4 @@ class BarterPage(FloatLayout):
                                                  'success': 'Okay, okay, about how these prices?',
                                                  'inspect': 'Classic closing tactic: You will either succeed or fail - any inbetween is rare.'}}
         
+        if

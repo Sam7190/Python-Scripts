@@ -6,6 +6,7 @@ Created on Mon Jul 12 11:48:40 2021
 """
 
 import time
+import numpy as np
 import threading
 from pynput.mouse import Button, Controller
 from pynput.keyboard import Listener, KeyCode
@@ -16,6 +17,17 @@ button = Button.left
 start_stop_key = KeyCode(char='1')
 exit_key = KeyCode(char='2')
 
+def random_delay(delay_speed, proportion):
+    return delay_speed + np.random.rand()*(delay_speed * proportion)
+
+def random_sleep(delay_speed, proportion=0.3):
+    time.sleep(random_delay(delay_speed, proportion))
+        
+def click_mouse(position, side=Button.left, delay=delay, end_sleep=True):
+    mouse.position = position
+    random_sleep(delay)
+    mouse.click(side)
+    if end_sleep: random_sleep(delay)
 
 class ClickMouse(threading.Thread):
     def __init__(self, delay, button):
@@ -39,7 +51,7 @@ class ClickMouse(threading.Thread):
         while self.program_running:
             while self.running:
                 mouse.click(self.button)
-                time.sleep(self.delay)
+                random_sleep(self.delay)
             time.sleep(0.1)
 
 

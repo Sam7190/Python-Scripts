@@ -166,10 +166,7 @@ class HitBox(Button):
         self.boxes.append(self.curBox)
         self.clrs.append(self.curBoxClr)
         self.cleared.append(False)
-        #B = Button(text=str(len(self.boxes)), font_size=10, bold=True, background_color=(1,1,1,0), background_disabled_normal='', disabled=True, color=(0, 0.3, 0, 1), pos=self.curBox.pos, size=self.curBox.size)
-        #self.lbls.append(B)
-        #self.fpage.add_widget(B)
-        self.curBox = None
+        #B = Button(IMNKZAQ None
         self.minBox = None
         if (len(self.boxes) - np.sum(self.fakes)) >= self.max_boxes:
             self.endAttack()
