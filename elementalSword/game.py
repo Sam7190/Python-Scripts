@@ -16,6 +16,7 @@ import skillGames
 import numpy as np
 import pandas as pd
 from PIL import Image as pilImage
+import matplotlib.path as mplPath
 import os
 import sys
 import csv
@@ -96,6 +97,7 @@ def isint(s):
 class HitBox(Button):
     def __init__(self, fpage, **kwargs):
         super().__init__(**kwargs)
+        logging.debug("Making hitbox")
         self.fpage = fpage
         self.xposScale = 1 + self.fpage.P.parentBoard.game_page.right_line_x
         self.timeLapseRestrained = 1.5 - 0.1*self.fpage.foestats[self.fpage.P.attributes['Agility']]
@@ -166,7 +168,7 @@ class HitBox(Button):
         self.boxes.append(self.curBox)
         self.clrs.append(self.curBoxClr)
         self.cleared.append(False)
-        #B = Button(IMNKZAQ None
+        self.curBox = None
         self.minBox = None
         if (len(self.boxes) - np.sum(self.fakes)) >= self.max_boxes:
             self.endAttack()
@@ -201,7 +203,6 @@ class HitBox(Button):
     def getNormalizedPosition(self, pos):
         xMin, xMax, yMin, yMax = self.fpage.size[0]*0.02, self.fpage.size[0]*0.32, self.fpage.size[1]*0.02, self.fpage.size[1]*0.72
         return np.array([(pos[0] - xMin)/(xMax - xMin), (pos[1] - yMin)/(yMax - yMin)])
-    def npcDefends(self, _=None):
         blocksLeft = self.fpage.foestats[self.fpage.P.attributes[f"Def-{self.fpage.P.combatstyle}"]]
         foeAgility = self.fpage.pstats[self.fpage.P.attributes["Agility"]]
         cunning = self.fpage.foestats[self.fpage.P.attributes["Cunning"]]
@@ -532,6 +533,7 @@ class DefBox(Button):
 class FightPage(FloatLayout):
     def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, foeStealth=0, **kwargs):
         super().__init__(**kwargs)
+        logging.debug("Initiatating Fight Page")
         self.logDef = logDef
         self.consume = consume
         self.action_amt = action_amt
@@ -757,6 +759,7 @@ class FightPage(FloatLayout):
         else:
             self.playerDefends()
     def playerAttacks(self):
+        logging.debug("Player is attacking")
         self.set_runFTG(self.foecateg)
         self.msgBoard.text = 'Choose Attack'
         self.curAtk, self.maxAtk = 0, self.pstats[self.P.attributes["Attack"]]
@@ -789,6 +792,7 @@ class FightPage(FloatLayout):
         else:
             self.msgBoard.text = 'You missed.' if self.curAtk == 0 else f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!' 
         if self.curAtk > 0:
+            logging.debug("Scaling hit box")
             hitBoxScale = (1 - 0.055*self.foestats[self.P.attributes["Stability"]])
             hitBox_x, hitBox_y = 0.3*hitBoxScale, 0.7*hitBoxScale
             self.hitBox = HitBox(self, text='', background_color=(1,0.4,0,0.2), disabled=True, background_disabled_normal='', pos_hint={'center_x':0.83, 'center_y':0.37}, size_hint=(float(hitBox_x), float(hitBox_y)))
@@ -2851,6 +2855,9 @@ class Player(Image):
         self.checkGameEnd()
         self.coins -= cost
         exitActionLoop(amt=1)()
+    def add_coins(self, amt):
+        self.coins += amt
+        self.update_mainStatPage()
     def storeInvestment(self, city, village, item, amt):
         for i in range(amt):
             if village in self.awaiting[city]:
@@ -5290,6 +5297,11 @@ clothSpecials = {'benfriege cloth':{'zinzibar','glaser','enfeir','starfex'},
                  'old fodker cloth':{'zinzibar','glaser'},
                  'old zinzibar cloth':{'benfriege','tutalu','pafiz','fodker'},
                  'luxurious cloth':{}}
+valid_items = []
+for category in gameItems:
+    valid_items += list(gameItems[category].keys())
+valid_items += list(clothSpecials.keys())
+valid_items = set(valid_items)
 game_launched = [False]
 hovering = [0]
 
@@ -5644,8 +5656,19 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             self.trader_wares_label.text = ''
             self.parentBoard.remove_widget(self.trader_wares_label)
             self.trader_wares_label = None
+    def get_mouse_in_hexagon(self):
+        # Get polygonal shape for mouse position detection
+        xp, yp = self.pos
+        dx, dy = self.size
+        ry = np.sqrt(3) * (dx/2) # Get height of triangle for hexagon y-pos
+        self.polygon = mplPath.Path(np.array([[xp+dx/2, yp], [xp+dx, yp+ry], [xp+dx, yp+dy-ry], [xp+dx/2, yp+dy], [xp, yp+dy-ry], [xp, yp+ry]]))
+        return self.polygon.contains_point(Window.mouse_pos)
     def initiate(self, instance):
         if self.parentBoard.inspect_mode:
+            logging.debug(f"Tile: {self.tile}, Tile Position: {self.pos}, Center: {self.centx, self.centy}, Size: {self.size}")
+            logging.debug(f"Mouse Position: {Window.mouse_pos}")
+            mouse_in_hexagon = self.get_mouse_in_hexagon()
+            logging.debug(f"Mouse in Hexagon: {mouse_in_hexagon}")
             if self.tile in avail_actions:
                 self.parentBoard.game_page.inspectTile(*avail_actions[self.tile](inspect=True))
             if self.tile in consequence_message:
@@ -5653,7 +5676,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             elif (self.tile in Skirmishes[2][self.parentBoard.localPlayer.birthcity]):
                 self.parentBoard.game_page.consequenceDisplay.text = 'Hooligan encounter chance: 1/3. Hooligan Lvl: 15-80. Reward: 1-8 coins. Hooligan Avoidance: (stealth+1)/13, if fails then (persuasion+1)/13.'
             else:
-                self.paretnBoard.game_page.consequenceDisplay.text = ''
+                self.parentBoard.game_page.consequenceDisplay.text = ''
         else:
             if self.parentBoard.localPlayer.paused:
                 return
@@ -6046,14 +6069,13 @@ class GamePage(GridLayout):
             message = message
         elif color in trns_clr:
             message = '[color='+trns_clr[color]+']'+message+'[/color]'
+        elif (type(color) is str) and (len(color) == 6):
+            message = f'[color={color.lower()}]{message}[/color]'
         else:
             hx = get_hexcolor(color)
             message = '[color='+hx+']'+message+'[/color]'
-        #self.output.text += '\n' + message
         self.output.add_msg(message)
     def update_display(self, username, message):
-#        if message[0]=='\n':
-#            message = message[1:]
         clr = get_hexcolor((131,215,190)) if username == self.board_page.localuser else get_hexcolor((211, 131, 131))
         #self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
         self.display_page.add_msg(f'|[color={clr}]{username}[/color]| ' + message)
@@ -6063,7 +6085,46 @@ class GamePage(GridLayout):
             # Send Message
             message = self.new_message.text.replace('\n','')
             self.new_message.text = ''
-            if message:
+            if (message[0] == '/') and (game_app.launch_page.cheat_on):
+                cheat_command = message.split(' ')
+                cheat_success, cheat_failure = "007200", "b53000"
+                P = lclPlayer()
+                if cheat_command[0] == '/help':
+                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>']
+                    output("Valid Commands:", "blue")
+                    for command in valid_commands:
+                        output(command, '545454')
+                elif cheat_command[0] == '/skill':
+                    skill = cheat_command[1].title()
+                    level_gain = int(cheat_command[2])
+                    if (skill not in P.skills) or (level_gain < 1):
+                        output("CHEAT COMMAND /skill failed: check if skill name is valid or make sure level_gain >= 1", cheat_failure)
+                    else:
+                        output(f"CHEAT COMMAND /skill activated: increasing {skill} by {level_gain} levels!", cheat_success)
+                        P.updateSkill(skill, level_gain)
+                elif cheat_command[0] == '/attribute':
+                    attribute = cheat_command[1].title()
+                    level_gain = int(cheat_command[2])
+                    if (attribute not in P.attributes) or (level_gain < 1):
+                        output("CHEAT COMMAND /attribute failed: check if attribute name is valid or make sure level_gain >= 1", cheat_failure)
+                    else:
+                        output(f"CHEAT COMMAND /attribute activated: increasing {attribute} by {level_gain} levels!", cheat_success)
+                        P.updateAttribute(attribute, level_gain)
+                elif cheat_command[0] == '/add_coins':
+                    add_coins = int(cheat_command[1])
+                    output(f"CHEAT COMMAND /add_coins activated: increasing coins by {add_coins}", cheat_success)
+                    P.add_coins(add_coins)
+                elif cheat_command[0] == '/get_item':
+                    item = cheat_command[1].lower()
+                    amt = int(cheat_command[2])
+                    if (item not in valid_items) or (amt < 1):
+                        output("CHEAT COMMAND /get_item failed: check if item name is valid or make sure the amount is >= 1", cheat_failure)
+                    else:
+                        output(f"CHEAT COMMAND /get_item activated: adding {amt} {item}", cheat_success)
+                        P.addItem(item, amt)
+                else:
+                    output(f"CHEAT COMMAND {cheat_command[0]} is not recognized!", cheat_failure)
+            elif message:
                 self.update_display(self.board_page.localuser, message)
                 socket_client.send('[CHAT]',message)
     def inspectTile(self, exc, mx):
@@ -6150,6 +6211,8 @@ def notAtWar(skrm):
 class LaunchPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.loglevel = 'info'
+        self.cheat_on = False
         self.cols = 1
         self.username = game_app.connect_page.username.text
         self.usernames, self.ready = [self.username], {self.username:0}
@@ -6163,6 +6226,11 @@ class LaunchPage(GridLayout):
         self.auto_resize_input.bind(on_press=self.auto_resize)
         playerSettings.add_widget(self.auto_resize_lbl)
         playerSettings.add_widget(self.auto_resize_input)
+        self.logging_level_lbl = Button(text="Logging Level:\nInfo", color=(0, 0, 0, 1), disabled=True, background_disabled_normal='')
+        self.logging_level_input = Button(text='Change to Debug')
+        self.logging_level_input.bind(on_press=self.logging_level_change)
+        playerSettings.add_widget(self.logging_level_lbl)
+        playerSettings.add_widget(self.logging_level_input)
         
         settingsGrid.add_widget(playerSettings)
         settingsGrid.add_widget(Button(text="Global Settings", font_size=16, color=(0.2, 0.2, 0.4, 1), underline=True, disabled=True, background_disabled_normal='', background_color=(0.92, 0.92, 0.92, 1), height=Window.size[1]*0.05, size_hint_y=None))
@@ -6235,6 +6303,7 @@ class LaunchPage(GridLayout):
             if not os.path.exists(f'log\\{self.username}'):
                 os.makedirs(f'log\\{self.username}')
             game_launched.append(Logger(f'log\\{self.username}\\{save_file}.log'))
+            game_launched[1].logger.setLevel(logging.DEBUG if self.loglevel=='debug' else logging.INFO)
             game_launched[1].logger.info("Initializing Logger")
             if os.path.exists(f'saves\\{self.username}\\{load_file}.pickle'):
                 with open(f'saves\\{self.username}\\{load_file}.pickle', 'rb') as f:
@@ -6257,6 +6326,20 @@ class LaunchPage(GridLayout):
         else:
             self.auto_resize_lbl.text = "Auto Resize:\nTrue"
             auto_resize = True
+    def logging_level_change(self, instance):
+        global logging
+        if self.logging_level_lbl.text == "Logging Level:\nInfo":
+            self.logging_level_lbl.text = "Logging Level:\nDebug"
+            self.logging_level_input.text = "Change to Info"
+            logging.getLogger().setLevel(logging.DEBUG)
+            logging.debug("Logger switching to DEBUG mode")
+            self.loglevel = 'debug'
+        else:
+            self.logging_level_lbl.text = "Logging Level:\nInfo"
+            self.logging_level_input.text = "Change to Debug"
+            logging.getLogger().setLevel(logging.INFO)
+            logging.info("Logger switching to INFO mode")
+            self.loglevel = 'info'
     def npc_difficulty(self, new=None):
         global npcDifficulty
         new = self.npc_difficulty_input.text if new is None else new
@@ -6266,6 +6349,14 @@ class LaunchPage(GridLayout):
             if new.lower() in validArgs:
                 self.npc_difficulty_lbl.text = f'[color=000000]NPC Difficulty:[/color]\n{validArgs[new.lower()][1]}{validArgs[new.lower()][0]}[/color]'
                 npcDifficulty = validArgs[new.lower()][2]
+                self.cheat_on = False
+                if self.ready[self.username]:
+                    self.update_self()
+                return new
+            elif new.lower() == 'cheat':
+                reverseMap = {1: 'very easy', 2: 'easy', 3: 'moderate', 4: 'hard', 5: 'very hard'}
+                self.npc_difficulty_lbl.text = f'[color=000000]NPC Difficulty:[/color]\n{validArgs[reverseMap[npcDifficulty]][1]}{validArgs[reverseMap[npcDifficulty]][0]}[/color] [color=0000b5]|CHEATS ENABLED|[/color]'
+                self.cheat_on = True
                 if self.ready[self.username]:
                     self.update_self()
                 return new

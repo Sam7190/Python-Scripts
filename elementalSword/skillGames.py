@@ -1,4 +1,4 @@
-Q# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Created on Thu Aug 19 15:59:23 2021
 
@@ -90,13 +90,11 @@ class BarterPage(FloatLayout):
                         'Buy in Bulk (3+)':     {'init':    'I wish to buy in bulk - what bulk deals will you give me?',
                                                  'regular': 'My prices are already adjusted to bulk orders.',
                                                  'failure': 'What do I look like to you, a warehouse?',
-                                                 'success': 'Certainly, these are my bulk deals.',
+                                                 'success': 'Certainly, these are my bulk prices.',
                                                  'inspect': 'Usually only helps the haggle - but will require the willingness to buy in bulk.'},
                         
-                        'Walk Away':            {'init':    'So be it.', 
+                        'Walk Away':            {'init':    'So be it. [You walk away]', 
                                                  'regular': 'Come on, lets keep negotiating.',
                                                  'failure': 'So long then.', 
                                                  'success': 'Okay, okay, about how these prices?',
                                                  'inspect': 'Classic closing tactic: You will either succeed or fail - any inbetween is rare.'}}
-        
-        if
