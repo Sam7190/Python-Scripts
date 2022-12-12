@@ -2426,8 +2426,10 @@ class Player(Image):
         else:
             if skip_check != True:
                 socket_client.send('[MOVE]',coord)
+            self.currenttile.source = f'images\\tile\\{self.currenttile.tile}.png' # remove green outline of tile moving away from.
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
+            self.currenttile.source = f'images\\ontile\\{self.currenttile.tile}.png' # outline new tile with green border.
             # Quest completions/consequences (if any)
             if hasattr(self, 'PlayerTrack'):
                 if (self.PlayerTrack.Quest.quests[2, 3].status == 'started') and (self.PlayerTrack.Quest.quests[2, 3].furthest_city==self.currenttile.tile):
@@ -5521,6 +5523,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         super(Tile, self).__init__(**kwargs)
         self.source = f'images\\tile\\{tile}.png'
         self.hoveringOver = False
+        self.entered = False
         self.parentBoard = None
         self.empty_label = None
         self.empty_label_rounds = None
@@ -5535,6 +5538,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.master_trainers = set()
         self.neighbors = set()
         self.bind(on_press=self.initiate)
+        Window.bind(mouse_pos = self.on_mouse_move)
         self.tile = tile
         self.gridx = x
         self.gridy = y
@@ -5611,6 +5615,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             self.trader_label.pos_hint = self.pos_hint
             self.trader_label.size_hint = self.size_hint
         self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
+        # Get polygonal shape for mouse position detection
+        self.update_polygon()
     def set_neighbors(self):
         neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if self.gridy % 2 else -1, 1], [1 if self.gridy % 2 else -1, -1]]
         self.neighbors, self.neighbortiles = set(), set()
@@ -5639,36 +5645,73 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
                 checked[coord] = (T.gridx, T.gridy)
                 queue.append((self.parentBoard.gridtiles[coord], depth+1))
         return None, None, None
+    def on_mouse_move(self, *args):
+        if self.entered:
+            in_hexagon = self.check_mouse_in_hexagon()
+            #logging.debug(f"Tile {self.tile} in hexagon: {in_hexagon}")
+            if in_hexagon:
+                self.hoveringOver = True
+                #hovering[0] += 1
+                if lclPlayer().currenttile != self:
+                    self.source = f'images\\selectedtile\\{self.tile}.png'
+                if (self.trader_rounds > 0) and (self.trader_wares_label is None):
+                    L = []
+                    for item in self.trader_wares:
+                        categ, price = getItemInfo(item)
+                        L.append(f'{item}: [color=ffff75]{gameItems[categ][item]}[/color]')
+                    self.trader_wares_label = Button(text='\n'.join(L), color=(1, 1, 1, 1), markup=True, pos=(self.pos[0]+self.size[0]/2,self.pos[1]+self.size[1]/2), size_hint=(self.size_hint[0]*4/(self.parentBoard.zoom+1),self.size_hint[1]*1.5/(self.parentBoard.zoom+1)), background_color=(0.3, 0.3, 0.3, 0.7))
+                    self.parentBoard.add_widget(self.trader_wares_label)
+            elif self.hoveringOver:
+                self.hoveringOver = False
+                #hovering[0] -= 1
+                if lclPlayer().currenttile == self:
+                    self.source = f'images\\ontile\\{self.tile}.png'
+                else:
+                    self.source = f'images\\tile\\{self.tile}.png'
+                if self.trader_wares_label is not None:
+                    self.trader_wares_label.text = ''
+                    self.parentBoard.remove_widget(self.trader_wares_label)
+                    self.trader_wares_label = None
     def on_enter(self, *args):
-        hovering[0] += 1
-        self.source = f'images\\selectedtile\\{self.tile}.png'
-        if (self.trader_rounds > 0) and (self.trader_wares_label is None):
-            L = []
-            for item in self.trader_wares:
-                categ, price = getItemInfo(item)
-                L.append(f'{item}: [color=ffff75]{gameItems[categ][item]}[/color]')
-            self.trader_wares_label = Button(text='\n'.join(L), color=(1, 1, 1, 1), markup=True, pos=(self.pos[0]+self.size[0]/2,self.pos[1]+self.size[1]/2), size_hint=(self.size_hint[0]*4/(self.parentBoard.zoom+1),self.size_hint[1]*1.5/(self.parentBoard.zoom+1)), background_color=(0.3, 0.3, 0.3, 0.7))
-            self.parentBoard.add_widget(self.trader_wares_label)
+        #logging.debug(f"Mouse is entering {self.tile}")
+        self.entered = True
+        self.update_polygon()
+#        self.hoveringOver = True
+#        hovering[0] += 1
+#        if lclPlayer().currenttile != self:
+#            self.source = f'images\\selectedtile\\{self.tile}.png'
+#        if (self.trader_rounds > 0) and (self.trader_wares_label is None):
+#            L = []
+#            for item in self.trader_wares:
+#                categ, price = getItemInfo(item)
+#                L.append(f'{item}: [color=ffff75]{gameItems[categ][item]}[/color]')
+#            self.trader_wares_label = Button(text='\n'.join(L), color=(1, 1, 1, 1), markup=True, pos=(self.pos[0]+self.size[0]/2,self.pos[1]+self.size[1]/2), size_hint=(self.size_hint[0]*4/(self.parentBoard.zoom+1),self.size_hint[1]*1.5/(self.parentBoard.zoom+1)), background_color=(0.3, 0.3, 0.3, 0.7))
+#            self.parentBoard.add_widget(self.trader_wares_label)
     def on_leave(self, *args):
-        hovering[0] -= 1
-        self.source = f'images\\tile\\{self.tile}.png'
+        #logging.debug(f"Mouse is leaving {self.tile}")
+        self.entered = False
+        self.hoveringOver = False
+#        hovering[0] -= 1
+        if lclPlayer().currenttile == self:
+            self.source = f'images\\ontile\\{self.tile}.png'
+        else:
+            self.source = f'images\\tile\\{self.tile}.png'
         if self.trader_wares_label is not None:
             self.trader_wares_label.text = ''
             self.parentBoard.remove_widget(self.trader_wares_label)
             self.trader_wares_label = None
-    def get_mouse_in_hexagon(self):
-        # Get polygonal shape for mouse position detection
+    def update_polygon(self):
         xp, yp = self.pos
         dx, dy = self.size
-        ry = np.sqrt(3) * (dx/2) # Get height of triangle for hexagon y-pos
+        ry = (1/np.sqrt(3)) * (dx/2) # Get height of triangle for hexagon y-pos
         self.polygon = mplPath.Path(np.array([[xp+dx/2, yp], [xp+dx, yp+ry], [xp+dx, yp+dy-ry], [xp+dx/2, yp+dy], [xp, yp+dy-ry], [xp, yp+ry]]))
+    def check_mouse_in_hexagon(self):
         return self.polygon.contains_point(Window.mouse_pos)
     def initiate(self, instance):
         if self.parentBoard.inspect_mode:
             logging.debug(f"Tile: {self.tile}, Tile Position: {self.pos}, Center: {self.centx, self.centy}, Size: {self.size}")
             logging.debug(f"Mouse Position: {Window.mouse_pos}")
-            mouse_in_hexagon = self.get_mouse_in_hexagon()
-            logging.debug(f"Mouse in Hexagon: {mouse_in_hexagon}")
+            logging.debug(f"Mouse in Hexagon: {self.check_mouse_in_hexagon()}")
             if self.tile in avail_actions:
                 self.parentBoard.game_page.inspectTile(*avail_actions[self.tile](inspect=True))
             if self.tile in consequence_message:
@@ -5680,8 +5723,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         else:
             if self.parentBoard.localPlayer.paused:
                 return
-            elif hovering[0] > 1:
-                output("Hovering over too many tiles! No action performed!",'yellow')
+            elif not self.check_mouse_in_hexagon():
+                #output("Hovering over too many tiles! No action performed!",'yellow')
                 return
             # If the tile is a neighbor and the player is not descended in a cave or ontop of a mountain... (tiered)
             elif self.is_neighbor() and (not self.parentBoard.localPlayer.tiered):
