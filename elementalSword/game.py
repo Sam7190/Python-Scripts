@@ -5409,7 +5409,7 @@ def perform_labor(skill=None, _=None):
     if P.working[1] >= 4:
         skill = P.working[0]
         P.coins += P.skills[skill]//2
-        P.addXP(skill, 0 if P.skills[skill] > 7 else min([1, P.skills[skill]//2]))
+        P.addXP(skill, 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2]))
         P.working = [None, 0]
         exitActionLoop(amt=4)()
     else:
@@ -5422,7 +5422,7 @@ def confirm_labor(skill, _=None):
     payment = P.skills[skill]//2
     if payment == 0:
         output("Your level is below 2! You will not be paid for this job! However, you can still volunteer.", 'yellow')
-    xp = 0 if P.skills[skill] > 7 else min([1, P.skills[skill]//2])
+    xp = 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2])
     output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
     actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
 
