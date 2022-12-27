@@ -592,7 +592,7 @@ class FightPage(FloatLayout):
         # Calculate Disadvantages
         self.p_affected_stats = set()
         self.f_affected_stats = set()
-        self.pstats[self.P.attributes["Stability"]] = max([0, self.pstats[self.P.attributes["Stability"]]-self.P.fatigue]) # Account for fatigue
+        self.pstats[self.P.attributes["Stability"]] = max([0, self.pstats[self.P.attributes["Stability"]]-self.P.fatigue//3]) # Account for fatigue
         if self.pstats[self.P.attributes["Stability"]] != self.P.current[self.P.attributes["Stability"]]: self.p_affected_stats.add('Stability')
         disadvantages = [['Physical', 'Trooper'], ['Trooper', 'Elemental'], ['Elemental', 'Wizard'], ['Wizard', 'Physical']]
         agil_i = self.P.attributes['Agility']
@@ -5411,9 +5411,9 @@ def perform_labor(skill=None, _=None):
         P.coins += P.skills[skill]//2
         P.addXP(skill, 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2]))
         P.working = [None, 0]
-        exitActionLoop(amt=4)()
+        P.takeAction(1)
     else:
-        P.takeAction(0)
+        exitActionLoop(amt=1)()
 
 def confirm_labor(skill, _=None):
     P = lclPlayer()
@@ -5422,7 +5422,7 @@ def confirm_labor(skill, _=None):
     payment = P.skills[skill]//2
     xp = 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2])
     if (P.fatigue + 5) >= P.max_fatigue:
-        output("You could have received {payment} coins and {xp} {skill} XP in 4 actions, if your fatigue wasn't so high.", 'yellow')
+        output(f"You could have received {payment} coins and {xp} {skill} XP in 4 actions, if your fatigue wasn't so high.", 'yellow')
     else:
         if payment == 0:
             output("Your level is below 2! You will not be paid for this job! However, you can still volunteer.", 'yellow')
