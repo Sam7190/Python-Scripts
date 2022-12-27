@@ -2272,7 +2272,7 @@ class Player(Image):
         self.max_actions = 2
         self.max_minor_actions = 3
         self.max_capacity = 3
-        self.max_fatigue = 10
+        self.max_fatigue = 12
         self.stability_impact = 1
         self.combatstyle = cities[self.birthcity]['Combat Style']
         
@@ -3922,8 +3922,8 @@ def finishFitnessTraining(_=None):
     P.PlayerTrack.Quest.update_quest_status((3, 2), 'complete')
     for skill in ['Gathering', 'Excavating', 'Survival']:
         P.updateSkill(skill, 1, 8)
-    output("Max fatigue increases by 2", 'green')
-    P.max_fatigue += 2
+    output("Max fatigue increases by 3", 'green')
+    P.max_fatigue += 3
 
 def FitnessTraining(_=None):
     P = lclPlayer()
@@ -5420,17 +5420,23 @@ def confirm_labor(skill, _=None):
     if P.paused:
         return
     payment = P.skills[skill]//2
-    if payment == 0:
-        output("Your level is below 2! You will not be paid for this job! However, you can still volunteer.", 'yellow')
     xp = 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2])
-    output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
-    actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
+    if (P.fatigue + 5) >= P.max_fatigue:
+        output("You could have received {payment} coins and {xp} {skill} XP in 4 actions, if your fatigue wasn't so high.", 'yellow')
+    else:
+        if payment == 0:
+            output("Your level is below 2! You will not be paid for this job! However, you can still volunteer.", 'yellow')
+        output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
+        actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
 
 def city_labor(_=None):
     P = lclPlayer()
     if P.paused:
         return
-    output("The following people are looking for assistants today:", 'blue')
+    if (P.fatigue + 5) >= P.max_fatigue:
+        output(f"Uh oh, your fatigue must be less than {P.max_fatigue - 4} to go to work! You can still click the jobs for info.", 'yellow')
+    else:
+        output("The following people are looking for assistants today:", 'blue')
     actions = {'Cancel':exitActionLoop(amt=0)}
     for skill in P.currenttile.city_jobs:
         actions[skill_users[skill]] = partial(confirm_labor, skill)
@@ -6136,7 +6142,7 @@ class GamePage(GridLayout):
                 cheat_success, cheat_failure = "007200", "b53000"
                 P = lclPlayer()
                 if cheat_command[0] == '/help':
-                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>']
+                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>', '/execute <command>']
                     output("Valid Commands:", "blue")
                     for command in valid_commands:
                         output(command, '545454')
@@ -6168,6 +6174,13 @@ class GamePage(GridLayout):
                     else:
                         output(f"CHEAT COMMAND /get_item activated: adding {amt} {item}", cheat_success)
                         P.addItem(item, amt)
+                elif cheat_command[0] == '/execute':
+                    executable = ' '.join(cheat_command[1:])
+                    try:
+                        exec(executable)
+                        output(f"CHEAT COMMAND /execute activated: executed {executable} without error.", cheat_success)
+                    except:
+                        output(f"CHEAT COMMAND /execute failed, the command threw an error: {executable}.", cheat_failure)
                 else:
                     output(f"CHEAT COMMAND {cheat_command[0]} is not recognized!", cheat_failure)
             elif message:
