@@ -73,17 +73,17 @@ def listen(incoming_message_callback, error_callback):
 
                 # Receive and decode username
                 username = client_socket.recv(username_length).decode('utf-8')
-                print(username)
+                print("SOCKET_CLIENT | username", username)
                 category_header = client_socket.recv(HEADER_LENGTH)
                 category_length = int(category_header.decode('utf-8').strip())
                 category = client_socket.recv(category_length).decode('utf-8')
-                print(category)
+                print("SOCKET_CLIENT | category", category)
 
                 # Now do the same for message (as we received username, we received whole message, there's no need to check if it has any length)
                 message_header = client_socket.recv(HEADER_LENGTH)
                 message_length = int(message_header.decode('utf-8').strip())
                 receivedMessage = client_socket.recv(message_length)
-                print(receivedMessage)
+                print("SOCKET_CLIENT | received message", receivedMessage)
                 try:
                     message = receivedMessage.decode('utf-8')
                 except UnicodeDecodeError:
