@@ -20,6 +20,7 @@ import skillGames
 import numpy as np
 import pandas as pd
 from PIL import Image as pilImage
+from skimage import color as skcolor
 import matplotlib.path as mplPath
 import os
 import sys
@@ -2750,7 +2751,6 @@ class Player(Image):
                 self.training_allowed[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['home_cap']
-                self.checkGameEnd()
             else:
                 if self.markets[city]:
                     output('You already own a market here!','yellow')
@@ -2759,7 +2759,8 @@ class Player(Image):
                 self.markets[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['market_cap']
-                self.checkGameEnd()
+            self.coins -= cost
+            self.checkGameEnd()
             exitActionLoop()()
         if barter is None:
             output(f"This will cost {cost}. Attempt to Barter (+1 Fatigue)?", 'blue')
@@ -2980,7 +2981,7 @@ class Table(GridLayout):
     def clear_data_cells(self):
         for h in self.cells:
             for L in self.cells[h]:
-                L.text=''
+                L.text = ''
                 self.remove_widget(L)
     def update_data_cells(self, data, clear=True):
         if clear: self.clear_data_cells()
@@ -2993,8 +2994,9 @@ class Table(GridLayout):
                 j += 1
                 if not clear:
                     if type(item) is dict:
-                        #print(cell, i, self.cells[cell][i].text, item['txt'])
                         self.cells[cell][i].text=item['text']
+                        if 'color' in item:
+                            self.cells[cell][i].color = item['color']
                     else:
                         self.cells[cell][i].text=str(item)
                     continue
@@ -3049,7 +3051,7 @@ class ArmoryTable(GridLayout):
             if space == 0:
                 B = Button(text=f"{self.P.combatstyle}\nWeapon", font_size=fsize-2, disabled=True, bold=True, background_color=(0.6, 0.6, 0.6, 1), color=(0.2, 0.2, 0.2, 1))
             else:
-                txt, dsbld, clr = ("Equipped",True,(0,0,0,1)) if space==1 else ("",False,(1,1,1,1))
+                txt, dsbld, clr = ("Equipped",True,(0,0,0,1)) if space==1 else ("Equip",False,(1,1,1,1))
                 B = Button(text=txt, disabled=dsbld, font_size=fsize-1, color=clr)#, background_color=(1.3,1.3,1.3,1))
                 B.bind(on_press=partial(self.change_primary))
             self.aspace[space].append(B)
@@ -4608,6 +4610,14 @@ class Quest:
         return actions
         
 #%% Player Track: Grid
+def level_up_color(level, min_lvl=1, max_lvl=12):
+    if level < min_lvl:
+        return (0, 0, 0, 1)
+    if level > max_lvl:
+        level = max_lvl
+    rgb = skcolor.lab2rgb((44.12, (178/(max_lvl-1))*(level-1)-50, 48.2))
+    return (rgb[0], rgb[1], rgb[2], 1)
+
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
         super().__init__(**kwargs)
@@ -4629,7 +4639,7 @@ class PlayerTrack(GridLayout):
         # Knowledge Screen
         knowledgeGrid = GridLayout(cols=1)
         self.knowledgeDisplay = Button(text='',height=Window.size[1]*0.05,size_hint_y=None,color=(0,0,0,1),markup=True,background_color=(1,1,1,0))
-        self.Knowledge = Table(header=['Skill','Level', 'XP'], data=self.get_Knowledge(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
+        self.Knowledge = Table(header=['Skill', 'Level', 'XP'], data=self.get_Knowledge(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
         knowledgeGrid.add_widget(self.Knowledge)
         knowledgeGrid.add_widget(self.knowledgeDisplay)
         screen = Screen(name='Knowledge')
@@ -4704,7 +4714,7 @@ class PlayerTrack(GridLayout):
                     group_disp.append(f'{warrior}: {lvls[i]}')
                 current['hover'] = (self.combatDisplay, ', '.join(group_disp))
             data.append([{'text':atr,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1),'hover':(self.combatDisplay, msg)},
-                         {'text':str(self.player.combat[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.combat[i]),'disabled':True,'background_color':(1,1,1,0),'color':level_up_color(self.player.combat[i])},
                          {'text':str(self.player.boosts[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
                          current])
         return data
@@ -4714,9 +4724,10 @@ class PlayerTrack(GridLayout):
             adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in adept_loc[skill]])
             mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in master_loc[skill]])
             msg = adpt+' | '+mstr
+            xp = f'{self.player.xps[skill]} / {3 + self.player.skills[skill]}' if self.player.skills[skill] < 8 else f'{self.player.xps[skill]} / ---'
             data.append([{'text':skill,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1),'hover':(self.knowledgeDisplay, msg)},
-                         {'text':str(self.player.skills[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
-                         {'text':str(self.player.xps[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
+                         {'text':str(self.player.skills[skill]),'disabled':True,'background_color':(1,1,1,0),'color':level_up_color(self.player.skills[skill])},
+                         {'text':xp,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
         return data
     def skirmDisplay(self, city, _=None):
         data = {'text':city[0].upper()+city[1:],'color':(0,0,0,1), 'disabled':True}
@@ -4739,6 +4750,7 @@ class PlayerTrack(GridLayout):
             data['disabled'] = True
             data['text'] = 'Owned!'
             data['background_color'] = (1, 10, 1, 0.8)
+            data['color'] = (0, 0, 0, 1)
         else:
             msg = f'Cost: [color=cfb53b]{capital_info[city]["home"]}[/color]' + msg
             data['text'] = 'Buy'
@@ -4758,6 +4770,7 @@ class PlayerTrack(GridLayout):
                 data['disabled'] = True
                 data['text'] = 'Automated'
                 data['background_color'] = (1, 10, 1, 0.8)
+                data['color'] = (0, 0, 0, 1)
             else:
                 msg = 'Owned!' + msg
                 data['text'] = 'Automate'
