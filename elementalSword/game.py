@@ -5,6 +5,10 @@ python game.py
 # Installations:
 conda install kivy -c conda-forge # Install kivy - make sure it is v1.11.1
 pip install kivymd # Install kivymd - make sure it is v0.104.1
+
+# Specific version installation:
+conda install kivy==1.11.1 -c conda-forge
+pip install kivymd==0.104.1
 """
 #%% Import Modules
 
@@ -16,6 +20,7 @@ import skillGames
 import numpy as np
 import pandas as pd
 from PIL import Image as pilImage
+from skimage import color as skcolor
 import matplotlib.path as mplPath
 import os
 import sys
@@ -91,6 +96,9 @@ def isint(s):
         return int(s) == float(s)
     except ValueError:
         return False
+def Clocked(function, delay, debug_msg=None):
+    if debug_msg is not None: logging.debug(f'Clocked @{delay}sec | {debug_msg}')
+    Clock.schedule_once(function, delay)
     
 #%% Fighting System
 
@@ -125,7 +133,7 @@ class HitBox(Button):
         self.TimeRemainingDisplay = Button(text=f"Time Remaining:\n{np.round(self.TimeRemaining,1)} seconds", pos_hint={'right':1, 'top':1}, size_hint=(0.2, 0.1), disabled=True, background_color=(1, 1, 3, 20))
         self.fpage.add_widget(self.TimeRemainingDisplay)
         Window.bind(on_key_down=self.on_key_down)
-        Clock.schedule_once(self.endAttack, self.TimeRemaining)
+        Clocked(self.endAttack, self.TimeRemaining, 'End Attack')
         Clock.schedule_interval(self.countDown, self.TimeRemainingIter)
     def on_key_down(self, instance, keyboard, keycode, text, modifiers):
         if (text == 'f') and (len(self.fakes) > 0) and (not self.fakes[-1]) and (self.fakesRemaining > 0):
@@ -196,13 +204,14 @@ class HitBox(Button):
             Window.unbind(on_key_down=self.on_key_down)
             if self.fpage.foeisNPC:
                 self.fpage.msgBoard.text = "NPC Defending"
-                Clock.schedule_once(self.npcDefends, 1)
+                Clocked(self.npcDefends, 1, "NPC Defending")
             else:
                 # [INCOMPLETE] Send attack data to the defending user
                 pass
     def getNormalizedPosition(self, pos):
         xMin, xMax, yMin, yMax = self.fpage.size[0]*0.02, self.fpage.size[0]*0.32, self.fpage.size[1]*0.02, self.fpage.size[1]*0.72
         return np.array([(pos[0] - xMin)/(xMax - xMin), (pos[1] - yMin)/(yMax - yMin)])
+    def npcDefends(self, _=None):
         blocksLeft = self.fpage.foestats[self.fpage.P.attributes[f"Def-{self.fpage.P.combatstyle}"]]
         foeAgility = self.fpage.pstats[self.fpage.P.attributes["Agility"]]
         cunning = self.fpage.foestats[self.fpage.P.attributes["Cunning"]]
@@ -281,12 +290,12 @@ class HitBox(Button):
             for i in boxIDs:
                 # Any remaining ids must be fake, so remove them
                 self.npcClickBox(i, None, 0.3 + 0.3*vgID, 0.3)
-            #Clock.schedule_once(partial(self.removeBox, i, damageNPC), 0.3 + 0.3*vgID)
+            #Clocked(partial(self.removeBox, i, damageNPC), 0.3 + 0.3*vgID)
         try:
             vgID
         except NameError:
             vgID = 0
-        Clock.schedule_once(self.fpage.nextAttack, 0.9 + 0.3*vgID)
+        Clocked(self.fpage.nextAttack, 0.9 + 0.3*vgID, "Go to Next Attack")
     def countDown(self, instance=None):
         if self.attackEnded:
             return False
@@ -304,8 +313,8 @@ class HitBox(Button):
             elif clickType == 'hit':
                 self.clrs[i].rgba = (1, 0, 0, 1)
                 dmg = True
-            Clock.schedule_once(partial(self.removeBox, i, dmg), rmvTime)
-        Clock.schedule_once(clk, delay)
+            Clocked(partial(self.removeBox, i, dmg), rmvTime, "Remove hit box")
+        Clocked(clk, delay, "NPC click box delay")
     def removeBox(self, i, damageFoe=False, _=None):
         if not self.cleared[i]:
             self.fpage.canvas.after.remove(self.boxes[i])
@@ -464,7 +473,7 @@ class DefBox(Button):
                     self.transitionBox(i, 'block')
                 elif prevState == 'block':
                     self.hitBox(i)
-        Clock.schedule_once(transition, self.dodgeTime if prevState=='dodge' else self.blockTime)
+        Clocked(transition, self.dodgeTime if prevState=='dodge' else self.blockTime, 'block/dodge time')
     def removeBox(self, i, _=None):
         def rmvBox(_=None):
             self.live_rects[i]['removed'] = True
@@ -472,7 +481,7 @@ class DefBox(Button):
             if self.fpage.logDef:
                 self.add2Log(i)
         if not self.live_rects[i]['removed']:
-            Clock.schedule_once(rmvBox, 0.1)
+            Clocked(rmvBox, 0.1, 'remove box')
         if not self.live_rects[i]['fake']:
             for group_i in self.volley_group[self.live_rects[i]['volley group']]:
                 if i == group_i:
@@ -597,7 +606,7 @@ class FightPage(FloatLayout):
         # Calculate Disadvantages
         self.p_affected_stats = set()
         self.f_affected_stats = set()
-        self.pstats[self.P.attributes["Stability"]] = max([0, self.pstats[self.P.attributes["Stability"]]-self.P.fatigue]) # Account for fatigue
+        self.pstats[self.P.attributes["Stability"]] = max([0, self.pstats[self.P.attributes["Stability"]]-self.P.fatigue//3]) # Account for fatigue
         if self.pstats[self.P.attributes["Stability"]] != self.P.current[self.P.attributes["Stability"]]: self.p_affected_stats.add('Stability')
         disadvantages = [['Physical', 'Trooper'], ['Trooper', 'Elemental'], ['Elemental', 'Wizard'], ['Wizard', 'Physical']]
         agil_i = self.P.attributes['Agility']
@@ -760,8 +769,8 @@ class FightPage(FloatLayout):
                     # Recycle order index
                     self.order_idx = 0
                 self.msgBoard.text = f"{self.fightorder[self.order_idx]} is Attacking Next"
-                Clock.schedule_once(self.triggerNext, delay)
-        Clock.schedule_once(trigger, delay)
+                Clocked(self.triggerNext, delay, 'trigger next attack')
+        Clocked(trigger, delay, 'trigger attack trigger')
     def triggerNext(self, _=None):
         if self.fightorder[self.order_idx] == self.P.username:
             self.playerAttacks()
@@ -2277,7 +2286,7 @@ class Player(Image):
         self.max_actions = 2
         self.max_minor_actions = 3
         self.max_capacity = 3
-        self.max_fatigue = 10
+        self.max_fatigue = 12
         self.stability_impact = 1
         self.combatstyle = cities[self.birthcity]['Combat Style']
         
@@ -2562,7 +2571,7 @@ class Player(Image):
                 # If someone has not ended the round yet, then wait.
                 return
         # Otherwise start the round
-        self.parentBoard.startRound()
+        self.parentBoard.startRoundDelay()
     def takeDamage(self, hp_amt, ftg_amt, add=True):
         hp_idx = self.attributes['Hit Points']
         self.current[hp_idx] = max([0, self.current[hp_idx]-hp_amt])
@@ -2751,7 +2760,6 @@ class Player(Image):
                 self.training_allowed[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['home_cap']
-                self.checkGameEnd()
             else:
                 if self.markets[city]:
                     output('You already own a market here!','yellow')
@@ -2760,7 +2768,8 @@ class Player(Image):
                 self.markets[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['market_cap']
-                self.checkGameEnd()
+            self.coins -= cost
+            self.checkGameEnd()
             exitActionLoop()()
         if barter is None:
             output(f"This will cost {cost}. Attempt to Barter (+1 Fatigue)?", 'blue')
@@ -2981,7 +2990,7 @@ class Table(GridLayout):
     def clear_data_cells(self):
         for h in self.cells:
             for L in self.cells[h]:
-                L.text=''
+                L.text = ''
                 self.remove_widget(L)
     def update_data_cells(self, data, clear=True):
         if clear: self.clear_data_cells()
@@ -2994,8 +3003,9 @@ class Table(GridLayout):
                 j += 1
                 if not clear:
                     if type(item) is dict:
-                        #print(cell, i, self.cells[cell][i].text, item['txt'])
                         self.cells[cell][i].text=item['text']
+                        if 'color' in item:
+                            self.cells[cell][i].color = item['color']
                     else:
                         self.cells[cell][i].text=str(item)
                     continue
@@ -3050,7 +3060,7 @@ class ArmoryTable(GridLayout):
             if space == 0:
                 B = Button(text=f"{self.P.combatstyle}\nWeapon", font_size=fsize-2, disabled=True, bold=True, background_color=(0.6, 0.6, 0.6, 1), color=(0.2, 0.2, 0.2, 1))
             else:
-                txt, dsbld, clr = ("Equipped",True,(0,0,0,1)) if space==1 else ("",False,(1,1,1,1))
+                txt, dsbld, clr = ("Equipped",True,(0,0,0,1)) if space==1 else ("Equip",False,(1,1,1,1))
                 B = Button(text=txt, disabled=dsbld, font_size=fsize-1, color=clr)#, background_color=(1.3,1.3,1.3,1))
                 B.bind(on_press=partial(self.change_primary))
             self.aspace[space].append(B)
@@ -3927,8 +3937,8 @@ def finishFitnessTraining(_=None):
     P.PlayerTrack.Quest.update_quest_status((3, 2), 'complete')
     for skill in ['Gathering', 'Excavating', 'Survival']:
         P.updateSkill(skill, 1, 8)
-    output("Max fatigue increases by 2", 'green')
-    P.max_fatigue += 2
+    output("Max fatigue increases by 3", 'green')
+    P.max_fatigue += 3
 
 def FitnessTraining(_=None):
     P = lclPlayer()
@@ -4609,6 +4619,14 @@ class Quest:
         return actions
         
 #%% Player Track: Grid
+def level_up_color(level, min_lvl=1, max_lvl=12):
+    if level < min_lvl:
+        return (0, 0, 0, 1)
+    if level > max_lvl:
+        level = max_lvl
+    rgb = skcolor.lab2rgb((44.12, (178/(max_lvl-1))*(level-1)-50, 48.2))
+    return (rgb[0], rgb[1], rgb[2], 1)
+
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
         super().__init__(**kwargs)
@@ -4630,7 +4648,7 @@ class PlayerTrack(GridLayout):
         # Knowledge Screen
         knowledgeGrid = GridLayout(cols=1)
         self.knowledgeDisplay = Button(text='',height=Window.size[1]*0.05,size_hint_y=None,color=(0,0,0,1),markup=True,background_color=(1,1,1,0))
-        self.Knowledge = Table(header=['Skill','Level', 'XP'], data=self.get_Knowledge(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
+        self.Knowledge = Table(header=['Skill', 'Level', 'XP'], data=self.get_Knowledge(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
         knowledgeGrid.add_widget(self.Knowledge)
         knowledgeGrid.add_widget(self.knowledgeDisplay)
         screen = Screen(name='Knowledge')
@@ -4705,7 +4723,7 @@ class PlayerTrack(GridLayout):
                     group_disp.append(f'{warrior}: {lvls[i]}')
                 current['hover'] = (self.combatDisplay, ', '.join(group_disp))
             data.append([{'text':atr,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1),'hover':(self.combatDisplay, msg)},
-                         {'text':str(self.player.combat[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
+                         {'text':str(self.player.combat[i]),'disabled':True,'background_color':(1,1,1,0),'color':level_up_color(self.player.combat[i])},
                          {'text':str(self.player.boosts[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
                          current])
         return data
@@ -4715,9 +4733,10 @@ class PlayerTrack(GridLayout):
             adpt = '[color=9f00ff]Adept Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in adept_loc[skill]])
             mstr = '[color=0041d6]Master Trainers[/color]: '+', '.join([('[color=00f03e]' if (city not in cities) or self.player.training_allowed[city] else '[color=b50400]')+city[0].upper()+city[1:]+'[/color]' for city in master_loc[skill]])
             msg = adpt+' | '+mstr
+            xp = f'{self.player.xps[skill]} / {3 + self.player.skills[skill]}' if self.player.skills[skill] < 8 else f'{self.player.xps[skill]} / ---'
             data.append([{'text':skill,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1),'hover':(self.knowledgeDisplay, msg)},
-                         {'text':str(self.player.skills[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
-                         {'text':str(self.player.xps[skill]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
+                         {'text':str(self.player.skills[skill]),'disabled':True,'background_color':(1,1,1,0),'color':level_up_color(self.player.skills[skill])},
+                         {'text':xp,'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)}])
         return data
     def skirmDisplay(self, city, _=None):
         data = {'text':city[0].upper()+city[1:],'color':(0,0,0,1), 'disabled':True}
@@ -4740,6 +4759,7 @@ class PlayerTrack(GridLayout):
             data['disabled'] = True
             data['text'] = 'Owned!'
             data['background_color'] = (1, 10, 1, 0.8)
+            data['color'] = (0, 0, 0, 1)
         else:
             msg = f'Cost: [color=cfb53b]{capital_info[city]["home"]}[/color]' + msg
             data['text'] = 'Buy'
@@ -4759,6 +4779,7 @@ class PlayerTrack(GridLayout):
                 data['disabled'] = True
                 data['text'] = 'Automated'
                 data['background_color'] = (1, 10, 1, 0.8)
+                data['color'] = (0, 0, 0, 1)
             else:
                 msg = 'Owned!' + msg
                 data['text'] = 'Automate'
@@ -5151,7 +5172,7 @@ class TradePage(FloatLayout):
                 self.display.color = previous_color
         self.display.text = msg
         self.display.color = color
-        if delay is not None: Clock.schedule_once(clear, delay)
+        if delay is not None: Clocked(clear, delay, 'clear display message')
     def remove(self, i, j, side=0, _=None):
         if type(self.slots[side][i, j].offered) is tuple:
             self.training = False
@@ -5414,29 +5435,35 @@ def perform_labor(skill=None, _=None):
     if P.working[1] >= 4:
         skill = P.working[0]
         P.coins += P.skills[skill]//2
-        P.addXP(skill, 0 if P.skills[skill] > 7 else P.skills[skill]//2)
+        P.addXP(skill, 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2]))
         P.working = [None, 0]
-        exitActionLoop(amt=4)()
+        P.takeAction(1)
+        P.go2action()
     else:
-        P.takeAction(0)
+        P.takeAction(1)
 
 def confirm_labor(skill, _=None):
     P = lclPlayer()
     if P.paused:
         return
     payment = P.skills[skill]//2
-    if payment == 0:
-        output(f"You need at least level 2 {skill} for them to hire you!", 'yellow')
-        return
-    xp = 0 if P.skills[skill] > 7 else P.skills[skill]//2
-    output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
-    actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
+    xp = 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2])
+    if (P.fatigue + 5) >= P.max_fatigue:
+        output(f"You could have received {payment} coins and {xp} {skill} XP in 4 actions, if your fatigue wasn't so high.", 'yellow')
+    else:
+        if payment == 0:
+            output("Your level is below 2! You will not be paid for this job! However, you can still volunteer.", 'yellow')
+        output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
+        actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
 
 def city_labor(_=None):
     P = lclPlayer()
     if P.paused:
         return
-    output("The following people are looking for assistants today:", 'blue')
+    if (P.fatigue + 5) >= P.max_fatigue:
+        output(f"Uh oh, your fatigue must be less than {P.max_fatigue - 4} to go to work! You can still click the jobs for info.", 'yellow')
+    else:
+        output("The following people are looking for assistants today:", 'blue')
     actions = {'Cancel':exitActionLoop(amt=0)}
     for skill in P.currenttile.city_jobs:
         actions[skill_users[skill]] = partial(confirm_labor, skill)
@@ -5492,6 +5519,7 @@ def city_actions(city, _=None):
             return
         P.coins -= 1
         P.recover(2)
+    logging.debug(f"Generating city actions for {city}.")
     T = game_app.game_page.board_page.citytiles[city]
     actions = {}
     if P.training_allowed[P.currenttile.tile]:
@@ -5739,7 +5767,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             elif self.is_neighbor() and (not self.parentBoard.localPlayer.tiered):
                 self.parentBoard.localPlayer.moveto((self.gridx, self.gridy))
 
-trns_clr = {'red':get_hexcolor((255,0,0)),'green':get_hexcolor((0,255,0)),'yellow':get_hexcolor((147,136,21)),'blue':get_hexcolor((0,0,255))}
+trns_clr = {'red':get_hexcolor((255,0,0)),'green':get_hexcolor((0,255,0)),'yellow':get_hexcolor((147,136,21)),'blue':get_hexcolor((0,0,255)),'cyan':get_hexcolor((0, 255, 255))}
 class BoardPage(FloatLayout):
     def __init__(self, game_page, **kwargs):
         super().__init__(**kwargs)
@@ -5755,6 +5783,7 @@ class BoardPage(FloatLayout):
         self.startLblMsgs = []
         self.startLblTimes = []
         self.startLblLast = []
+        self.defaultRoundDelay = 3
         for tiletype in positions:
             if tiletype == 'randoms':
                 continue
@@ -5810,6 +5839,15 @@ class BoardPage(FloatLayout):
         self.gridtiles[(x,y)] = T
         T.parentBoard = self
         self.add_widget(T)
+    def startRoundDelay(self, delay=None, _=None):
+        if delay is None:
+            delay = self.defaultRoundDelay
+        if delay == 0:
+            self.startRound()
+        else:
+            msg = f'New Round Starting in {delay}...' if delay == self.defaultRoundDelay else f'{delay}...'
+            self.sendFaceMessage(msg, None, 1, False)
+            Clocked(partial(self.startRoundDelay, delay-1), 1, 'start round delay')
     def startRound(self):
         self.localPlayer.savePlayer()
         logging.info("Player saved.")
@@ -5828,7 +5866,7 @@ class BoardPage(FloatLayout):
             if P.PlayerTrack.Quest.quests[2, 8].wait_rounds > 0:
                 P.PlayerTrack.Quest.quests[2, 8].wait_rounds -= 1
         self.localPlayer.round_num += 1
-        self.sendFaceMessage(f'Start Round {self.localPlayer.round_num}!')
+        self.sendFaceMessage(f'Start Round {self.localPlayer.round_num}!', 'cyan')
         if self.localPlayer.has_warrior:
             self.localPlayer.has_warrior -= 1
             if self.localPlayer.has_warrior == 0:
@@ -5840,7 +5878,7 @@ class BoardPage(FloatLayout):
         self.localPlayer.update_mainStatPage()
         paralyzed = check_paralysis()
         if not paralyzed: 
-            logging.info("Player not paralyzed.")
+            logging.debug("Player not paralyzed.")
             self.localPlayer.started_round = True
             if (self.localPlayer.PlayerTrack.Quest.quests[3, 6].status=='started') and (self.localPlayer.PlayerTrack.Quest.quests[3, 6].action % 2):
                 JoinFight()
@@ -5851,6 +5889,7 @@ class BoardPage(FloatLayout):
                 self.localPlayer.go2consequence(0)
     def update_market(self, market_seed, _=None):
         np.random.seed(market_seed)
+        logging.debug(f"Using seed {market_seed} for market update.")
         for city, D in city_info.items():
             # Update Market
             self.citytiles[city].city_wares = set(np.random.choice(list(D['sell']), 6))
@@ -5918,7 +5957,7 @@ class BoardPage(FloatLayout):
                 self.game_width = wwidth/(1+self.game_page.right_line_x)
                 self.game_height = wheight
                 resize_images(self.game_width, self.game_height)
-    def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2):
+    def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2, outputOnMsgBoard=True):
         timeNow = time()
         msg = f'[color={trns_clr[clr]}]{msg}[/color]' if clr is not None else msg
         if msg is not None:
@@ -5935,10 +5974,10 @@ class BoardPage(FloatLayout):
         self.startLabel.text = '\n'.join(self.startLblMsgs)
         if msg is not None: 
             if msg == f'Start Round {self.localPlayer.round_num}!': msg = '\n'+msg
-            output(msg, clr)
+            if outputOnMsgBoard: output(msg, clr)
         def clear_lbl(_):
             self.sendFaceMessage()
-        Clock.schedule_once(clear_lbl, scheduleTime)
+        Clocked(clear_lbl, scheduleTime)
     def updateView(self, deltaZoom=0):
         # Make sure change does not go beyond the bounds of [0,3]
         if deltaZoom:
@@ -6142,7 +6181,7 @@ class GamePage(GridLayout):
                 cheat_success, cheat_failure = "007200", "b53000"
                 P = lclPlayer()
                 if cheat_command[0] == '/help':
-                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>']
+                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>', '/execute <command>']
                     output("Valid Commands:", "blue")
                     for command in valid_commands:
                         output(command, '545454')
@@ -6174,6 +6213,13 @@ class GamePage(GridLayout):
                     else:
                         output(f"CHEAT COMMAND /get_item activated: adding {amt} {item}", cheat_success)
                         P.addItem(item, amt)
+                elif cheat_command[0] == '/execute':
+                    executable = ' '.join(cheat_command[1:])
+                    try:
+                        exec(executable)
+                        output(f"CHEAT COMMAND /execute activated: executed {executable} without error.", cheat_success)
+                    except:
+                        output(f"CHEAT COMMAND /execute failed, the command threw an error: {executable}.", cheat_failure)
                 else:
                     output(f"CHEAT COMMAND {cheat_command[0]} is not recognized!", cheat_failure)
             elif message:
@@ -6365,11 +6411,11 @@ class LaunchPage(GridLayout):
                 game_app.screen_manager.current = 'Game'
             else:
                 game_app.screen_manager.current = 'Birth City Chooser'
-            #Clock.schedule_once(bootup, 5)
+            #Clocked(bootup, 5)
     def refresh_label(self, _=None):
         self.label.text = '[color=000000]'+'\n'.join([self.usernames[i]+': '+['Not Ready', 'Ready'][self.ready[self.usernames[i]]] for i in range(len(self.usernames))])+'[/color]'
         self.check_launch()
-        #Clock.schedule_once(self.check_launch, 0.5)
+        #Clocked(self.check_launch, 0.5)
     def auto_resize(self, instance):
         global auto_resize
         if self.auto_resize_lbl.text == "Auto Resize:\nTrue":
@@ -6526,7 +6572,7 @@ class LaunchPage(GridLayout):
             if self.readyButton.text == 'Play Single Player': self.readyButton.text = 'Ready Up'
         self.ready[username] = 1 if message == 'Ready' else 0
         #self.refresh_label()
-        Clock.schedule_once(self.refresh_label, 0.5)
+        Clocked(self.refresh_label, 0.5, 'LAUNCH refresh_label')
     def DIFFICULTY(self, username, message):
         self.npc_difficulty(message)
     def SEED(self, username, message):
@@ -6549,70 +6595,73 @@ class LaunchPage(GridLayout):
         def clockedClaim(_):
             game_app.chooseCity_page.make_claim(username, message)
         #game_app.chooseCity_page.make_claim(username, message)
-        Clock.schedule_once(clockedClaim, 0.1)
+        Clocked(clockedClaim, 0.1, 'CLAIM clockedClaim')
     def MOVE(self, username, message):
         def clockedMove(_):
             game_app.game_page.board_page.Players[username].moveto(message, False, True)
-        Clock.schedule_once(clockedMove, 0.2)
+        Clocked(clockedMove, 0.2, 'MOVE clockedMove')
     def CHAT(self, username, message):
         def clockedChat(_):
             game_app.game_page.update_display(username, message)
-        Clock.schedule_once(clockedChat, 0.2)
+        Clocked(clockedChat, 0.2, 'CHAT clockedChat')
     def EMPTY(self, username, message):
         def emptyTile(_):
             game_app.game_page.board_page.gridtiles[message].empty_tile(recvd=True)
-        Clock.schedule_once(emptyTile, 0.2)
+        Clocked(emptyTile, 0.2, 'EMPTY emptyTile')
     def ROUND(self, username, message):
         if message == 'end':
             def pauseUser(_):
                 game_app.game_page.board_page.Players[username].end_round()
-            Clock.schedule_once(pauseUser, 0.2)
+            Clocked(pauseUser, 0.2, 'ROUND pauseUser')
     def TRADER(self, username, message):
         def clockedTrader(_):
             game_app.game_page.board_page.gridtiles[message[0]].trader_appears(recvd=message[1])
         def clockedPurchase(_):
             game_app.game_page.board_page.gridtiles[message[0]].buy_from_trader(message[1], recvd=True)
         if type(message[1]) is set:
-            Clock.schedule_once(clockedTrader, 0.2)
+            Clocked(clockedTrader, 0.2, 'TRADER clockedTrader')
         elif type(message[1]) is str:
-            Clock.schedule_once(clockedPurchase, 0.1)
+            Clocked(clockedPurchase, 0.1, 'TRADER clockedPurchase')
         elif message[1] == 0:
             def run(_):
                 P = lclPlayer()
                 P.remove_trade(True)
-            Clock.schedule_once(run, 0.1)
+            Clocked(run, 0.1, 'TRADER run')
     def SKIRMISH(self, username, message):
         def run(_):
             Skirmishes[0] = message
             game_app.game_page.board_page.localPlayer.getIncome()
-        Clock.schedule_once(run, 0.2)
+        Clocked(run, 0.2, 'SKIRMISH run')
     def MARKET(self, username, message):
-        Clock.schedule_once(partial(game_app.game_page.board_page.update_market, message), 0.01)
+        def run(msg=None, _=None):
+            game_app.game_page.board_page.update_market(msg)
+        #Clocked(partial(game_app.game_page.board_page.update_market, message), 0.01, 'MARKET')
+        Clocked(partial(run, message), 0.1, 'MARKET run')
     def EFFICIENCY(self, username, message):
         def run(_):
             output(f"{username} increased village output efficiency by 1 for {message}!", 'blue')
             capital_info[message]['efficiency'] += 1
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'EFFICIENCY run')
     def DISCOUNT(self, username, message):
         def run(_):
             output(f"{username} convinced {message} market leaders to reduce their prices by 1 coin (min=1)!", 'blue')
             capital_info[message]['discount'] += 1
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'DISCOUNT run')
     def TRADER_ALLOWED(self, username, message):
         def run(_):
             output(f"{username} convinced traders to start appearing in {message}! (1/8 chance)", 'blue')
             capital_info[message]['trader allowed'] = True
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'TRADER_ALLOWED run')
     def REDUCED_TENSION(self, username, message):
         def run(_):
             output(f"{username} reduced the tensions between {' and '.join(list(message[0]))} by a factor of {message[1]}!", 'blue')
             Skirmishes[1][message[0]] += message[1]
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'REDUCED_TENSION run')
     def CAPACITY(self, username, message):
         def run(_):
             output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
             IncreaseCapacity(message[0], message[1])
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'CAPACITY run')
     def FIGHT(self, username, message):
         def run(_):
             P = lclPlayer()
@@ -6678,18 +6727,18 @@ class LaunchPage(GridLayout):
                     T.training_failure()
                 elif message[1] == 'training success':
                     T.complete_trade()
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'TRADE run')
     def GAME_END(self, username, message):
         def run(_):
             P = lclPlayer()
             output(f"{username} Triggered End Game!", 'blue')
             socket_client.send('[END STATS]', {'Combat':P.Combat, 'Reputation':P.Reputation, 'Capital':P.Capital, 'Knowledge':P.Knowledge})
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'GAME_END run')
     def FINAL_END_STATS(self, username, message):
         def run(_):
             P = lclPlayer()
             P.GameEnd(message)
-        Clock.schedule_once(run, 0.1)
+        Clocked(run, 0.1, 'FINAL_END_STATS run')
     def incoming_message(self, username, category, message):
         funcAttr = category[1:-1].replace(' ','_')
         if hasattr(self, funcAttr):
@@ -6710,7 +6759,7 @@ class LaunchPage(GridLayout):
             self.label.background_color = (1, 0.3, 0.3, 1)
             socket_client.send("[LAUNCH]","Not Ready")
             self.readyButton.text = "Play Single Player" if len(self.ready)==1 else "Ready Up"
-            Clock.schedule_once(blue_screen, 0.3)
+            Clocked(blue_screen, 0.3, 'update_self blue_screen')
         self.refresh_label()
 
 class Logger:
@@ -6804,7 +6853,7 @@ class ConnectPage(GridLayout):
             game_app.screen_manager.current = 'Launcher'
         game_app.info_page.update_info("Launching Game Locally...")
         game_app.screen_manager.current = 'Info'
-        Clock.schedule_once(connect, 1)
+        Clocked(connect, 1, 'launch local game')
 
     def join_button(self, instance):
         port = self.port.text
@@ -6816,7 +6865,7 @@ class ConnectPage(GridLayout):
         info = f"Joining {ip}:{port} as {username}"
         game_app.info_page.update_info(info)
         game_app.screen_manager.current = 'Info'
-        Clock.schedule_once(self.connect, 1)
+        Clocked(self.connect, 1, 'join game')
 
     # Connects to the server
     # (second parameter is the time after which this function had been called,
@@ -6893,7 +6942,7 @@ class EpicApp(App):
 def show_error(message):
     game_app.info_page.update_info(message)
     game_app.screen_manager.current = 'Info'
-    Clock.schedule_once(sys.exit, 10)
+    Clocked(sys.exit, 10, 'show error and system exit')
 
 if __name__ == "__main__":
     game_app = EpicApp()
