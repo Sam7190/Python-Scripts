@@ -529,6 +529,15 @@ class DefBox(Button):
         self.fpage.canvas.after.remove(self.realDodge)
         self.fpage.canvas.after.remove(self.fakeDodge)
         self.fpage.remove_widget(self)
+        
+class SkillPage():
+    def __init__(self, skill):
+        logging.debug(f"Initiating SkillPage for {skill}")
+        
+        # Player objects
+        self.P = lclPlayer()
+        self.P.paused = True
+        
 
 class FightPage(FloatLayout):
     def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, foeStealth=0, **kwargs):
@@ -644,7 +653,7 @@ class FightPage(FloatLayout):
         p1 = int(np.sum(self.fightorder==self.fightorder[0]))
         p2 = int(np.sum(self.fightorder==self.fightorder[-1]))
         fightorder = f"Fight Order: {p1} time{'s' if p1>1 else ''} {self.fightorder[0]} then {p2} time{'s' if p2>1 else ''} {self.fightorder[-1]}\n"
-        msg = f'You are encountered by {self.foename}\n' if encountered else ''
+        msg = f'You are encountered by {self.foename} Lvl. {lvl} using {style} combat style.\n' if encountered else ''
         msg = msg+f"{fightorder}You can't faint but leveling up probability is reduced.\nRun or Fight?" if self.foename == 'Sparring Partner' else msg+f'{fightorder}Run or Fight?'
         self.msgBoard = Button(text=msg, background_color=(1,1,1,0.6), color=(0.3, 0.3, 0.7, 1), background_disabled_normal='', disabled=True, pos_hint={'x':0.32, 'y':0.8}, size_hint=(0.36, 0.1))#, markup=True)
         self.add_widget(self.msgBoard)
