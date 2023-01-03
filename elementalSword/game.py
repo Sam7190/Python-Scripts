@@ -5434,7 +5434,7 @@ def perform_labor(skill=None, _=None):
         P.working[1] += 1
     if P.working[1] >= 4:
         skill = P.working[0]
-        P.coins += P.skills[skill]//2
+        P.coins += P.skills[skill]
         P.addXP(skill, 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2]))
         P.working = [None, 0]
         P.takeAction(1)
@@ -5446,13 +5446,13 @@ def confirm_labor(skill, _=None):
     P = lclPlayer()
     if P.paused:
         return
-    payment = P.skills[skill]//2
+    payment = P.skills[skill]
     xp = 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2])
     if (P.fatigue + 5) >= P.max_fatigue:
         output(f"You could have received {payment} coins and {xp} {skill} XP in 4 actions, if your fatigue wasn't so high.", 'yellow')
     else:
         if payment == 0:
-            output("Your level is below 2! You will not be paid for this job! However, you can still volunteer.", 'yellow')
+            output("Your level is zero! You will not be paid for this job! However, you can still volunteer.", 'yellow')
         output(f'Would you like to assist {skill_users[skill]} for 4 actions? [Payment={payment}, {skill} XP={xp}, 4 fatigue applied afterwards]', 'blue')
         actionGrid({'Yes':partial(perform_labor, skill), 'No':exitActionLoop(amt=0)}, False, False)
 

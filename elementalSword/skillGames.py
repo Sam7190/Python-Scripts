@@ -33,13 +33,13 @@ class BarterPage(FloatLayout):
         self.progress = 0
         # Lvl 0-3: 2 chances, Lvl 4-7: 3 chances, Lvl 8-11: 4 chances, Lvl 12: 5 chances
         self.chancesLeft = 2 + (lvl // 4)
-        self.options = {'Prompt for Price':     {'init':    'So how much are you really selling it for?', 
+        self.options = {'Prompt Price':     {'init':    'So how much are you really selling it for?', 
                                                  'regular': 'Prices are as marked.', 
                                                  'failure': "You won't be able to afford our prices.", 
                                                  'success': 'Alright, how are these prices for you?',
                                                  'inspect': "Unlikely to hurt the haggle, but usually doesn't help much either"},
                         
-                        'Ask for a Deal':       {'init':    'Come on, give me a good deal on these.', 
+                        'Ask for Deal':       {'init':    'Come on, give me a good deal on these.', 
                                                  'regular': "You can't beat these prices.", 
                                                  'failure': 'How does NO deal sound?', 
                                                  'success': 'You know what, just for you, how does this deal sound?',
@@ -51,7 +51,7 @@ class BarterPage(FloatLayout):
                                                  'success': 'Okay, how about this?',
                                                  'inspect': 'May hurt the haggle, but could also help.'}, 
                         
-                        'Proclaim True Value':  {'init':    'You and I both know how much these are trully worth.', 
+                        'Proclaim Value':  {'init':    'You and I both know how much these are trully worth.', 
                                                  'regular': 'Do these prices bother you?', 
                                                  'failure': "If you know how much they are worth, then why don't you sell them?",
                                                  'success': "Do these prices look better?",
