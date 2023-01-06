@@ -1927,7 +1927,7 @@ def A_road(inspect=False):
         actionGrid({}, True)
 
 def A_plains(inspect=False):
-    exc = {'Hunstman':[1,1,persuade_trainer(['Agility','Gathering'],'huntsman',exitActionLoop())],
+    exc = {'Huntsman':[1,1,persuade_trainer(['Agility','Gathering'],'huntsman',exitActionLoop())],
            'Wild Herd':[2,6,Gather('raw meat',0)]}
     if inspect:
         return exc, 9
@@ -2258,6 +2258,38 @@ def get_inverse_city_info():
     master['Excavating'].append('mountains')
     return adept, master
 adept_loc, master_loc = get_inverse_city_info()
+
+#%% Icons
+
+class LockIcon(Image):
+    def __init__(self, tile, reputation_required, **kwargs):
+        super().__init__(**kwargs)
+        self.source = f'images\\icons\\locked\\{reputation_required}.png'
+        self.tile = tile
+        self.pos_hint = tile.pos_hint
+        self.size_hint = tile.size_hint
+        self.locked = True
+    def delete(self):
+        self.source = ''
+        self.opacity = 0
+        self.locked = False
+        
+class SkirmishIcon(Image):
+    def __init__(self, tile, stage, **kwargs):
+        super().__init__(**kwargs)
+        self.set_stage(stage)
+        self.tile = tile
+        self.pos_hint = tile.pos_hint
+        self.size_hint = tile.size_hint
+    def set_stage(self, stage):
+        self.stage = stage
+        if (stage <= 0) or (self.tile.lockIcon.locked):
+            self.source = ''
+            self.opacity = 0
+        else:
+            self.source = f'images\\icons\\skirmish\\{stage}.png'
+            self.opacity = 0.65
+            
                 
 #%% Player
 class Player(Image):
@@ -2828,6 +2860,8 @@ class Player(Image):
                     # Check if bartering will give you extra coins - does not count as an activation!
                     r = rbtwn(0, self.skills["Bartering"])
                     self.coins += capital_info[city]['return'] + r # Get the income plus the bartering effort
+                    brtr_msg = '' if r > 0 else r" plus {r} coins from bartering!"
+                    output(f"You received {capital_info[city]['return']} coins from your market{brtr_msg}!", 'green')
                 # Otherwise check if you have automated the city
                 elif self.workers[city]:
                     self.bank[city] += capital_info[city]['return'] - 1 # 1 coin goes to the worker and money sent to bank
@@ -4562,7 +4596,7 @@ class Quest:
         init_req = eval(quest_req[quest]) if quest in quest_req else True
         inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
         return init_req * inCity if (quest[0] == 1) else init_req * (self.stage_completion[quest[0]-1] >= 4) * inCity
-    def update_quest_status(self, quest, new_status, verbose=True):
+    def update_quest_status(self, quest, new_status=None, verbose=True):
         if (new_status == 'started'):
             self.quests[quest].disabled = True
             self.quests[quest].background_color = (1.5, 1.5, 0.5, 1.5)
@@ -4582,19 +4616,27 @@ class Quest:
             if verbose: output(f"You completed the mission '{self.quests[quest].text}'! Reputation increases by {self.quests[quest].stage}!", 'green')
             self.quests[quest].background_color = (0, 3, 0, 1.5)
             self.quests[quest].color = (0.6, 0.6, 0.6, 1)
-            if verbose: 
-                self.playerTrack.player.Reputation += self.quests[quest].stage
-                self.playerTrack.player.checkGameEnd()
+            self.playerTrack.player.Reputation += self.quests[quest].stage
+            self.playerTrack.player.parentBoard.checkCityUnlocks() # Remove lock icons if appropriate
+            self.update_reqs()
+            self.playerTrack.player.checkGameEnd()
             self.playerTrack.reputationTab.text = f"Reputation: [color={self.playerTrack.hclr}]{self.playerTrack.player.Reputation}[/color]"
             self.stage_completion[self.quests[quest].stage] += 1
-            if verbose:
-                for city in city_info:
-                    if self.playerTrack.player.Reputation > city_info[city]['entry']:
-                        self.playerTrack.player.entry_allowed[city] = True
-                    if self.playerTrack.player.Reputation > (2*city_info[city]['entry']):
-                        self.playerTrack.player.market_allowed[city] = True
-                    elif self.playerTrack.player.Reputation > (3*city_info[city]['entry']):
-                        self.playerTrack.player.training_allowed[city] = True
+            for city in city_info:
+                if self.playerTrack.player.Reputation >= city_info[city]['entry']:
+                    if not self.playerTrack.player.entry_allowed[city]:
+                        output(f"You are now allowed to enter {city}!", 'green')
+                        output(f"Get {2*city_info[city]['entry']} and {3*city_info[city]['entry']} to buy a market/home and train respectively in {city}.", 'blue')
+                    self.playerTrack.player.entry_allowed[city] = True
+                if self.playerTrack.player.Reputation >= (2*city_info[city]['entry']):
+                    if not self.playerTrack.player.market_allowed[city]:
+                        output(f"You are now allowed to buy a market/home in {city}!", 'green')
+                        output(f"Get {3*city_info[city]['entry'] to train in {city}.", 'blue')
+                    self.playerTrack.player.market_allowed[city] = True
+                elif self.playerTrack.player.Reputation >= (3*city_info[city]['entry']):
+                    if not self.playerTrack.player.training_allowed['entry']:
+                        output(f"You are now allowed to train in {city}!", 'green')
+                    self.playerTrack.player.training_allowed[city] = True
         else:
             # Each statement was failed so assume that the status should not be changed
             return
@@ -5497,7 +5539,7 @@ def city_consequence(city):
             else:
                 output(f"Be mindful: Tensions are active between {city} and {P.birthcity}! Hooligans could be aggrevated!", 'yellow')
         else:
-            output(f"Tensions between {city} and {P.birthciy} are calm at the moment.")
+            output(f"Tensions between {city} and {P.birthcity} are calm at the moment.")
     exitActionLoop()()
 
 def city_actions(city, _=None):
@@ -5574,6 +5616,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.adept_trainers = set()
         self.master_trainers = set()
         self.neighbors = set()
+        self.lockIcon = None
+        self.skirmishIcon = None
         self.bind(on_press=self.initiate)
         Window.bind(mouse_pos = self.on_mouse_move)
         self.tile = tile
@@ -5651,6 +5695,12 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         if self.trader_label is not None:
             self.trader_label.pos_hint = self.pos_hint
             self.trader_label.size_hint = self.size_hint
+        if self.lockIcon is not None:
+            self.lockIcon.size_hint = self.size_hint
+            self.lockIcon.pos_hint = self.pos_hint
+        if self.skirmishIcon is not None:
+            self.skirmishIcon.size_hint = self.size_hint
+            self.skirmishIcon.pos_hint = self.pos_hint
         self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
         # Get polygonal shape for mouse position detection
         self.update_polygon()
@@ -5808,6 +5858,33 @@ class BoardPage(FloatLayout):
         self.inspectButton = Button(text='Inspect', pos_hint={'x':0.07,'y':0}, size_hint=(0.06, 0.03))
         self.inspectButton.bind(on_press=self.toggleInspect)
         self.add_widget(self.inspectButton)
+    def setIcons(self):
+        if self.localPlayer is None:
+            # Local Player must be set if setting icons
+            return
+        self.iconTiles = {}
+        for T in self.gridtiles.values():
+            if (T.tile in cities) and (T.tile != self.localPlayer.birthcity):
+                T.lockIcon = LockIcon(T, city_info[T.tile]['entry'])
+                T.skirmishIcon = SkirmishIcon(T, 0)
+                self.iconTiles[T.tile] = T
+                self.add_widget(T.lockIcon)
+                self.add_widget(T.skirmishIcon)
+    def checkCityUnlocks(self):
+        for city, T in self.iconTiles.items():
+            if self.localPlayer.Reputation >= city_info[city]['entry']:
+                T.lockIcon.delete()
+    def updateSkirmishIcons(self):
+        sk_cities = set()
+        for sk in Skirmishes[0]:
+            if (self.localPlayer.birthcity in sk):
+                sk_city = list(sk.difference({self.localPlayer.birthcity}))[0]
+                sk_cities.add(sk_city)
+                self.iconTiles[sk_city].skirmishIcon.set_stage(Skirmishes[0][sk])
+        non_sk_cities = set(cities).difference(sk_cities)
+        non_sk_cities.remove(self.localPlayer.birthcity)
+        for city in non_sk_cities:
+            self.iconTiles[city].skirmishIcon.set_stage(0)
     def completeRandomTileDistribution(self):
         np.random.seed(seed)
         randomChoice = np.random.choice(randoms*int(np.ceil(len(positions['randoms'])/len(randoms))), len(positions['randoms']))
@@ -5957,6 +6034,9 @@ class BoardPage(FloatLayout):
                 self.game_width = wwidth/(1+self.game_page.right_line_x)
                 self.game_height = wheight
                 resize_images(self.game_width, self.game_height)
+                
+            # Add icon labels to city
+            self.setIcons()
     def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2, outputOnMsgBoard=True):
         timeNow = time()
         msg = f'[color={trns_clr[clr]}]{msg}[/color]' if clr is not None else msg
@@ -6181,7 +6261,7 @@ class GamePage(GridLayout):
                 cheat_success, cheat_failure = "007200", "b53000"
                 P = lclPlayer()
                 if cheat_command[0] == '/help':
-                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>', '/execute <command>']
+                    valid_commands = ['/help', '/skill <skill> <level_gain>', '/attribute <attribute> <level_gain>', '/add_coins <amt>', '/get_item <item> <amt>', '/complete_quest <stage> <mission>', '/execute <command>']
                     output("Valid Commands:", "blue")
                     for command in valid_commands:
                         output(command, '545454')
@@ -6213,6 +6293,16 @@ class GamePage(GridLayout):
                     else:
                         output(f"CHEAT COMMAND /get_item activated: adding {amt} {item}", cheat_success)
                         P.addItem(item, amt)
+                elif cheat_command[0] == '/complete_quest':
+                    quest = (int(cheat_command[1]), int(cheat_command[2]))
+                    # First add condition if quest is available
+                    if quest not in P.PlayerTrack.Quest.quests:
+                        output("CHEAT COMMAND /complete_quest failed: the inputted quest does not exist.")
+                    elif P.PlayerTrack.Quest.quests[quest].status == 'completed':
+                        output("CHEAT COMMAND /complete_quest ignored: the quest is already complete.")
+                    else:
+                        output("CHEAT COMMAND /complete_quest activated: updating quest to complete.")
+                        P.PlayerTrack.Quest.update_quest_status(quest, 'complete')
                 elif cheat_command[0] == '/execute':
                     executable = ' '.join(cheat_command[1:])
                     try:
@@ -6630,6 +6720,7 @@ class LaunchPage(GridLayout):
     def SKIRMISH(self, username, message):
         def run(_):
             Skirmishes[0] = message
+            game_app.game_page.board_page.updateSkirmishIcons()
             game_app.game_page.board_page.localPlayer.getIncome()
         Clocked(run, 0.2, 'SKIRMISH run')
     def MARKET(self, username, message):
