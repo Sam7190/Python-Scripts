@@ -4631,7 +4631,7 @@ class Quest:
                 if self.playerTrack.player.Reputation >= (2*city_info[city]['entry']):
                     if not self.playerTrack.player.market_allowed[city]:
                         output(f"You are now allowed to buy a market/home in {city}!", 'green')
-                        output(f"Get {3*city_info[city]['entry'] to train in {city}.", 'blue')
+                        output(f"Get {3*city_info[city]['entry']} to train in {city}.", 'blue')
                     self.playerTrack.player.market_allowed[city] = True
                 elif self.playerTrack.player.Reputation >= (3*city_info[city]['entry']):
                     if not self.playerTrack.player.training_allowed['entry']:
@@ -5564,12 +5564,15 @@ def city_actions(city, _=None):
     logging.debug(f"Generating city actions for {city}.")
     T = game_app.game_page.board_page.citytiles[city]
     actions = {}
+    actions['Market'] = partial(Trading, False)
+    actions['Job Postings'] = city_labor
     if P.training_allowed[P.currenttile.tile]:
         actions['Adept'] = partial(city_trainer, T.adept_trainers, 'adept')
         actions['Master'] = partial(city_trainer, T.master_trainers, 'city')
-    if P.market_allowed[P.currenttile.tile]:
-        actions['Market'] = partial(Trading, False)
-        actions['Job Postings'] = city_labor
+    # Removing market_allowed cap on trading and job postings, and limiting to buying homes and markets.
+#    if P.market_allowed[P.currenttile.tile]:
+#        actions['Market'] = partial(Trading, False)
+#        actions['Job Postings'] = city_labor
     if (P is not None) and (P.currenttile.tile == 'scetcher'):
         actions['Duel'] = Duelling
     elif (P is not None) and (P.birthcity == city): 
