@@ -1199,6 +1199,8 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                 elif amt>0:
                     if game_launched[0]: logging.info(f"Taking {amt} of fatigue!")
                     P.takeAction(amt)
+                else:
+                    P.update_mainStatPage()
                 if empty_tile: P.currenttile.empty_tile()
                 if (consume is None) or ('tiered' not in consume):
                     P.go2action()
@@ -2369,6 +2371,7 @@ class Player(Image):
         self.cityorder = sorted(cities)
         self.homes = {city: False for city in cities}
         self.markets = {city: False for city in cities}
+        self.tended_market = {city: False for city in cities}
         self.workers = {city: False for city in cities}
         self.bank = {city: 0 for city in cities}
         self.villages = {city: {} for city in cities}
@@ -2682,6 +2685,7 @@ class Player(Image):
         self.update_mainStatPage()
         if self.actions <= 0:
             self.end_round()
+            self.getIncome() # Get income before sending end of round to all players.
             socket_client.send("[ROUND]",'end')
         elif (self.PlayerTrack.Quest.quests[3, 6].status == 'started') and (self.PlayerTrack.Quest.quests[3, 6].action % 2):
             JoinFight()
@@ -2792,6 +2796,10 @@ class Player(Image):
                 self.training_allowed[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['home_cap']
+                output(f"You successfully purchased a home in {city}!", 'green')
+                output(f"+{capital_info[city]['capacity']} inventory space.", 'green')
+                output(f"+{capital_info[city]['home_cap']} Capital.", 'green')
+                output(f"Training in {city} is now allowed.", 'green')
             else:
                 if self.markets[city]:
                     output('You already own a market here!','yellow')
@@ -2800,6 +2808,9 @@ class Player(Image):
                 self.markets[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['market_cap']
+                output(f"You successfully purchased a market in {city}!", 'green')
+                output(f"+{capital_info[city]['market_cap']} Capital.", 'green')
+                output(f"+{capital_info[city]['return']} coins at the end of every round you tend the market. Must be in {city} at round end.", 'green')
             self.coins -= cost
             self.checkGameEnd()
             exitActionLoop()()
@@ -2815,11 +2826,14 @@ class Player(Image):
             self.already_asset_bartered = True
             bartering = self.activateSkill("Bartering")
             # Bartering home is more effective than bartering for market
-            r = min([self.cost-1, rbtwn(0, bartering if asset == 'home' else bartering/2)]) # Has to at least cost a coin!
-            output(f"Your bartering can save you {r} coins. Complete purchase?", 'blue')
+            r = min([cost-1, rbtwn(0, bartering if asset == 'home' else bartering//2)]) # Has to cost at least a coin!
+            if r > 0:
+                output(f"Your bartering will save you {r} coins. Complete purchase?", 'blue')
+            else:
+                output("Your bartering failed. Still complete the purchase?", 'blue')
             actions = {'Yes':partial(make_purchase, asset, city, cost-r), 'No':exitActionLoop(amt=0)}
-            actionGrid(actions, False)
             self.fatigue += 1 # Take a fatigue for bartering
+            actionGrid(actions, False)
         elif barter and self.already_asset_bartered:
             output("You can't barter again this action!", 'yellow')
             return
@@ -2852,19 +2866,29 @@ class Player(Image):
         exitActionLoop()()
     def getIncome(self,_=None):
         notwaring = notAtWar(Skirmishes[0])
-        for city in notwaring:
-            # If you have the city
-            if self.markets[city]:
-                # And you are on the city
-                if self.currenttile.tile == city:
-                    # Check if bartering will give you extra coins - does not count as an activation!
-                    r = rbtwn(0, self.skills["Bartering"])
-                    self.coins += capital_info[city]['return'] + r # Get the income plus the bartering effort
-                    brtr_msg = '' if r > 0 else r" plus {r} coins from bartering!"
-                    output(f"You received {capital_info[city]['return']} coins from your market{brtr_msg}!", 'green')
-                # Otherwise check if you have automated the city
-                elif self.workers[city]:
-                    self.bank[city] += capital_info[city]['return'] - 1 # 1 coin goes to the worker and money sent to bank
+        def receive_market_from_tending(city):
+            # Check if bartering will give you extra coins - does not count as an activation!
+            r = rbtwn(0, self.skills["Bartering"])
+            self.coins += capital_info[city]['return'] + r # Get the income plus the bartering effort
+            brtr_msg = '' if r <= 0 else f" plus {r} coins from bartering!"
+            self.tended_market[city] = False
+            coins_plurality = 'coin' if capital_info[city]['return'] == 1 else 'coins'
+            output(f"You received {capital_info[city]['return']} {coins_plurality} from your market{brtr_msg}!", 'green')
+        for city in cities:
+            if city in notwaring:
+                # If you have the city
+                if self.markets[city]:
+                    # If you tended the market (for 1 action) this round and still in the city.
+                    if (self.currenttile.tile == city) and self.tended_market[city]:
+                        receive_market_from_tending(city)
+                    # Otherwise check if you have automated the city
+                    elif self.workers[city]:
+                        if capital_info[city]['return'] <= 1:
+                            self.bank[city] += 0.5 # only half a coin goes to the bank.
+                        else:
+                            self.bank[city] += capital_info[city]['return'] - 1 # 1 coin goes to the worker and money sent to bank
+            elif self.tended_market[city]:
+                receive_market_from_tending(city)
         self.update_mainStatPage()
     def invest(self, item=None, replace=False, _=None):
         if self.paused:
@@ -4626,15 +4650,15 @@ class Quest:
                 if self.playerTrack.player.Reputation >= city_info[city]['entry']:
                     if not self.playerTrack.player.entry_allowed[city]:
                         output(f"You are now allowed to enter {city}!", 'green')
-                        output(f"Get {2*city_info[city]['entry']} and {3*city_info[city]['entry']} to buy a market/home and train respectively in {city}.", 'blue')
+                        output(f"Get {2*city_info[city]['entry']} to buy a market or home in {city}.", 'blue')
                     self.playerTrack.player.entry_allowed[city] = True
                 if self.playerTrack.player.Reputation >= (2*city_info[city]['entry']):
                     if not self.playerTrack.player.market_allowed[city]:
-                        output(f"You are now allowed to buy a market/home in {city}!", 'green')
-                        output(f"Get {3*city_info[city]['entry']} to train in {city}.", 'blue')
+                        output(f"You are now allowed to buy a market or home in {city}!", 'green')
+                        output(f"Get {3*city_info[city]['entry']} or purchase home to train in {city}.", 'blue')
                     self.playerTrack.player.market_allowed[city] = True
-                elif self.playerTrack.player.Reputation >= (3*city_info[city]['entry']):
-                    if not self.playerTrack.player.training_allowed['entry']:
+                elif (self.playerTrack.player.Reputation >= (3*city_info[city]['entry'])) and (not self.playerTrack.player.training_allowed[city]):
+                    if not self.playerTrack.player.training_allowed[city]:
                         output(f"You are now allowed to train in {city}!", 'green')
                     self.playerTrack.player.training_allowed[city] = True
         else:
@@ -4797,11 +4821,15 @@ class PlayerTrack(GridLayout):
         data = {}
         msg = f' Capital: [color={self.hclr}]{capital_info[city]["home_cap"]}[/color], Capacity: {capital_info[city]["capacity"]}'
         if self.player.homes[city]:
-            msg = 'Purchased! '+ msg
+            msg = 'Purchased!'+ msg
             data['disabled'] = True
             data['text'] = 'Owned!'
             data['background_color'] = (1, 10, 1, 0.8)
             data['color'] = (0, 0, 0, 1)
+        elif not self.player.market_allowed[city]:
+            msg = f"You need at least {2*city_info[city]['entry']} Reputation to purchase the home!" + msg
+            data['disabled'] = True
+            data['text'] = f"{2*city_info[city]['entry']} Reputation\nRequired"
         else:
             msg = f'Cost: [color=cfb53b]{capital_info[city]["home"]}[/color]' + msg
             data['text'] = 'Buy'
@@ -4830,6 +4858,10 @@ class PlayerTrack(GridLayout):
                 else:
                     data['background_color'] = (2, 2, 0.2, 1)
                     data['func'] = partial(self.player.get_worker, city)
+        elif not self.player.market_allowed[city]:
+            msg = f"You need at least {2*city_info[city]['entry']} Reputation to purchase the market!" + msg
+            data['text'] = f"{2*city_info[city]['entry']} Reputation\nRequired"
+            data['disabled'] = True
         else:
             msg = f'Cost: [color=cfb53b]{capital_info[city]["market"]}[/color]' + msg
             data['text'] = 'Buy'
@@ -5510,6 +5542,23 @@ def city_labor(_=None):
     for skill in P.currenttile.city_jobs:
         actions[skill_users[skill]] = partial(confirm_labor, skill)
     actionGrid(actions, False)
+    
+def TendMarket(_=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    if P.tended_market[P.currenttile.tile]:
+        output("You already tended the market this round, you will need to wait until next round!", 'yellow')
+        exitActionLoop(amt=0)()
+        return
+    notwaring = notAtWar(Skirmishes[0])
+    if P.currenttile.tile not in notwaring:
+        output("The city is currently in a skirmish - so there is little activity in the market. Try again later.", 'yellow')
+        exitActionLoop(amt=0)()
+        return
+    P.tended_market[P.currenttile.tile] = True
+    output("You tended the market this round. Stay in the city until the end of the round to receive your income.", 'green')
+    exitActionLoop(amt=1)()
 
 def city_consequence(city):
     P = lclPlayer()
@@ -5569,10 +5618,8 @@ def city_actions(city, _=None):
     if P.training_allowed[P.currenttile.tile]:
         actions['Adept'] = partial(city_trainer, T.adept_trainers, 'adept')
         actions['Master'] = partial(city_trainer, T.master_trainers, 'city')
-    # Removing market_allowed cap on trading and job postings, and limiting to buying homes and markets.
-#    if P.market_allowed[P.currenttile.tile]:
-#        actions['Market'] = partial(Trading, False)
-#        actions['Job Postings'] = city_labor
+    if P.markets[P.currenttile.tile]:
+        actions['Tend Market'] = TendMarket
     if (P is not None) and (P.currenttile.tile == 'scetcher'):
         actions['Duel'] = Duelling
     elif (P is not None) and (P.birthcity == city): 
@@ -5836,7 +5883,7 @@ class BoardPage(FloatLayout):
         self.startLblMsgs = []
         self.startLblTimes = []
         self.startLblLast = []
-        self.defaultRoundDelay = 3
+        self.defaultRoundDelay = 1
         for tiletype in positions:
             if tiletype == 'randoms':
                 continue
@@ -5925,8 +5972,8 @@ class BoardPage(FloatLayout):
         if delay == 0:
             self.startRound()
         else:
-            msg = f'New Round Starting in {delay}...' if delay == self.defaultRoundDelay else f'{delay}...'
-            self.sendFaceMessage(msg, None, 1, False)
+            #msg = f'New Round Starting in {delay}...' if delay == self.defaultRoundDelay else f'{delay}...'
+            #self.sendFaceMessage(msg, None, 1, False)
             Clocked(partial(self.startRoundDelay, delay-1), 1, 'start round delay')
     def startRound(self):
         self.localPlayer.savePlayer()
@@ -6724,7 +6771,8 @@ class LaunchPage(GridLayout):
         def run(_):
             Skirmishes[0] = message
             game_app.game_page.board_page.updateSkirmishIcons()
-            game_app.game_page.board_page.localPlayer.getIncome()
+            # Move getIncome to the end of the round, not the beginning.
+            #game_app.game_page.board_page.localPlayer.getIncome()
         Clocked(run, 0.2, 'SKIRMISH run')
     def MARKET(self, username, message):
         def run(msg=None, _=None):
