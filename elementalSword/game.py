@@ -2309,6 +2309,8 @@ class Player(Image):
         self.Capital = 0
         self.Reputation = 0
         self.Knowledge = 0
+        self.Fellowship = 0
+        self.Titles = 0
         
         # Constraints
         self.round_ended = False
@@ -2389,6 +2391,16 @@ class Player(Image):
                 self.reputation[stage, mission] = {}
         self.entry_allowed = {city: False for city in cities}
         self.entry_allowed[self.birthcity] = True
+        # Organizations
+        self.grand_bank = {'credit': 0, 'borrow_rounds': None, 'strikes': 0} # demetry grand central bank
+        self.ninja_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
+        self.meditation = {'class': 1, 'score': 0, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # pafiz meditation chamber
+        self.creature = {'delay': 0, 'lvl': 0, 'rounds': 0, 'bond': 0, 'combat_limit': 1, 'combats': 0}  # anafola castle of conjurors
+        self.reaquisition = {'class': 1, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # enfeir requisition guild
+        self.wizard_membership = None # Tamariza wizard tower
+        self.ancestrial_order = {'loot': 0, 'food': 0, 'fatigue': 0, 'minor': False, 'horse': False, 'major': False} # kubani ancestrial order
+        self.gifted_museum = 0 # starfex ancient magic museum
+        
         # Position Player
         self.currentcoord = positions[birthcity][0]
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
@@ -2707,8 +2719,10 @@ class Player(Image):
         self.parentBoard.sendFaceMessage(winner+' Wins the Game!', clr, 60)
     def checkGameEnd(self):
         trigger = True
-        all_tracks = np.array([self.Combat, self.Reputation, self.Knowledge, self.Capital])
-        if (4 in gameEnd) and np.any(all_tracks < gameEnd[4]):
+        all_tracks = np.array([self.Combat, self.Reputation, self.Knowledge, self.Capital, self.Fellowship])
+        if (5 in gameEnd) and np.any(all_tracks < gameEnd[5]):
+            trigger = False
+        if (4 in gameEnd) and (np.sum(all_tracks < gameEnd[4])<4):
             trigger = False
         if (3 in gameEnd) and (np.sum(all_tracks >= gameEnd[3])<3):
             trigger = False
@@ -2716,13 +2730,13 @@ class Player(Image):
             trigger = False
         if (1 in gameEnd) and np.all(all_tracks < gameEnd[1]):
             trigger = False
-        for track in ['Reputation', 'Combat', 'Capital', 'Combat']:
+        for track in ['Reputation', 'Combat', 'Capital', 'Combat', 'Fellowship']:
             if (track in gameEnd) and (self.__dict__[track] < gameEnd[track]):
                 trigger = False
         if trigger:
             output("You Triggered End Game!", 'blue')
             socket_client.send('[GAME END]', '')
-            socket_client.send('[END STATS]', {'Combat':self.Combat, 'Reputation':self.Reputation, 'Capital':self.Capital, 'Knowledge':self.Knowledge})
+            socket_client.send('[END STATS]', {'Combat':self.Combat, 'Reputation':self.Reputation, 'Capital':self.Capital, 'Knowledge':self.Knowledge, 'Fellowship':self.Fellowship, 'Titles':self.Titles})
     def updateSkill(self, skill, val=1, max_lvl=12):
         lvl_gain = max([0, min([max_lvl - self.skills[skill], val])])
         if lvl_gain != val:
@@ -3011,6 +3025,7 @@ class Table(GridLayout):
         self.cols = len(header)
         self.wrap_text = wrap_text
         self.header = header
+        self.header_color = header_color
         self.color_odd_rows = (0.3, 1, 1, 0.5) if color_odd_rows and (type(color_odd_rows) is bool) else color_odd_rows
         if bkg_color is not None:
             with self.canvas.before:
@@ -3029,7 +3044,7 @@ class Table(GridLayout):
                 # Take up some random space to make sure the super header is on left and header starts as normal
                 space_kwargs = {} if header_height_hint is None else {'height': Window.size[1]*header_height_hint, 'size_hint_y':None}
                 self.add_widget(Widget(**space_kwargs))
-        self.cells = {}
+        self.cells, self.header_widgets = {}, {}
         for h in header:
             self.cells[h] = []
             clr = ['[b]','[/b]'] if header_color is None else [f'[color={get_hexcolor(header_color)}][b]','[/b][/color]']
@@ -3040,6 +3055,7 @@ class Table(GridLayout):
                 L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',**hkwargs)
                 #L.text_size = L.size
                 if wrap_text: L.text_size = L.size
+            self.header_widgets[h] = L
             self.add_widget(L)
         # In the case that data is one-dimensional, then make it a matrix of one row.
         self.input_text_color = text_color
@@ -3094,6 +3110,9 @@ class Table(GridLayout):
                 self.add_widget(L)
                 self.cells[cell].append(L)
             i += 1
+    def update_header(self, header_name, new_value):
+        clr = ['[b]','[/b]'] if self.header_color is None else [f'[color={get_hexcolor(self.header_color)}][b]','[/b][/color]']
+        self.header_widgets[header_name].text = clr[0] + new_value + clr[1]
     def update_bkgSize(self, instance, value):
         self.bkg.size = self.size
         self.bkg.pos = self.pos
@@ -4703,7 +4722,8 @@ class PlayerTrack(GridLayout):
         # Combat Screen
         combatGrid = GridLayout(cols=1)
         self.combatDisplay = Button(text='',height=Window.size[1]*0.05,size_hint_y=None,color=(0,0,0,1),markup=True,background_color=(1,1,1,0))
-        self.Combat = Table(header=['Attribute','Base','Boost','Current'], data=self.get_Combat(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
+        self.Combat = Table(header=['Attribute','Base','Boost','Total'], data=self.get_Combat(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
+        self.Combat.update_header('Total', f'Total: {self.get_total_combat()}')
         self.armoryTable = ArmoryTable()
         combatGrid.add_widget(self.Combat)
         combatGrid.add_widget(self.armoryTable)
@@ -4746,7 +4766,7 @@ class PlayerTrack(GridLayout):
             for tB in self.tabs.children:
                 tB.disabled = True if tB == tabButton else False
                 tB.color = (0, 0, 0, 1) if tB == tabButton else (1, 1, 1, 1)
-        self.tabs = GridLayout(cols=5, height=0.07*Window.size[1], size_hint_y=None)
+        self.tabs = GridLayout(cols=7, height=0.07*Window.size[1], size_hint_y=None)
         self.tab_color = (0.1, 0.6, 0.5, 1)
         self.combatTab = Button(text=f"Combat: [color={self.hclr}]{player.Combat}[/color]",markup=True,background_color=self.tab_color)
         self.combatTab.bind(on_press=partial(changeTab, 'Combat'))
@@ -4756,12 +4776,18 @@ class PlayerTrack(GridLayout):
         self.capitalTab.bind(on_press=partial(changeTab, "Capital"))
         self.reputationTab = Button(text=f'Reputation: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
         self.reputationTab.bind(on_press=partial(changeTab, "Reputation"))
+        self.FellowshipTab = Button(text=f'Fellowship: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
+        self.FellowshipTab.bind(on_press=partial(changeTab, "Fellowship"))
+        self.titlesTab = Button(text=f'Titles: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
+        self.titlesTab.bind(on_press=partial(changeTab, "Titles"))
         self.itemsTab = Button(text='Items: 0/3',markup=True,background_color=self.tab_color)
         self.itemsTab.bind(on_press=partial(changeTab, 'Items'))
         self.tabs.add_widget(self.combatTab)
         self.tabs.add_widget(self.knowledgeTab)
         self.tabs.add_widget(self.capitalTab)
         self.tabs.add_widget(self.reputationTab)
+        self.tabs.add_widget(self.FellowshipTab)
+        self.tabs.add_widget(self.titlesTab)
         self.tabs.add_widget(self.itemsTab)
         # Add widgets in order
         self.add_widget(self.tabs)
@@ -4793,6 +4819,8 @@ class PlayerTrack(GridLayout):
                          {'text':str(self.player.boosts[i]),'disabled':True,'background_color':(1,1,1,0),'color':(0,0,0,1)},
                          current])
         return data
+    def get_total_combat(self):
+        return int(np.sum(self.player.current))
     def get_Knowledge(self):
         data = []
         for skill in self.player.skills:
@@ -4980,6 +5008,7 @@ class PlayerTrack(GridLayout):
         return data
     def updateAll(self):
         self.Combat.update_data_cells(self.get_Combat(), False)
+        self.Combat.update_header(self, 'Total', f'Total: {self.get_total_combat()}')
         self.combatTab.text=f"Combat: [color={self.hclr}]{self.player.Combat}[/color]"
         self.Knowledge.update_data_cells(self.get_Knowledge(), False)
         self.knowledgeTab.text=f'Knowledge: [color={self.hclr}]{self.player.Knowledge}[/color]'
@@ -6874,7 +6903,7 @@ class LaunchPage(GridLayout):
         def run(_):
             P = lclPlayer()
             output(f"{username} Triggered End Game!", 'blue')
-            socket_client.send('[END STATS]', {'Combat':P.Combat, 'Reputation':P.Reputation, 'Capital':P.Capital, 'Knowledge':P.Knowledge})
+            socket_client.send('[END STATS]', {'Combat':P.Combat, 'Reputation':P.Reputation, 'Capital':P.Capital, 'Knowledge':P.Knowledge, 'Fellowship':P.Fellowship, 'Titles':P.Titles})
         Clocked(run, 0.1, 'GAME_END run')
     def FINAL_END_STATS(self, username, message):
         def run(_):
