@@ -2677,7 +2677,7 @@ class Player(Image):
         if (fatigue > 0) and (self.paralyzed_rounds == 0):
             # Not activated, but can be used.
             survival = self.skills["Survival"]
-            r = rbtwn(1, 16, None, survival, 'Survival ') # Adept survival gives 0.5 chance of no fatigue, while masters have 0.75 chance of no fatigue.
+            r = rbtwn(1, 18, None, survival, 'Survival ') # At level 9 expect every 2nd action to not consume fatigue.
             if r <= survival:
                 self.useSkill("Survival")
                 fatigue -= 1
