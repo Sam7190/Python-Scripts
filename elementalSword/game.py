@@ -4842,6 +4842,8 @@ def level_up_color(level, min_lvl=1, max_lvl=12):
 def toReadableTime(secondsElapsed, roundTo=2):
     if secondsElapsed is None:
         return '-'
+    if secondsElapsed < 0:
+        secondsElapsed = -secondsElapsed
     if secondsElapsed < 60:
         return f"{np.round(secondsElapsed, roundTo)} seconds"
     elif secondsElapsed < 3600:
@@ -5097,13 +5099,15 @@ class PlayerTrack(GridLayout):
         data = []
         for title in self.player.titleOrder:
             T = self.player.titles[title]
-            value = str(T['value']) if title != 'decisive' else toReadableTime(-T['value'], 2)
+            value = str(T['value']) if title != 'decisive' else toReadableTime(T['value'], 2)
             if T['maxRecord']['holder'] == self.player.username:
                 holder = 'You'
             elif T['maxRecord']['value'] == T['value']:
                 holder = 'Tied - but not held'
+            elif T['maxRecord']['holder'] is None:
+                holder = '-'
             else:
-                holder = str(T['maxRecord']['value']) if title != 'decisive' else toReadableTime(-T['maxRecord']['value'], 2)
+                holder = str(T['maxRecord']['value']) if title != 'decisive' else toReadableTime(T['maxRecord']['value'], 2)
             data.append([title, T['description'], T['titleVP'], T['minTitleReq'], value, holder])
         return data
     def get_Items(self):
