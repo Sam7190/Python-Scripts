@@ -620,7 +620,7 @@ class FightPage(FloatLayout):
                 if self.foestats[agil_i] != prior: self.f_affected_stats.add('Agility')
         # First add background based on tile encounter
         if name == 'Sparring Partner':
-            bkgSource = f'images\\resized\\background\\sparringground.png'
+            bkgSource = 'images\\resized\\background\\sparringground.png'
         elif background_img is None:
             bkgSource = f'images\\resized\\background\\{self.P.currenttile.tile}.png' if (self.P.currenttile.tile+'.png') in os.listdir('images\\background') else f'images\\resized\\background\\{self.P.currenttile.tile[:-1]}.png'
         else:
@@ -667,7 +667,7 @@ class FightPage(FloatLayout):
         self.msgBoard = Button(text=msg, background_color=(1,1,1,0.6), color=(0.3, 0.3, 0.7, 1), background_disabled_normal='', disabled=True, pos_hint={'x':0.32, 'y':0.8}, size_hint=(0.36, 0.1))#, markup=True)
         self.add_widget(self.msgBoard)
         # Run or Fight
-        self.runButton = Button(text=f"", background_color=(1, 1, 0, 1), background_normal='', color=(0,0,0,1), pos_hint={'x':0.32, 'y':0}, size_hint=(0.17, 0.09))
+        self.runButton = Button(text="", background_color=(1, 1, 0, 1), background_normal='', color=(0,0,0,1), pos_hint={'x':0.32, 'y':0}, size_hint=(0.17, 0.09))
         self.set_runFTG(self.foecateg)
         self.runButton.bind(on_press=self.run)
         category = ['Very Weak', 'Weak', 'Match', 'Strong', 'Very Strong']
@@ -892,6 +892,10 @@ class FightPage(FloatLayout):
                         # Assumption: If not coins, then must be an item
                         output(f"Rewarded {int(amt)} {rwd}!", 'green')
                         self.P.addItem(rwd, int(amt))
+            # Update title
+            self.P.title['brave']['currentStreak'] += self.foelvl
+            if self.P.title['brave']['currentStreak'] > self.P.title['brave']['value']:
+                self.P.updateTitleValue('brave', self.P.title['brave']['currentStreak'] - self.P.title['brave']['value'])
             # Training with Sparring partner does not gaurantee you a level increase like with others.
             levelsup = (self.foecateg/2) ** 2
             if self.foename == 'Sparring Partner': levelsup *= 0.65
@@ -913,6 +917,9 @@ class FightPage(FloatLayout):
                         random_atr = list(self.valid_attributes.keys())[rbtwn(0, len(self.valid_attributes)-1)]
                         output(f"Leveling up {random_atr}!", 'green')
                         self.P.updateAttribute(random_atr)
+                        if self.P.trained_abilities[random_atr]:
+                            self.P.trained_abilities[random_atr] = False
+                            self.P.updateTitleValue('apprentice', self.P.get_level(random_atr))
                     self.endFight()
             else:
                 output(f"You don't level up, level up remainder: {round(self.P.combatxp,2)}", 'yellow')
@@ -932,6 +939,9 @@ class FightPage(FloatLayout):
             output(f"Leveling up {atr}!", 'green')
             self.P.updateAttribute(atr)
             self.levelsup -= 1
+            if self.P.trained_abilities[atr]:
+                self.P.trained_abilities[atr] = False
+                self.P.updateTitleValue('apprentice', self.P.get_level(atr))
             if self.levelsup > 0:
                 self.prompt_levelup()
             else:
@@ -942,6 +952,8 @@ class FightPage(FloatLayout):
         self.valid_attributes = {}
         for atr in self.check_attributes:
             if self.P.combat[self.P.attributes[atr]] < 8:
+                self.valid_attributes[atr] = partial(self.levelup, atr)
+            elif self.P.trained_abilities[atr]:
                 self.valid_attributes[atr] = partial(self.levelup, atr)
     def prompt_levelup(self):
         self.check_valid_levelup()
@@ -1260,10 +1272,20 @@ def sellItem(item, to_trader, barter=None, _=None):
                 P.bartering_mode = 2
                 sellprice += 2
                 P.coins += sellprice
+                P.updateTitleValue('merchant', sellprice)
+                if to_trader:
+                    if P.currenttile.trader_id not in P.titles['trader']['unique_traders']:
+                        P.titles['trader']['unique_traders'].add(P.currenttile.trader_id)
+                        P.updateTitleValue('trader', 1)
             else:
                 P.bartering_mode = 1
                 sellprice += 1
                 P.coins += sellprice
+                P.updateTitleValue('merchant', sellprice)
+                if to_trader:
+                    if P.currenttile.trader_id not in P.titles['trader']['unique_traders']:
+                        P.titles['trader']['unique_traders'].add(P.currenttile.trader_id)
+                        P.updateTitleValue('trader', 1)
             # Its basically inverted getItem
             output(f"Sold {item} for {sellprice}.")
             getItem(item, -1, 'minor', False, 1)()
@@ -1274,6 +1296,11 @@ def sellItem(item, to_trader, barter=None, _=None):
         sellprice += P.bartering_mode
         output(f"Sold {item} for {sellprice}.")
         P.coins += sellprice
+        P.updateTitleValue('merchant', sellprice)
+        if to_trader:
+            if P.currenttile.trader_id not in P.titles['trader']['unique_traders']:
+                P.titles['trader']['unique_traders'].add(P.currenttile.trader_id)
+                P.updateTitleValue('trader', 1)
         getItem(item, -1, 'minor', False)()
 
 def buyItem(item, cost, from_trader, amt=1, consume='minor'):
@@ -1292,6 +1319,10 @@ def buyItem(item, cost, from_trader, amt=1, consume='minor'):
                 output(f"Bought {item} for {cost}")
             else:
                 output("Bought {amt} {item} for {cost*amt}")
+            if from_trader:
+                if P.currenttile.trader_id not in P.titles['trader']['unique_traders']:
+                    P.titles['trader']['unique_traders'].add(P.currenttile.trader_id)
+                    P.updateTitleValue('trader', 1)
             if from_trader and (item in P.currenttile.trader_wares):
                 P.currenttile.buy_from_trader(item)
             getItem(item, amt, consume, False, 1)()
@@ -1446,6 +1477,7 @@ def Train(abilities, master, confirmed, _=None):
     if P.paused:
         return
     usingLesson = True if (abilities == 'stealth') and (master == 'city') and hasattr(P.PlayerTrack.Quest.quests[5, 7], 'used_lesson') and (not P.PlayerTrack.Quest.quests[5, 7].used_lesson) and (P.PlayerTrack.Quest.quests[2, 8].coord == P.currentcoord) else False
+    requirement = 'go to combat' if abilities in P.attributes else 'use the skill successfully'
     if not confirmed:
         if master == 'monk':
             cost = 0
@@ -1506,14 +1538,16 @@ def Train(abilities, master, confirmed, _=None):
                 Train(abilities, master, False)
             elif rbtwn(1,3) == 1:
                 output(f"You successfully leveled up in {abilities}",'green')
-                P.levelup(abilities,1,8)
+                newlevel = P.levelup(abilities,1,8)
+                P.updateTitleValue('apprentice', newlevel)
                 exitActionLoop(None,1)()
             else:
                 critthink = P.activateSkill('Critical Thinking')
                 if rbtwn(1,12) <= critthink:
                     P.useSkill('Critical Thinking')
                     output(f"You successfully leveled up in {abilities}",'green')
-                    P.levelup(abilities,1,8)
+                    newlevel = P.levelup(abilities,1,8)
+                    P.updateTitleValue('apprentice', newlevel)
                     exitActionLoop(None,1)()
                 else:
                     output("You were unsuccessful.",'red')
@@ -1542,17 +1576,24 @@ def Train(abilities, master, confirmed, _=None):
                 P.levelup(abilities,1)
                 if usingLesson: P.PlayerTrack.Quest.quests[5, 7].used_lesson = True
                 exitActionLoop(None,1)()
+            elif P.trained_abilities[abilities]:
+                output(f"You have already unlocked the potential to level up {abilities}, now you need to {requirement} to level up!", 'blue')
+                exitActionLoop(None,0 if master=='city' else 1)()
             elif rbtwn(1,4) == 1:
-                output(f"You successfully leveled up in {abilities}",'green')
-                P.levelup(abilities,1)
+                output(f"You successfully unlocked the potential to level up {abilities}! Now {requirement} to level up!", 'green')
+                # output(f"You successfully leveled up in {abilities}",'green')
+                # P.levelup(abilities,1)
+                P.trained_abilities[abilities] = True
                 if usingLesson: P.PlayerTrack.Quest.quests[5, 7].used_lesson = True
                 exitActionLoop(None,1)()
             else:
                 critthink = P.activateSkill('Critical Thinking')
                 if rbtwn(1,16) <= critthink:
                     P.useSkill('Critical Thinking', 2, 7)
-                    output(f"You successfully leveled up in {abilities}",'green')
-                    P.levelup(abilities,1)
+                    output(f"You successfully unlocked the potential to level up {abilities}! Now {requirement} to level up!", 'green')
+                    # output(f"You successfully leveled up in {abilities}",'green')
+                    # P.levelup(abilities,1)
+                    P.trained_abilities[abilities] = True
                     if usingLesson: P.PlayerTrack.Quest.quests[5, 7].used_lesson = True
                     exitActionLoop(None,1)()
                 else:
@@ -2369,6 +2410,10 @@ class Player(Image):
         self.xps = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
         for skl, val in cities[self.birthcity]['Knowledges']:
             self.updateSkill(skl, val)
+        # Combination of Abilities for training
+        self.trained_abilities = {**self.skills, **self.attributes} # This syntax requires Python 3.5 or greater
+        for ability in self.trained_abilities:
+            self.trained_abilities[ability] = False
         #Capital
         self.cityorder = sorted(cities)
         self.homes = {city: False for city in cities}
@@ -2391,7 +2436,7 @@ class Player(Image):
                 self.reputation[stage, mission] = {}
         self.entry_allowed = {city: False for city in cities}
         self.entry_allowed[self.birthcity] = True
-        # Organizations
+        # Fellowships
         self.grand_bank = {'credit': 0, 'borrow_rounds': None, 'strikes': 0} # demetry grand central bank
         self.ninja_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
         self.meditation = {'class': 1, 'score': 0, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # pafiz meditation chamber
@@ -2400,12 +2445,63 @@ class Player(Image):
         self.wizard_membership = None # Tamariza wizard tower
         self.ancestrial_order = {'loot': 0, 'food': 0, 'fatigue': 0, 'minor': False, 'horse': False, 'major': False} # kubani ancestrial order
         self.gifted_museum = 0 # starfex ancient magic museum
+        # Titles
+        self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 10, 'value':0, 'description': 'Most unique tiles traveled upon.'},
+                      'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
+                      'courageous': {'titleVP': 3, 'minTitleReq': 3, 'value':0, 'description': 'Most rounds spent in skirmishing cities (all actions per round).'},
+                      'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'description': 'Longest continuous Tamariza Wizard Tower premium holder.'},
+                      'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'description': 'Highest credit score from the Demetry Grand Bank'},
+                      'traveler': {'titleVP': 3, 'minTitleReq': 25, 'value':0, 'description': 'Most road tile movement.'},
+                      'apprentice': {'titleVP': 4, 'minTitleReq': 100, 'value':0, 'description': 'Most cumulative levels gained from trainers.'},
+                      'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'description': 'Most books checked out from the Benefriege public library, and learned from.'},
+                      'laborer': {'titleVP': 3, 'minTitleReq': 10, 'value':0, 'description': 'Most jobs worked.'},
+                      'valuable': {'titleVP': 2, 'minTitleReq': 20, 'value':0, 'description': 'Most money earned from jobs worked.'},
+                      'entrepreneur': {'titleVP': 3, 'minTitleReq': 50, 'value':0, 'description': 'Most money received from owned markets.'},
+                      'trader': {'titleVP': 4, 'minTitleReq': 5, 'value':0, 'unique_traders': set(), 'description': 'Most trading (buy or sell) with unique traders.'},
+                      'negotiator': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'description': 'Most successful persuasions.'},
+                      'steady': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'description': 'Most rounds started with zero fatigue.'},
+                      'grinder': {'titleVP': 3, 'minTitleReq': 100, 'value':0, 'description': 'Most fatigue taken.'},
+                      'merchant': {'titleVP': 2, 'minTitleReq': 40, 'value':0, 'description': 'Most coin made from selling items to merchants or traders.'},
+                      'brave': {'titleVP': 5, 'minTitleReq': 80, 'value':0, 'currentStreak': 0, 'description': 'Sum total level of continuous enemies defeated without restoring HP.'},
+                      'decisive': {'titleVP': 1, 'minTitleReq': -float('inf'), 'value':None, 'sum': 0, 'round': 0, 'startTime': time(), 'description': 'Shortest average round time.'},
+                      'champion': {'titleVP': 7, 'minTitleReq': 1, 'value':0, 'description': 'Most class V Scetcher Tournament titles won.'},
+                      'resurrector': {'titleVP': 10, 'minTitleReq': 1, 'value':0, 'description': 'Strongest magic sword revived with ability unlocked.'}}
+        for key in self.titles:
+            self.titles[key]['maxRecord'] = {'value': 0, 'holder': None, 'title': key}
+        self.titleOrder = [T[0] for T in sorted(self.titles.items(), key=lambda kv: kv[1]['titleVP'])]
         
         # Position Player
         self.currentcoord = positions[birthcity][0]
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
         self.moveto(self.currentcoord, False, True)
         self.size_hint = (self.imgSize[0]/xsize, self.imgSize[1]/ysize)
+    def updateTitleValue(self, title, value=1):
+        if title == 'decisive':
+            # value is ignored in this case
+            endTime = time()
+            self.titles[title]['sum'] += (endTime - self.titles[title]['startTime'])
+            self.titles[title]['round'] += 1
+            self.titles[title]['value'] =  - (self.titles[title]['sum'] / self.titles[title]['rounds']) # Force negative for consistency in finding max holder
+        else:
+            self.titles[title]['value'] += value
+        if (self.titles[title]['value'] >= self.titles[title]['minTitleReq']) and (self.titles[title]['value'] > self.titles[title]['maxRecord']['value']):
+            output(f"You now hold The {title.capitalize()} title!", 'green')
+            self.titles[title]['maxRecord'] = {'value': self.titles[title]['value'], 'holder': self.username, 'title': title}
+            self.Titles += self.titles[title]['titleVP']
+            socket_client.send('[TITLE]', self.titles[title]['maxRecord'])
+        if hasattr(self, 'PlayerTrack'):
+            self.PlayerTrack.updateTitles() # [INCOMPLETE] instead just update the cells that changed
+    def newMaxRecord(self, maxRecord):
+        previousRecord = self.titles[maxRecord['title']]['maxRecord']
+        if previousRecord['holder'] == self.username:
+            # If this user was the last holder, then remove Title VP
+            self.Titles -= self.titles[maxRecord['title']]['titleVP']
+            output(f"You lost The {maxRecord['title'].capitalize()} title to {maxRecord['holder']}", 'red')
+        else:
+            output(f"{maxRecord['holder']} now holds The {maxRecord['title'].capitalize()} title!", 'blue')
+        self.titles[maxRecord['title']]['maxRecord'] = maxRecord
+        if hasattr(self, 'PlayerTrack'):
+            self.PlayerTrack.updateTitles() # [INCOMPLETE] instead just update the cells that changed
     def savePlayer(self):
         self.PlayerTrack.Quest.saveTable()
         self.PlayerTrack.craftingTable.saveTable()
@@ -2494,6 +2590,13 @@ class Player(Image):
             self.currenttile.source = f'images\\tile\\{self.currenttile.tile}.png' # remove green outline of tile moving away from.
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
+            if not self.currenttile.traveledOn:
+                self.updateTitleValue('explorer')
+                self.currenttile.traveledOn = True
+            if self.currenttile.tile != self.birthcity:
+                self.titles['loyal']['in_birthcity'] = False
+            elif self.currenttile.tile == 'road':
+                self.updateTitleValue('traveler', 1)
             self.currenttile.source = f'images\\ontile\\{self.currenttile.tile}.png' # outline new tile with green border.
             # Quest completions/consequences (if any)
             if hasattr(self, 'PlayerTrack'):
@@ -2517,6 +2620,7 @@ class Player(Image):
             # Collect any money waiting at bank
             if (self.currenttile.tile in cities):
                 self.coins += self.bank[self.currenttile.tile]
+                self.updateTitleValue('entrepreneur', self.bank[self.currenttile.tile])
                 self.bank[self.currenttile.tile] = 0
                 if hasattr(self, 'PlayerTrack'):
                     self.PlayerTrack.craftingTable.enable_selling()
@@ -2574,7 +2678,11 @@ class Player(Image):
                 self.fatigue += 1
             self.fatigue = max([0, self.fatigue-rest_rate])
             hp_idx = self.attributes['Hit Points']
+            prior_hp = self.current[hp_idx]
             self.current[hp_idx] = min([self.combat[hp_idx]+self.boosts[hp_idx], self.current[hp_idx]+rest_rate])
+            if prior_hp != self.current[hp_idx]:
+                # If resting increases hp, then reset current streak.
+                self.titles['brave']['currentStreak'] = 0
             output(f'[ACTION {self.max_actions-self.actions+1}] You rested {rest_rate} fatigue/HP')
             self.takeAction(0, False, True)
     def eat(self, food, _=None):
@@ -2596,8 +2704,10 @@ class Player(Image):
                 ftg += 1
             self.useSkill("Survival")
         restoring_list = []
-        if ftg>0: restoring_list.append(f'FTG by {ftg}')
-        if hp>0: restoring_list.append(f'HP by {hp}')
+        if ftg > 0: restoring_list.append(f'FTG by {ftg}')
+        if hp > 0: 
+            restoring_list.append(f'HP by {hp}')
+            self.title['brave']['currentStreak'] = 0
         output(f'Restored {", ".join(restoring_list)}','green')
         self.addItem(food, -1)
         self.fatigue = max([0, self.fatigue - ftg])
@@ -2609,6 +2719,10 @@ class Player(Image):
         self.round_ended = True
         output(f"{self.username} Ended Round")
         print(self.parentBoard.Players, game_app.launch_page.usernames)
+        # Update local end round stats:
+        if self.titles['loyal']['in_birthcity']:
+            self.updateTitleValue('loyal', 1)
+        self.updateTitleValue('decisive')
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
@@ -2685,6 +2799,7 @@ class Player(Image):
             if fatigue > 0:
                 output("Took normal fatigue this action")
                 self.takeDamage(0,fatigue)
+                self.updateTitleValue('grinder', fatigue)
         self.minor_actions = self.max_minor_actions # Refresh minor actions
         self.ate = 0 # Refresh how much one can eat
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
@@ -2764,6 +2879,12 @@ class Player(Image):
             if lvl <= max_lvl_xp: self.addXP(skill, xp, 'Activation: ')
         return actv_lvl
     def useSkill(self, skill, xp=1, max_lvl_xp=5):
+        if skill == 'Persuasion':
+            self.updateTitleValue('negotiator', 1)
+        if self.trained_abilities[skill]:
+            newlevel = self.levelup(skill, 1, 12)
+            self.trained_abilities[skill] = False
+            self.updateTitleValue('apprentice', newlevel)
         if self.skills[skill] <= max_lvl_xp:
             self.addXP(skill, xp, 'Successful: ')
     def updateAttribute(self, attribute, val=1, max_lvl=12):
@@ -2785,6 +2906,7 @@ class Player(Image):
             self.updateSkill(ability, val, max_lvl)
         else:
             self.updateAttribute(ability, val, max_lvl)
+        return self.get_level(ability)
     def get_level(self, ability):
         if ability in self.skills:
             return self.skills[ability]
@@ -2884,6 +3006,7 @@ class Player(Image):
             # Check if bartering will give you extra coins - does not count as an activation!
             r = rbtwn(0, self.skills["Bartering"])
             self.coins += capital_info[city]['return'] + r # Get the income plus the bartering effort
+            self.updateTitleValue('entrepreneur', capital_info[city]['return'] + r)
             brtr_msg = '' if r <= 0 else f" plus {r} coins from bartering!"
             self.tended_market[city] = False
             coins_plurality = 'coin' if capital_info[city]['return'] == 1 else 'coins'
@@ -2999,7 +3122,7 @@ class Player(Image):
                 output(f"{item} doesn't exit in the inventory!", 'yellow')
                 return
             elif (item == 'fruit') and ((self.items[item] - amt) <= 0) and (self.PlayerTrack.Quest.quests[1, 8].status == 'started') and hasattr(self.PlayerTrack.Quest.quests[1, 8], 'has_mammoth') and self.PlayerTrack.Quest.quests[1, 8].has_mammoth:
-                output(f"You lost your fruit! The baby mammoth stops following you! You will need to find it again.", 'red')
+                output("You lost your fruit! The baby mammoth stops following you! You will need to find it again.", 'red')
                 self.PlayerTrack.Quest.quests[1, 8].has_mammoth = False
         self.item_count += amt
         if item in self.items:
@@ -3270,7 +3393,7 @@ class ArmoryTable(GridLayout):
         if self.aspace[space][slot].text not in gameItems['Smithing']:
             output("Space is already empty!", 'yellow')
         elif not confirmed:
-            output(f"Would you like to remove and destroy this item?", "blue")
+            output("Would you like to remove and destroy this item?", "blue")
             actionGrid({"Yes":partial(self.rmv_slot, space, slot, True), "No":exitActionLoop(amt=0)}, False, False)
         else:
             prev = None
@@ -3417,7 +3540,7 @@ class ArmoryTable(GridLayout):
     def sell(self, space, barter=None, _=None):
         if self.P.paused:
             return
-        elif (self.P.currenttile not in cities) and (self.P.currenttile.trader_rounds==0):
+        elif (self.P.currenttile.tile not in cities) and (self.P.currenttile.trader_rounds==0):
             # If you are not in a city or not in any trading places, then you can't sell the item
             return
         elif (self.space_items[space]==1) and (self.aspace[space][1].text in self.P.unsellable):
@@ -3442,6 +3565,7 @@ class ArmoryTable(GridLayout):
                     sellprice += 1
                 self.P.coins += sellprice
                 output(f"Sold smithed piece for {sellprice}.")
+                self.P.updateTitleValue('merchant', sellprice)
                 self.rmv(space, True)
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
@@ -3450,6 +3574,7 @@ class ArmoryTable(GridLayout):
             sellprice += self.P.bartering_mode
             output(f"Sold smithed piece for {sellprice}.")
             self.P.coins += sellprice
+            self.P.updateTitleValue('merchant', sellprice)
             self.rmv(space, True)
                 
 class CraftingTable(GridLayout):
@@ -3559,7 +3684,7 @@ class CraftingTable(GridLayout):
             self.P.addItem(self.cspace[space][slot].text, 1)
             self.reassign_lbl(space, slot)
         elif not confirmed:
-            output(f"Would you like to remove and destroy this item?", "blue")
+            output("Would you like to remove and destroy this item?", "blue")
             actionGrid({"Yes":partial(self.rmv_slot, space, slot, True), "No":exitActionLoop(amt=0)}, False, False)
         else:
             prev = None
@@ -3639,7 +3764,7 @@ class CraftingTable(GridLayout):
     def sell_craft(self, space, barter=None, _=None):
         if self.P.paused:
             return
-        elif (self.P.currenttile not in cities) and (self.P.currenttile.trader_rounds==0):
+        elif (self.P.currenttile.tile not in cities) and (self.P.currenttile.trader_rounds==0):
             # If you are not in a city or not in any trading places, then you can't sell the item
             return
         elif (self.space_items[space]==1) and (self.cspace[space][1].text in self.P.unsellable):
@@ -3664,6 +3789,7 @@ class CraftingTable(GridLayout):
                     sellprice += 1
                 self.P.coins += sellprice
                 output(f"Sold craft {space+1} for {sellprice}.")
+                self.updateTitleValue('merchant', sellprice)
                 self.rmv_craft(space, True)
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
@@ -3672,6 +3798,7 @@ class CraftingTable(GridLayout):
             sellprice += self.P.bartering_mode
             output(f"Sold craft {space+1} for {sellprice}.")
             self.P.coins += sellprice
+            self.updateTitleValue('merchant', sellprice)
             self.rmv_craft(space, True)
     def getItems(self, space):
         items = set()
@@ -3746,7 +3873,7 @@ def GaurdHome(_=None):
     def Consequence():
         P.PlayerTrack.Quest.update_quest_status((1, 3), 'failed')
     B.count = B.count + 1 if hasattr(B, 'count') else 1
-    output(f"You spent an action gaurding the house")
+    output("You spent an action gaurding the house")
     if B.count >= 2:
         encounter('Robber', [6, 6], [P.combatstyle], Reward, consequence=Consequence, background_img='images\\resized\\background\\cottage.png')
     else:
@@ -3880,7 +4007,7 @@ def BeginProtection(_=None):
 def MotherSerpent(_=None):
     P = lclPlayer()
     coord, distance, path = P.currenttile.findNearest('pond')
-    output(f"The pond where the Mother Serpent lives is tinted green on the map!", 'blue')
+    output("The pond where the Mother Serpent lives is tinted green on the map!", 'blue')
     P.PlayerTrack.Quest.quests[2, 4].pond = coord
     P.parentBoard.gridtiles[coord].color = (1, 1.5, 1, 1)
     P.group["Companion"] = npc_stats(35)
@@ -3888,7 +4015,7 @@ def MotherSerpent(_=None):
 def LibrariansSecret(_=None):
     P = lclPlayer()
     coord, distance, path = P.currenttile.findNearest('oldlibrary')
-    output(f"The old library where they librarian lost his book is tinted green on the map!", 'blue')
+    output("The old library where they librarian lost his book is tinted green on the map!", 'blue')
     P.PlayerTrack.Quest.quests[2, 5].coord = coord
     P.parentBoard.gridtiles[coord].color = (1, 1.5, 1, 1)
     P.PlayerTrack.Quest.quests[2, 5].has_book = False
@@ -3982,7 +4109,7 @@ def FeedThePoor(_=None):
         output(f"You have distributed a total of {P.PlayerTrack.Quest.quests[3, 1].food_given} food!", 'blue')
         if P.PlayerTrack.Quest.quests[3, 1].food_given >= 10:
             P.PlayerTrack.Quest.update_quest_status((3, 1), 'complete')
-            output(f"Your max eating per action increases by 2!", 'green')
+            output("Your max eating per action increases by 2!", 'green')
             P.max_eating += 2
         exitActionLoop('minor')
     if not hasattr(P.PlayerTrack.Quest.quests[3, 1], 'food_given'):
@@ -4254,7 +4381,7 @@ def FindAndPursuadeLeader(_=None):
     r = rbtwn(1, 10, None, excavating, "Excavating ")
     if r <= excavating:
         P.useSkill("Excavating")
-        output(f"You found a leader!")
+        output("You found a leader!")
         persuasion = P.activateSkill("Persuasion")
         r = rbtwn(1, 12, None, persuasion, "Persuasion ")
         if r <= persuasion:
@@ -4484,7 +4611,7 @@ def ConvinceBarterMaster(_=None):
         P.PlayerTrack.Quest.update_quest_status((5, 5), 'complete')
         P.max_minor_actions += 4
     else:
-        output(f"Unable to convince the Bartering Master", 'yellow')
+        output("Unable to convince the Bartering Master", 'yellow')
     exitActionLoop()()
     
 def HighlightMammothTile(_=None):
@@ -4607,7 +4734,7 @@ class Quest:
                 self.quests[stage, mission] = B
                 B.bind(on_press=self.activate)
             data.append(datarow)
-        self.QuestTable = Table(['Mission','Stage 1\nCommon Folk', 'Stage 2\nNoblemen', 'Stage 3\nLocal Leaders', 'Stage 4\nCity Counsel', 'Stage 5\nMayor'], data, header_color=(50, 50, 50), header_as_buttons=True)
+        self.QuestTable = Table(['Mission','Stage 1\nCommon Folk', 'Stage 2\nNoblemen', 'Stage 3\nDistrict Leaders', 'Stage 4\nCity Counsel', 'Stage 5\nMayor'], data, header_color=(50, 50, 50), header_as_buttons=True)
         qgrid.add_widget(self.QuestTable)
         qgrid.add_widget(self.questDisplay)
         screen = Screen(name = 'Reputation')
@@ -4712,6 +4839,15 @@ def level_up_color(level, min_lvl=1, max_lvl=12):
     rgb = skcolor.lab2rgb((44.12, (178/(max_lvl-1))*(level-1)-50, 48.2))
     return (rgb[0], rgb[1], rgb[2], 1)
 
+def toReadableTime(secondsElapsed, roundTo=2):
+    if secondsElapsed is None:
+        return '-'
+    if secondsElapsed < 60:
+        return f"{np.round(secondsElapsed, roundTo)} seconds"
+    elif secondsElapsed < 3600:
+        return f"{np.round(secondsElapsed / 60, roundTo)} minutes"
+    return f"{np.round(secondsElapsed / 3600, roundTo)} hours"
+
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
         super().__init__(**kwargs)
@@ -4751,6 +4887,19 @@ class PlayerTrack(GridLayout):
         self.track_screen.add_widget(screen)
         # Reputation Screen
         self.Quest = Quest(self)
+        # Fellowship Screen
+        fellowshipGrid = GridLayout(cols=1)
+        screen = Screen(name='Fellowship')
+        
+        screen.add_widget(fellowshipGrid)
+        self.track_screen.add_widget(screen)
+        # Titles Screen
+        titleGrid = GridLayout(cols=1)
+        self.Titles = Table(header=['Title', 'Description', 'VP', 'Minimum Req', 'Your Record', 'Highest Record'], data=self.get_Titles(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True)
+        titleGrid.add_widget(self.Titles)
+        screen = Screen(name='Titles')
+        screen.add_widget(titleGrid)
+        self.track_screen.add_widget(screen)
         # Item Screen
         itemGrid = GridLayout(cols=1)
         self.Items = Table(header=['Item', 'Quantity', 'Sell', 'Use'], data=self.get_Items(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True)
@@ -4944,6 +5093,19 @@ class PlayerTrack(GridLayout):
                          self.villageDisplay(city),
                          self.villageAwaitingDisplay(city)])
         return data
+    def get_Titles(self):
+        data = []
+        for title in self.player.titleOrder:
+            T = self.player.titles[title]
+            value = str(T['value']) if title != 'decisive' else toReadableTime(-T['value'], 2)
+            if T['maxRecord']['holder'] == self.player.username:
+                holder = 'You'
+            elif T['maxRecord']['value'] == T['value']:
+                holder = 'Tied - but not held'
+            else:
+                holder = str(T['maxRecord']['value']) if title != 'decisive' else toReadableTime(-T['maxRecord']['value'], 2)
+            data.append([title, T['description'], T['titleVP'], T['minTitleReq'], value, holder])
+        return data
     def get_Items(self):
         data = []
         wares = self.player.currenttile.city_wares.union(self.player.currenttile.trader_wares)
@@ -5006,6 +5168,12 @@ class PlayerTrack(GridLayout):
                          usebutton])
             # [INCOMPLETE] Add an "invest" button option if player on a village
         return data
+    def get_tab_text(self, category):
+        category = category.capitalize()
+        return f"{category}: [color={self.hclr}]{getattr(self.player, category)}[/color]"
+    def updateTitles(self):
+        self.titlesTab.text = self.get_tab_text('Titles')
+        self.Titles.update_data_cells(self.get_Titles())
     def updateAll(self):
         self.Combat.update_data_cells(self.get_Combat(), False)
         self.Combat.update_header(self, 'Total', f'Total: {self.get_total_combat()}')
@@ -5014,6 +5182,8 @@ class PlayerTrack(GridLayout):
         self.knowledgeTab.text=f'Knowledge: [color={self.hclr}]{self.player.Knowledge}[/color]'
         self.Capital.update_data_cells(self.get_Capital())
         self.capitalTab.text=f"Capital: [color={self.hclr}]{self.player.Capital}[/color]"
+        self.fellowshipTab.text=f"Fellowship: [color={self.hclr}]{self.player.Fellowship}[/color]"
+        self.updateTitles()
         self.Items.update_data_cells(self.get_Items())
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
 
@@ -5146,20 +5316,22 @@ class TradePage(FloatLayout):
             return
         ability = self.is_trainee[0]
         lvl = self.P.get_level(ability)
+        requirement = 'go to combat' if ability in self.P.attributes else 'use the skill successfully'
         if lvl >= 12:
             output(f"You have already maxed out {self.is_trainee[0]}!", 'yellow')
             self.reject_proposal()
         if not self.is_trainee[1]:
             # Being taught by adept trainer.
             if lvl >= 8:
-                output(f"Your level is too high to be taught by this trainer!", 'yellow')
+                output("Your level is too high to be taught by this trainer!", 'yellow')
                 self.reject_proposal()
             elif rbtwn(1,10) <= self.P.fatigue:
                 self.training_failure("You were unable to keep up with training.",'red')
                 socket_client.send('[TRADE]', [self.O, 'training failure'])
             elif rbtwn(1,3) == 1:
                 output(f"You successfully leveled up in {ability}",'green')
-                self.P.levelup(ability,1,8)
+                newlevel = self.P.levelup(ability,1,8)
+                self.P.updateTitleValue('apprentice', newlevel)
                 socket_client.send('[TRADE]', [self.O, 'training success'])
                 self.complete_trade()
             else:
@@ -5167,7 +5339,8 @@ class TradePage(FloatLayout):
                 if rbtwn(1,12) <= critthink:
                     self.P.useSkill('Critical Thinking')
                     output(f"You successfully leveled up in {ability}",'green')
-                    self.P.levelup(ability,1,8)
+                    newlevel = self.P.levelup(ability,1,8)
+                    self.P.updateTitleValue('apprentice', newlevel)
                     socket_client.send('[TRADE]', [self.O, 'training success'])
                     self.complete_trade()
                 else:
@@ -5180,20 +5353,26 @@ class TradePage(FloatLayout):
                 socket_client.send('[TRADE]', [self.O, 'training failure'])
             elif lvl < 8:
                 output(f"You successfully leveled up in {ability}",'green')
-                self.P.levelup(ability,1)
+                newlevel = self.P.levelup(ability,1)
+                self.P.updateTitleValue('apprentice', newlevel)
                 socket_client.send('[TRADE]', [self.O, 'training success'])
                 self.complete_trade()
+            elif self.P.trained_abilities[ability]:
+                output(f"You have already unlocked the potential to level up {ability}, now {requirement} to level up! Aborting trade.", 'red')
+                socket_client.send('[TRADE]', [self.O, 'training failure'])
             elif rbtwn(1,4) == 1:
-                output(f"You successfully leveled up in {ability}",'green')
-                self.P.levelup(ability,1)
+                output(f"You successfully unlocked the potential to level up {ability}! Now {requirement} to level up!", 'green')
+                #self.P.levelup(ability,1)
+                self.P.trained_abilities[ability] = True
                 socket_client.send('[TRADE]', [self.O, 'training success'])
                 self.complete_trade()
             else:
                 critthink = self.P.activateSkill('Critical Thinking')
                 if rbtwn(1,16) <= critthink:
                     self.P.useSkill('Critical Thinking', 2, 7)
-                    output(f"You successfully leveled up in {ability}",'green')
-                    self.P.levelup(ability,1)
+                    output(f"You successfully unlocked the potential to level up {ability}! Now {requirement} to level up!", 'green')
+                    #self.P.levelup(ability,1)
+                    self.P.trained_abilities[ability] = True
                     socket_client.send('[TRADE]', [self.O, 'training success'])
                     self.complete_trade()
                 else:
@@ -5541,6 +5720,10 @@ def perform_labor(skill=None, _=None):
         P.addXP(skill, 0 if P.skills[skill] > 7 else max([1, P.skills[skill]//2]))
         P.working = [None, 0]
         P.takeAction(1)
+        # Update title values
+        P.updateTitleValue('laborer', 1)
+        P.updateTitleValue('valuable', P.skills[skill])
+        # Start next round
         P.go2action()
     else:
         P.takeAction(1)
@@ -5610,7 +5793,7 @@ def city_consequence(city):
                     r = rbtwn(0, 12, None, persuasion, "Persuasion ")
                     if r <= persuasion:
                         P.useSkill("Persuasion")
-                        output(f"You are able to convince the hooligan you mean no harm.", 'green')
+                        output("You are able to convince the hooligan you mean no harm.", 'green')
                     else:
                         encounter(f'{city[0].upper()+city[1:]} Hooligan', [15, 80], [cities[city]['Combat Style']], {'coins':[1, 8]})
                         return
@@ -5686,6 +5869,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.empty_label = None
         self.empty_label_rounds = None
         self.is_empty = False
+        self.trader_id = None
         self.trader_label = None
         self.trader_rounds = 0
         self.trader_wares = set()
@@ -5697,6 +5881,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.neighbors = set()
         self.lockIcon = None
         self.skirmishIcon = None
+        self.traveledOn = False
         self.bind(on_press=self.initiate)
         Window.bind(mouse_pos = self.on_mouse_move)
         self.tile = tile
@@ -5721,6 +5906,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             for c in randomCategories:
                 self.trader_wares.add(np.random.choice(list(gameItems[c])))
             socket_client.send('[TRADER]',[(self.gridx, self.gridy), self.trader_wares])
+            self.parentBoard.traderID += 1
+            self.trader_id = self.parentBoard.traderID
         else:
             self.trader_wares = recvd
         self.color = (0.5, 1, 0.5, 1)
@@ -5735,6 +5922,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.trader_label.text = ''
         self.parentBoard.remove_widget(self.trader_label)
         self.trader_label = None
+        self.trader_id = None
         self.color = (1, 1, 1, 1)
         self.trader_wares = set()
     def buy_from_trader(self, item, rounds=3, recvd=False):
@@ -5903,6 +6091,7 @@ class BoardPage(FloatLayout):
         self.game_page = game_page
         self.localuser = game_app.connect_page.username.text
         self.size = get_dim(xtiles, ytiles)
+        self.traderID = 0
         self.zoom = 0
         self.inspect_mode = False
         self.gridtiles = {}
@@ -6028,10 +6217,19 @@ class BoardPage(FloatLayout):
             if self.localPlayer.has_warrior == 0:
                 self.localPlayer.group.pop("Warrior")
                 output("Warrior left your group!", 'yellow')
+        # Update Tile properties
         for T in self.gridtiles.values():
             T.update_tile_properties()
+        if self.localPlayer.currenttile.tile == self.localPlayer.birthcity:
+            self.localPlayer.titles['loyal']['in_birthcity'] = True
+        if self.localPlayer.fatigue == 0:
+            self.updateTitleValue('steady', 1)
+        self.localPlayer.titles['decisive']['startRound'] = time()
+        # Update Investments
         self.localPlayer.receiveInvestments() # Receive village investments (or at least update)
+        # Update stat pages
         self.localPlayer.update_mainStatPage()
+        # Check if paralyzed
         paralyzed = check_paralysis()
         if not paralyzed: 
             logging.debug("Player not paralyzed.")
@@ -6833,6 +7031,10 @@ class LaunchPage(GridLayout):
             output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
             IncreaseCapacity(message[0], message[1])
         Clocked(run, 0.1, 'CAPACITY run')
+    def TITLE(self, username, message):
+        def run(_):
+            lclPlayer().newMaxRecord(message)
+        Clocked(run, 0.1, 'TITLE run')
     def FIGHT(self, username, message):
         def run(_):
             P = lclPlayer()
