@@ -585,6 +585,8 @@ class FightPage(FloatLayout):
             for i in range(len(self.pstats)):
                 self.pstats[i] = int(min([self.pstats[i]+Gsum[i], self.pstats[i]*(1 + np.log10(len(self.P.group)+1))]))
             self.foestats = stats
+        self.p_startinglvl = np.sum(self.pstats)
+        self.f_startinglvl = np.sum(self.foestats)
         # Reduce Stats based on these hard limits
         hard_limits = {"Technique":12, "Stability":14}
         for atr, lvl in hard_limits.items():
@@ -896,6 +898,8 @@ class FightPage(FloatLayout):
             self.P.title['brave']['currentStreak'] += self.foelvl
             if self.P.title['brave']['currentStreak'] > self.P.title['brave']['value']:
                 self.P.updateTitleValue('brave', self.P.title['brave']['currentStreak'] - self.P.title['brave']['value'])
+            if self.P.title['valiant']['value'] < (self.f_startinglvl - self.p_startinglvl):
+                self.P.updateTitleValue('valiant', (self.f_startinglvl - self.p_startinglvl) - self.P.title['valiant']['value'])
             # Training with Sparring partner does not gaurantee you a level increase like with others.
             levelsup = (self.foecateg/2) ** 2
             if self.foename == 'Sparring Partner': levelsup *= 0.65
@@ -2352,6 +2356,7 @@ class Player(Image):
         self.Knowledge = 0
         self.Fellowship = 0
         self.Titles = 0
+        self.TotalVP = 3
         
         # Constraints
         self.round_ended = False
@@ -2402,8 +2407,10 @@ class Player(Image):
         self.atrorder = ['Agility','Cunning','Technique','Hit Points','Attack','Stability','Def-Physical','Def-Wizard','Def-Elemental','Def-Trooper']
         self.combat = np.array([0, 0, 0, 2, 1, 0, 0, 0, 0, 0])
         self.boosts = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        self.perm_boosts = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) # permanent boosts will enable fellowship joining
         for atr, val in cities[self.birthcity]['Combat Boosts']:
             self.boosts[self.attributes[atr]] += val
+            self.perm_boosts[self.attributes[atr]] += val
         self.current = self.combat + self.boosts
         #Knowledge
         self.skills = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
@@ -2446,29 +2453,30 @@ class Player(Image):
         self.ancestrial_order = {'loot': 0, 'food': 0, 'fatigue': 0, 'minor': False, 'horse': False, 'major': False} # kubani ancestrial order
         self.gifted_museum = 0 # starfex ancient magic museum
         # Titles
-        self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 10, 'value':0, 'description': 'Most unique tiles traveled upon.'},
-                      'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
-                      'courageous': {'titleVP': 3, 'minTitleReq': 3, 'value':0, 'description': 'Most rounds spent in skirmishing cities (all actions per round).'},
-                      'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'description': 'Longest continuous Tamariza Wizard Tower premium holder.'},
-                      'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'description': 'Highest credit score from the Demetry Grand Bank'},
-                      'traveler': {'titleVP': 3, 'minTitleReq': 25, 'value':0, 'description': 'Most road tile movement.'},
-                      'apprentice': {'titleVP': 4, 'minTitleReq': 100, 'value':0, 'description': 'Most cumulative levels gained from trainers.'},
-                      'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'description': 'Most books checked out from the Benefriege public library, and learned from.'},
-                      'laborer': {'titleVP': 3, 'minTitleReq': 10, 'value':0, 'description': 'Most jobs worked.'},
-                      'valuable': {'titleVP': 2, 'minTitleReq': 20, 'value':0, 'description': 'Most money earned from jobs worked.'},
-                      'entrepreneur': {'titleVP': 3, 'minTitleReq': 50, 'value':0, 'description': 'Most money received from owned markets.'},
-                      'trader': {'titleVP': 4, 'minTitleReq': 5, 'value':0, 'unique_traders': set(), 'description': 'Most trading (buy or sell) with unique traders.'},
-                      'negotiator': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'description': 'Most successful persuasions.'},
-                      'steady': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'description': 'Most rounds started with zero fatigue.'},
-                      'grinder': {'titleVP': 3, 'minTitleReq': 100, 'value':0, 'description': 'Most fatigue taken.'},
-                      'merchant': {'titleVP': 2, 'minTitleReq': 40, 'value':0, 'description': 'Most coin made from selling items to merchants or traders.'},
-                      'brave': {'titleVP': 5, 'minTitleReq': 80, 'value':0, 'currentStreak': 0, 'description': 'Sum total level of continuous enemies defeated without restoring HP.'},
-                      'decisive': {'titleVP': 1, 'minTitleReq': -float('inf'), 'value':None, 'sum': 0, 'round': 0, 'startTime': time(), 'description': 'Shortest average round time.'},
-                      'champion': {'titleVP': 7, 'minTitleReq': 1, 'value':0, 'description': 'Most class V Scetcher Tournament titles won.'},
-                      'resurrector': {'titleVP': 10, 'minTitleReq': 1, 'value':0, 'description': 'Strongest magic sword revived with ability unlocked.'}}
+        self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
+                      'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'category': 'General', 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
+                      'valiant': {'titleVP': 3, 'minTitleReq': 6, 'value':0, 'category': 'Combat', 'description': 'Maximum difference between an opponent stronger than you, that you defeated, and your total combat at the start of battle.'},
+                      'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'category': 'Fellowship', 'description': 'Longest continuous Tamariza Wizard Tower premium holder.'},
+                      'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'category': 'Fellowship', 'description': 'Highest credit score from the Demetry Grand Bank'},
+                      'traveler': {'titleVP': 3, 'minTitleReq': 30, 'value':0, 'category': 'General', 'description': 'Most road tile movement.'},
+                      'apprentice': {'titleVP': 4, 'minTitleReq': 60, 'value':0, 'category': 'Knowledge', 'description': 'Most cumulative levels gained from trainers.'},
+                      'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'category': 'Fellowship', 'description': 'Most books checked out from the Benefriege public library, and learned from.'},
+                      'laborer': {'titleVP': 3, 'minTitleReq': 10, 'value':0, 'category': 'Capital', 'description': 'Most jobs worked.'},
+                      'valuable': {'titleVP': 2, 'minTitleReq': 20, 'value':0, 'category': 'Capital', 'description': 'Most money earned from jobs worked.'},
+                      'entrepreneur': {'titleVP': 3, 'minTitleReq': 50, 'value':0, 'category': 'Capital', 'description': 'Most money received from owned markets.'},
+                      'trader': {'titleVP': 4, 'minTitleReq': 5, 'value':0, 'category': 'Capital', 'unique_traders': set(), 'description': 'Most trading (buy or sell) with unique traders.'},
+                      'negotiator': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'category': 'Knowledge', 'description': 'Most successful persuasions.'},
+                      'steady': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'category': 'General', 'description': 'Most rounds started with zero fatigue.'},
+                      'grinder': {'titleVP': 3, 'minTitleReq': 120, 'value':0, 'category': 'General', 'description': 'Most fatigue taken.'},
+                      'merchant': {'titleVP': 2, 'minTitleReq': 40, 'value':0, 'category': 'Capital', 'description': 'Most coin made from selling items to merchants or traders.'},
+                      'brave': {'titleVP': 5, 'minTitleReq': 80, 'value':0, 'category': 'Combat', 'currentStreak': 0, 'description': 'Sum total level of continuous enemies defeated without restoring HP.'},
+                      'decisive': {'titleVP': 1, 'minTitleReq': -float('inf'), 'category': 'General', 'value':None, 'sum': 0, 'round': 0, 'startTime': time(), 'description': 'Shortest average round time.'},
+                      'champion': {'titleVP': 7, 'minTitleReq': 1, 'value':0, 'category': 'Fellowship', 'description': 'Most class V Scetcher Tournament titles won.'},
+                      'resurrector': {'titleVP': 10, 'minTitleReq': 1, 'value':0, 'category': 'End Game', 'description': 'Strongest magic sword revived with its ability unlocked.'}}
         for key in self.titles:
-            self.titles[key]['maxRecord'] = {'value': 0, 'holder': None, 'title': key}
+            self.titles[key]['maxRecord'] = {'value': -float('inf') if key=='decisive' else 0, 'holder': None, 'title': key}
         self.titleOrder = [T[0] for T in sorted(self.titles.items(), key=lambda kv: kv[1]['titleVP'])]
+        self.titleIndex = {T: i for i, T in enumerate(self.titleOrder)}
         
         # Position Player
         self.currentcoord = positions[birthcity][0]
@@ -2481,27 +2489,31 @@ class Player(Image):
             endTime = time()
             self.titles[title]['sum'] += (endTime - self.titles[title]['startTime'])
             self.titles[title]['round'] += 1
-            self.titles[title]['value'] =  - (self.titles[title]['sum'] / self.titles[title]['rounds']) # Force negative for consistency in finding max holder
+            self.titles[title]['value'] =  - (self.titles[title]['sum'] / self.titles[title]['round']) # Force negative for consistency in finding max holder
         else:
             self.titles[title]['value'] += value
         if (self.titles[title]['value'] >= self.titles[title]['minTitleReq']) and (self.titles[title]['value'] > self.titles[title]['maxRecord']['value']):
             output(f"You now hold The {title.capitalize()} title!", 'green')
             self.titles[title]['maxRecord'] = {'value': self.titles[title]['value'], 'holder': self.username, 'title': title}
             self.Titles += self.titles[title]['titleVP']
+            self.updateTotalVP(self.titles[title]['titleVP'], False)
             socket_client.send('[TITLE]', self.titles[title]['maxRecord'])
         if hasattr(self, 'PlayerTrack'):
-            self.PlayerTrack.updateTitles() # [INCOMPLETE] instead just update the cells that changed
+            self.PlayerTrack.update_single_title(title)
+            #self.PlayerTrack.updateTitles()
     def newMaxRecord(self, maxRecord):
         previousRecord = self.titles[maxRecord['title']]['maxRecord']
         if previousRecord['holder'] == self.username:
             # If this user was the last holder, then remove Title VP
             self.Titles -= self.titles[maxRecord['title']]['titleVP']
+            self.updateTotalVP(-self.titles[maxRecord['title']]['titleVP'], False)
             output(f"You lost The {maxRecord['title'].capitalize()} title to {maxRecord['holder']}", 'red')
         else:
             output(f"{maxRecord['holder']} now holds The {maxRecord['title'].capitalize()} title!", 'blue')
         self.titles[maxRecord['title']]['maxRecord'] = maxRecord
         if hasattr(self, 'PlayerTrack'):
-            self.PlayerTrack.updateTitles() # [INCOMPLETE] instead just update the cells that changed
+            self.PlayerTrack.update_single_title(maxRecord['title'])
+            #self.PlayerTrack.updateTitles() 
     def savePlayer(self):
         self.PlayerTrack.Quest.saveTable()
         self.PlayerTrack.craftingTable.saveTable()
@@ -2595,7 +2607,7 @@ class Player(Image):
                 self.currenttile.traveledOn = True
             if self.currenttile.tile != self.birthcity:
                 self.titles['loyal']['in_birthcity'] = False
-            elif self.currenttile.tile == 'road':
+            if self.currenttile.tile == 'road':
                 self.updateTitleValue('traveler', 1)
             self.currenttile.source = f'images\\ontile\\{self.currenttile.tile}.png' # outline new tile with green border.
             # Quest completions/consequences (if any)
@@ -2818,6 +2830,12 @@ class Player(Image):
             JoinFight()
         elif self.working[0] is not None:
             perform_labor()
+    def updateTotalVP(self, add, checkGameEnd=True):
+        self.TotalVP += add
+        if game_app.game_page.vpView.text != 'VP Hidden':
+            game_app.game_page.vpView.text = f'[color={game_app.game_page.hclr}]{self.TotalVP}[/color] VP'
+        if checkGameEnd:
+            self.checkGameEnd()
     def GameEnd(self, player_stats):
         best_total, best_users = -1, []
         for username, stats in player_stats.items():
@@ -2858,7 +2876,7 @@ class Player(Image):
             output(f"Your level in {skill} was not able to level beyond {max_lvl} with this action", 'yellow')
         self.skills[skill] += lvl_gain
         self.Knowledge += lvl_gain
-        self.checkGameEnd()
+        self.updateTotalVP(lvl_gain)
         if (skill == 'Crafting') and (hasattr(self, 'PlayerTrack')):
             self.PlayerTrack.craftingTable.update_lbls()
     def addXP(self, skill, xp, msg=''):
@@ -2894,7 +2912,7 @@ class Player(Image):
         self.combat[self.attributes[attribute]] += lvl_gain
         self.current[self.attributes[attribute]] += lvl_gain
         self.Combat += lvl_gain
-        self.checkGameEnd()
+        self.updateTotalVP(lvl_gain)
         self.update_mainStatPage()
     def applyBoost(self, attribute, val=1, update_stats=True):
         index = self.attributes[attribute]
@@ -2932,6 +2950,7 @@ class Player(Image):
                 self.training_allowed[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['home_cap']
+                self.updateTotalVP(capital_info[city]['home_cap'])
                 output(f"You successfully purchased a home in {city}!", 'green')
                 output(f"+{capital_info[city]['capacity']} inventory space.", 'green')
                 output(f"+{capital_info[city]['home_cap']} Capital.", 'green')
@@ -2944,6 +2963,7 @@ class Player(Image):
                 self.markets[city] = True
                 self.market_allowed[city] = True
                 self.Capital += capital_info[city]['market_cap']
+                self.updateTotalVP(capital_info[city]['market_cap'])
                 output(f"You successfully purchased a market in {city}!", 'green')
                 output(f"+{capital_info[city]['market_cap']} Capital.", 'green')
                 output(f"+{capital_info[city]['return']} coins at the end of every round you tend the market. Must be in {city} at round end.", 'green')
@@ -3047,7 +3067,7 @@ class Player(Image):
             self.villages[city]['village3'] = [item, rounds, 1] # Item, Rounds until item is received, number of items to receive
             self.coins -= cost
             self.Capital += 1
-            self.checkGameEnd()
+            self.updateTotalVP(1)
             exitActionLoop(amt=1)()
             return
         categ, price = getItemInfo(item)
@@ -3067,7 +3087,7 @@ class Player(Image):
         self.addItem(item, -1)
         self.villages[city][self.currenttile.tile] = [item, rounds, 2] # A newly produced item and your original (borrowed) item
         self.Capital += 1
-        self.checkGameEnd()
+        self.updateTotalVP(1)
         self.coins -= cost
         exitActionLoop(amt=1)()
     def add_coins(self, amt):
@@ -4789,7 +4809,7 @@ class Quest:
             self.playerTrack.player.Reputation += self.quests[quest].stage
             self.playerTrack.player.parentBoard.checkCityUnlocks() # Remove lock icons if appropriate
             self.update_reqs()
-            self.playerTrack.player.checkGameEnd()
+            self.playerTrack.player.updateTotalVP(self.quests[quest].stage)
             self.playerTrack.reputationTab.text = f"Reputation: [color={self.playerTrack.hclr}]{self.playerTrack.player.Reputation}[/color]"
             self.stage_completion[self.quests[quest].stage] += 1
             for city in city_info:
@@ -4848,7 +4868,9 @@ def toReadableTime(secondsElapsed, roundTo=2):
         return f"{np.round(secondsElapsed, roundTo)} seconds"
     elif secondsElapsed < 3600:
         return f"{np.round(secondsElapsed / 60, roundTo)} minutes"
-    return f"{np.round(secondsElapsed / 3600, roundTo)} hours"
+    elif secondsElapsed < 86400:
+        return f"{np.round(secondsElapsed / 3600, roundTo)} hours"
+    return f"{np.round(secondsElapsed / 86400, roundTo)} days"
 
 class PlayerTrack(GridLayout):
     def __init__(self, player, **kwargs):
@@ -4897,8 +4919,10 @@ class PlayerTrack(GridLayout):
         self.track_screen.add_widget(screen)
         # Titles Screen
         titleGrid = GridLayout(cols=1)
-        self.Titles = Table(header=['Title', 'Description', 'VP', 'Minimum Req', 'Your Record', 'Highest Record'], data=self.get_Titles(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True)
+        self.titleDisplay = Button(text='',height=Window.size[1]*0.05,size_hint_y=None,color=(0, 0, 0, 1),markup=True,background_color=(1,1,1,0))
+        self.Titles = Table(header=['Title', 'Category', 'VP', 'Minimum Req', 'Your Record', 'Highest Record'], data=self.get_Titles(), text_color=(0, 0, 0, 1), header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True)
         titleGrid.add_widget(self.Titles)
+        titleGrid.add_widget(self.titleDisplay)
         screen = Screen(name='Titles')
         screen.add_widget(titleGrid)
         self.track_screen.add_widget(screen)
@@ -4927,8 +4951,8 @@ class PlayerTrack(GridLayout):
         self.capitalTab.bind(on_press=partial(changeTab, "Capital"))
         self.reputationTab = Button(text=f'Reputation: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
         self.reputationTab.bind(on_press=partial(changeTab, "Reputation"))
-        self.FellowshipTab = Button(text=f'Fellowship: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
-        self.FellowshipTab.bind(on_press=partial(changeTab, "Fellowship"))
+        self.fellowshipTab = Button(text=f'Fellowship: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
+        self.fellowshipTab.bind(on_press=partial(changeTab, "Fellowship"))
         self.titlesTab = Button(text=f'Titles: [color={self.hclr}]0[/color]',markup=True,background_color=self.tab_color)
         self.titlesTab.bind(on_press=partial(changeTab, "Titles"))
         self.itemsTab = Button(text='Items: 0/3',markup=True,background_color=self.tab_color)
@@ -4937,7 +4961,7 @@ class PlayerTrack(GridLayout):
         self.tabs.add_widget(self.knowledgeTab)
         self.tabs.add_widget(self.capitalTab)
         self.tabs.add_widget(self.reputationTab)
-        self.tabs.add_widget(self.FellowshipTab)
+        self.tabs.add_widget(self.fellowshipTab)
         self.tabs.add_widget(self.titlesTab)
         self.tabs.add_widget(self.itemsTab)
         # Add widgets in order
@@ -5095,21 +5119,34 @@ class PlayerTrack(GridLayout):
                          self.villageDisplay(city),
                          self.villageAwaitingDisplay(city)])
         return data
+    def get_holder(self, T):
+        if T['maxRecord']['holder'] is None:
+            holder = '-'
+        elif T['maxRecord']['holder'] == self.player.username:
+            holder = 'You'
+        elif T['maxRecord']['value'] == T['value']:
+            holder = 'Tied - but not held'
+        else:
+            holder = str(T['maxRecord']['value']) if T['maxRecord']['title'] != 'decisive' else toReadableTime(T['maxRecord']['value'], 2)
+        return holder
     def get_Titles(self):
         data = []
-        for title in self.player.titleOrder:
+        def as_button(text, title):
+            return {'text': str(text), 'disabled': True, 'color': (0,0,0,1), 'hover': (self.titleDisplay, self.player.titles[title]['description'])}
+        for i, title in enumerate(self.player.titleOrder):
             T = self.player.titles[title]
-            value = str(T['value']) if title != 'decisive' else toReadableTime(T['value'], 2)
-            if T['maxRecord']['holder'] == self.player.username:
-                holder = 'You'
-            elif T['maxRecord']['value'] == T['value']:
-                holder = 'Tied - but not held'
-            elif T['maxRecord']['holder'] is None:
-                holder = '-'
-            else:
-                holder = str(T['maxRecord']['value']) if title != 'decisive' else toReadableTime(T['maxRecord']['value'], 2)
-            data.append([title, T['description'], T['titleVP'], T['minTitleReq'], value, holder])
+            data.append([as_button(str(i+1)+'. The '+title.capitalize(), title),
+                         as_button(T['category'], title),
+                         as_button(T['titleVP'], title), 
+                         as_button('-' if title=='decisive' else T['minTitleReq'], title),
+                         as_button(T['value'] if title != 'decisive' else toReadableTime(T['value'], 2), title),
+                         as_button(self.get_holder(T), title)])
         return data
+    def update_single_title(self, title):
+        i = self.player.titleIndex[title]
+        self.Titles.cells['Your Record'][i].text = str(self.player.titles[title]['value']) if title != 'decisive' else toReadableTime(self.player.titles[title]['value'], 2)
+        self.Titles.cells['Highest Record'][i].text = self.get_holder(self.player.titles[title])
+        self.titlesTab.text = self.get_tab_text('Titles')
     def get_Items(self):
         data = []
         wares = self.player.currenttile.city_wares.union(self.player.currenttile.trader_wares)
@@ -5180,14 +5217,14 @@ class PlayerTrack(GridLayout):
         self.Titles.update_data_cells(self.get_Titles())
     def updateAll(self):
         self.Combat.update_data_cells(self.get_Combat(), False)
-        self.Combat.update_header(self, 'Total', f'Total: {self.get_total_combat()}')
+        self.Combat.update_header('Total', f'Total: {self.get_total_combat()}')
         self.combatTab.text=f"Combat: [color={self.hclr}]{self.player.Combat}[/color]"
         self.Knowledge.update_data_cells(self.get_Knowledge(), False)
         self.knowledgeTab.text=f'Knowledge: [color={self.hclr}]{self.player.Knowledge}[/color]'
         self.Capital.update_data_cells(self.get_Capital())
         self.capitalTab.text=f"Capital: [color={self.hclr}]{self.player.Capital}[/color]"
         self.fellowshipTab.text=f"Fellowship: [color={self.hclr}]{self.player.Fellowship}[/color]"
-        self.updateTitles()
+        #self.updateTitles()
         self.Items.update_data_cells(self.get_Items())
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
 
@@ -6227,7 +6264,7 @@ class BoardPage(FloatLayout):
         if self.localPlayer.currenttile.tile == self.localPlayer.birthcity:
             self.localPlayer.titles['loyal']['in_birthcity'] = True
         if self.localPlayer.fatigue == 0:
-            self.updateTitleValue('steady', 1)
+            self.localPlayer.updateTitleValue('steady', 1)
         self.localPlayer.titles['decisive']['startRound'] = time()
         # Update Investments
         self.localPlayer.receiveInvestments() # Receive village investments (or at least update)
@@ -6414,9 +6451,12 @@ class GamePage(GridLayout):
         input_y, label_y, stat_y, action_y, output_y, toggle_y = 0.05, 0.25, 0.1, 0.2, 0.35, 0.05
         self.stat_ypos, self.stat_ysize = input_y+label_y, stat_y
         self.right_line = RelativeLayout(size_hint_x=self.right_line_x)
-        self.toggleView = Button(text="Player Track",pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.8,toggle_y),background_color=(0, 0.4, 0.4, 1))
+        self.hclr = get_hexcolor((255, 85, 0))
+        self.vpView = Button(text=f'[color={self.hclr}]3[/color] VP',pos_hint={'x':0, 'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.2,toggle_y),markup=True,background_color=(0.945, 0.835, 0.475, 1))
+        self.vpView.bind(on_press=self.toggleVPHidden)
+        self.toggleView = Button(text="Player Track",pos_hint={'x':0.2,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.7,toggle_y),background_color=(0, 0.4, 0.4, 1))
         self.toggleView.bind(on_press=self.switchView)
-        self.flagButton = Button(text="Flag",pos_hint={'x':0.8,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.2,toggle_y),background_color=(0.7, 0, 0, 1))
+        self.flagButton = Button(text="Flag",pos_hint={'x':0.9,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.1,toggle_y),background_color=(0.7, 0, 0, 1))
         self.flagButton.bind(on_press=self.flagPosition)
         self.outputscreen = ScreenManager()
         screen = Screen(name='Actions')
@@ -6460,6 +6500,7 @@ class GamePage(GridLayout):
         self.display_page.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
         self.new_message = TextInput(pos_hint={'x':0,'y':0},size_hint=(1,input_y))
         # Append the widgets
+        self.right_line.add_widget(self.vpView)
         self.right_line.add_widget(self.toggleView)
         self.right_line.add_widget(self.flagButton)
         self.right_line.add_widget(self.outputscreen)
@@ -6469,6 +6510,11 @@ class GamePage(GridLayout):
         self.add_widget(self.right_line)
         # Any keyboard press will trigger the event:
         Window.bind(on_key_down=self.on_key_down)
+    def toggleVPHidden(self, instance):
+        if self.vpView.text == 'VP Hidden':
+            self.vpView.text = f'[color={self.hclr}]{self.board_page.localPlayer.TotalVP}[/color] VP'
+        else:
+            self.vpView.text = 'VP Hidden'
     def flagPosition(self, instance):
         if game_launched[0]: logging.warning("User RED FLAG!")
     def switchView(self, instance):
