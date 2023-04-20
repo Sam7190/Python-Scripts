@@ -4094,7 +4094,7 @@ def PursuadeStealthMaster(_=None):
         exitActionLoop(amt=0)()
     elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]==0) and (P.currentcoord==P.PlayerTrack.Quest.quests[2, 8].coord):
         P.PlayerTrack.Quest.quests[2, 8].has_book = True
-        output("The stealth master hands you the book, now present it to the librarian at home!", 'blue')
+        output("The stealth master hands you the book, now present it to the quest giver at home!", 'blue')
         exitActionLoop('minor')()
     elif not hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds'):
         persuasion = P.activateSkill("Persuasion")
