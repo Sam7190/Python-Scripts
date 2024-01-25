@@ -895,11 +895,11 @@ class FightPage(FloatLayout):
                         output(f"Rewarded {int(amt)} {rwd}!", 'green')
                         self.P.addItem(rwd, int(amt))
             # Update title
-            self.P.title['brave']['currentStreak'] += self.foelvl
-            if self.P.title['brave']['currentStreak'] > self.P.title['brave']['value']:
-                self.P.updateTitleValue('brave', self.P.title['brave']['currentStreak'] - self.P.title['brave']['value'])
-            if self.P.title['valiant']['value'] < (self.f_startinglvl - self.p_startinglvl):
-                self.P.updateTitleValue('valiant', (self.f_startinglvl - self.p_startinglvl) - self.P.title['valiant']['value'])
+            self.P.titles['brave']['currentStreak'] += self.foelvl
+            if self.P.titles['brave']['currentStreak'] > self.P.titles['brave']['value']:
+                self.P.updateTitleValue('brave', self.P.titles['brave']['currentStreak'] - self.P.titles['brave']['value'])
+            if self.P.titles['valiant']['value'] < (self.f_startinglvl - self.p_startinglvl):
+                self.P.updateTitleValue('valiant', (self.f_startinglvl - self.p_startinglvl) - self.P.titles['valiant']['value'])
             # Training with Sparring partner does not gaurantee you a level increase like with others.
             levelsup = (self.foecateg/2) ** 2
             if self.foename == 'Sparring Partner': levelsup *= 0.65
@@ -2719,7 +2719,7 @@ class Player(Image):
         if ftg > 0: restoring_list.append(f'FTG by {ftg}')
         if hp > 0: 
             restoring_list.append(f'HP by {hp}')
-            self.title['brave']['currentStreak'] = 0
+            self.titles['brave']['currentStreak'] = 0
         output(f'Restored {", ".join(restoring_list)}','green')
         self.addItem(food, -1)
         self.fatigue = max([0, self.fatigue - ftg])
