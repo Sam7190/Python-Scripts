@@ -15,6 +15,9 @@ pip install kivymd==0.104.1
 # Import helper modules
 import buildAI as AI
 import skillGames
+import gameVariables as var
+import fightingSystem as fightsys
+import essentialfuncs as essf
 
 # Import standard modules
 import numpy as np
@@ -57,6 +60,7 @@ from kivymd.uix.behaviors import HoverBehavior
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.clock import Clock
 from kivy.core.window import Window
+from PIL import Image as PILImage
 
 #%% Settings and Core Functions
 
@@ -87,15 +91,6 @@ def rbtwn(mn, mx, size=None, chance=None, msg=''):
             chance = chance - mn + 1
         output(f'{msg}Success chance is {chance} in {mx-mn+1}')
     return r
-def randofsum(s, n):
-    return np.random.multinomial(s,np.ones(n)/n,size=1)[0]
-def euc(a, b): 
-    return np.linalg.norm(a-b)
-def isint(s):
-    try:
-        return int(s) == float(s)
-    except ValueError:
-        return False
 def Clocked(function, delay, debug_msg=None):
     if debug_msg is not None: logging.debug(f'Clocked @{delay}sec | {debug_msg}')
     Clock.schedule_once(function, delay)
@@ -231,11 +226,11 @@ class HitBox(Button):
             vgID = boxes2group[i]
             gSize = len(group2boxes[vgID])
             nrmPos = self.getNormalizedPosition(self.boxes[i].pos)
-            dis2cent = euc(nrmPos, np.array([0.5, 0.5]))
+            dis2cent = essf.euc(nrmPos, np.array([0.5, 0.5]))
             if vgID > 0:
                 for gi in group2boxes[vgID-1]:
                     if not self.fakes[gi]:
-                        dis2last = euc(nrmPos, self.getNormalizedPosition(self.boxes[gi].pos))
+                        dis2last = essf.euc(nrmPos, self.getNormalizedPosition(self.boxes[gi].pos))
                         break
             else:
                 dis2last = dis2cent
@@ -244,7 +239,7 @@ class HitBox(Button):
                 if gi == i:
                     continue
                 total += 1
-                dis2group += euc(nrmPos, self.getNormalizedPosition(self.boxes[gi].pos))
+                dis2group += essf.euc(nrmPos, self.getNormalizedPosition(self.boxes[gi].pos))
             if total > 0: dis2group /= total
             opacity = 0.96 if self.fakes[i] else (0.92 - cunning*0.013)
             data = [[foeAgility, cunning, stability, dodging, vgID, gSize, tApplied, dis2last, dis2cent, dis2group, opacity]]
@@ -429,11 +424,11 @@ class DefBox(Button):
         tApplied = int(-(R.size[0] - self.boxMaxScale)/self.techniqueScale)
         vg = self.live_rects[i]['volley group']
         npos = self.live_rects[i]['nrmpos']
-        d2c = euc(npos, np.array([0.5, 0.5]))
+        d2c = essf.euc(npos, np.array([0.5, 0.5]))
         if vg > 0:
             for gi in self.volley_group[vg-1]:
                 if not self.live_rects[gi]['fake']:
-                    d2p = euc(npos, self.live_rects[gi]['nrmpos'])
+                    d2p = essf.euc(npos, self.live_rects[gi]['nrmpos'])
                     break
         else:
             d2p = d2c
@@ -441,7 +436,7 @@ class DefBox(Button):
         for gi in self.volley_group[vg]:
             if gi == i:
                 continue
-            d2g += euc(npos, self.live_rects[gi]['nrmpos'])
+            d2g += essf.euc(npos, self.live_rects[gi]['nrmpos'])
             total += 1
         if total > 0: d2g /= total
         clicked = 1 if self.live_rects[i]['state'] in {'blocked', 'dodged'} else 0
@@ -538,15 +533,7 @@ class DefBox(Button):
         self.fpage.canvas.after.remove(self.realDodge)
         self.fpage.canvas.after.remove(self.fakeDodge)
         self.fpage.remove_widget(self)
-        
-class SkillPage():
-    def __init__(self, skill):
-        logging.debug(f"Initiating SkillPage for {skill}")
-        
-        # Player objects
-        self.P = lclPlayer()
-        self.P.paused = True
-        
+              
 
 class FightPage(FloatLayout):
     def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, foeStealth=0, **kwargs):
@@ -564,7 +551,7 @@ class FightPage(FloatLayout):
         
         # Player objects
         self.P = lclPlayer()
-        self.P.paused = True
+        self.P.paused = True # prevents player from switching to another page and making an action.
         self.fighting = True
         
         # Stats
@@ -1001,7 +988,7 @@ def npc_stats(lvl, fixed=None, maxAtr=None):
                 # Stealth is handled in the encounter function
                 conditions.append(f'a[{P.attributes[atr]}]=={fixedlvl}')
     while True:
-        a = randofsum(lvl, n)
+        a = essf.randofsum(lvl, n)
         breakout = True
         for i in range(len(conditions)):
             if (conditions[i] is not None) and eval(conditions[i]):
@@ -2202,61 +2189,13 @@ def A_wilderness(inspect=False):
 avail_actions = {'road':A_road,'plains':A_plains,'pond':A_pond,'cave':A_cave,'outpost':A_outpost,'mountain':A_mountain,'oldlibrary':A_oldlibrary,'ruins':A_ruins,'battle1':A_battlezone,'battle2':A_battlezone}
 
 #%% Game Properties
-food_restore = {'raw meat':(1,0),'cooked meat':(2,0),'well cooked meat':(3,0),
-                'raw fish':(0,1),'cooked fish':(0,2),'well cooked fish':(0,3),
-                'fruit':(1,1)}
+food_restore = var.food_restore
+ore_properties = var.ore_properties
+capital_info = var.capital_info
+city_info = var.city_info
+village_invest = var.village_invest
+connectivity = var.connectivity
 
-ore_properties = {'lead':('Elemental',1),'tin':('Physical',1),'copper':('Trooper',1),'iron':('Wizard',1),
-                  'tantalum':('Elemental',2),'aluminum':('Physical',2),'kevlium':('Trooper',2),'nickel':('Wizard',2),
-                  'tungsten':('Elemental',3),'titanium':('Physical',3),'diamond':('Trooper',3),'chromium':('Wizard',3),
-                  'shinopsis':('Elemental',4),'ebony':('Physical',4),'astatine':('Trooper',4),'promethium':('Wizard',4)}
-
-capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
-                'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
-                'demetry':{'home':49,'home_cap':6,'capacity':4,'market':24,'return':6,'market_cap':2,'invest':9,'efficiency':0,'discount':0,'trader allowed':False},
-                'enfeir':{'home':20,'home_cap':4,'capacity':4,'market':9,'return':2,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
-                'fodker':{'home':24,'home_cap':4,'capacity':4,'market':12,'return':3,'market_cap':1,'invest':None,'efficiency':0,'discount':0,'trader allowed':False}, # Fodker has no villages to invest in
-                'glaser':{'home':5,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
-                'kubani':{'home':37,'home_cap':5,'capacity':4,'market':19,'return':4,'market_cap':2,'invest':7,'efficiency':0,'discount':0,'trader allowed':False},
-                'pafiz':{'home':27,'home_cap':4,'capacity':4,'market':13,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0,'trader allowed':False},
-                'scetcher':{'home':42,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
-                'starfex':{'home':28,'home_cap':4,'capacity':4,'market':14,'return':3,'market_cap':1,'invest':5,'efficiency':0,'discount':0,'trader allowed':False},
-                'tamarania':{'home':43,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
-                'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
-                'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4,'efficiency':0,'discount':0,'trader allowed':False},
-                'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False}}
-
-city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':8, 'Excavating':12, 'Smithing':4, 'entry':12, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'}},
-             'benfriege':{'Hit Points':8, 'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':8, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':12, 'Survival':8, 'Smithing':4, 'entry':4, 'sell':{'raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'}},
-             'demetry':{'Elemental':8, 'Def-Trooper':8, 'Bartering':12, 'Crafting':8, 'Smithing':4, 'entry':13, 'sell':{'raw meat', 'cooked meat', 'fruit', 'string', 'beads', 'hide', 'sand', 'clay', 'leather', 'ceramic', 'glass', 'gems', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'tungsten', 'bartering book', 'crafting book'}},
-             'enfeir':{'Agility':8, 'Cunning':12, 'Physical':8, 'Def-Wizard':8, 'Critical Thinking':8, 'Heating':8, 'Smithing':8, 'Stealth':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'tin', 'copper', 'aluminum', 'kevlium'}},
-             'fodker':{'Stability':12, 'Trooper':8, 'Def-Physical':12, 'Bartering':8, 'Smithing':8, 'entry':6, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'sand', 'lead', 'tin', 'copper', 'iron', 'excavating book'}},
-             'glaser':{'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':12, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':8, 'Survival':8, 'entry':4, 'Excavating':8, 'Smithing':4, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'scales', 'bark', 'lead', 'tin', 'critical thinking book', 'survival book', 'gathering book'}},
-             'kubani':{'Agility':8, 'Physical':8, 'Def-Wizard':12, 'Critical Thinking':8, 'Bartering':8, 'Crafting':8, 'Gathering':8, 'Smithing':4, 'entry':6, 'sell':{'raw meat', 'string', 'beads', 'sand', 'clay', 'glass', 'lead', 'copper', 'iron', 'tantalum', 'titanium', 'survival book'}},
-             'pafiz':{'Hit Points':8, 'Wizard':8, 'Def-Elemental':12, 'Persuasion':12, 'Crafting':8, 'Heating':8, 'Gathering':8, 'Smithing':4, 'entry':6, 'sell':{'cooked meat', 'cooked fish', 'fruit', 'string', 'beads', 'hide', 'scales', 'iron', 'nickel', 'persuasion book'}},
-             'scetcher':{'Hit Points':8, 'Agility':8, 'Stability':8, 'Physical':8, 'Wizard':8, 'Elemental':8, 'Trooper':8, 'Def-Physical':8, 'Def-Wizard':8, 'Def-Elemental':8, 'Def-Trooper':8, 'Smithing':8, 'Stealth':8, 'entry':1, 'sell':{'raw meat', 'raw fish', 'string', 'sand', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel'}},
-             'starfex':{'Hit Points':8, 'Elemental':12, 'Def-Trooper':8, 'Heating':8, 'Gathering':8, 'Excavating':8, 'Smithing':4, 'entry':8, 'sell':{'raw fish', 'cooked fish', 'fruit', 'string', 'beads', 'scales', 'lead', 'tantalum', 'tungsten', 'heating book'}},
-             'tamarania':{'Hit Points':8, 'Stability':8, 'Physical':12, 'Def-Wizard':8, 'Smithing':12, 'entry':14, 'sell':{'raw meat', 'cooked meat', 'well cooked meat', 'string', 'beads', 'hide', 'clay', 'leather', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel', 'titanium', 'diamond', 'smithing book'}},
-             'tamariza':{'Hit Points':8, 'Cunning':8, 'Wizard':12, 'Def-Elemental':8, 'Critical Thinking':8, 'Persuasion':8, 'Heating':8, 'Smithing':4, 'entry':15, 'sell':{'fruit', 'string', 'beads', 'bark', 'rubber', 'iron', 'nickel', 'chromium', 'heating book'}},
-             'tutalu':{'Hit Points':8, 'Trooper':12, 'Def-Physical':8, 'Smtihing':8, 'Excavating':8, 'entry':8, 'sell':{'raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'}},
-             'zinzibar':{'Agility':12, 'Physical':8, 'Def-Wizard':8, 'Persuasion':8, 'Smithing':8, 'Survival':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum'}}}
-
-village_invest = {'village1':'Food', 'village2':'Crafting', 'village3':'Cloth', 'village4':'Food', 'village5':'Crafting'}
-
-connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
-                         [ 0, 0, 6,10, 7,10, 7, 5, 5, 9, 8, 3, 4,11],
-                         [ 0, 0, 0, 4, 4, 6, 2, 4, 2, 4, 2, 3, 5, 6],
-                         [ 0, 0, 0, 0, 7, 7, 4, 8, 6, 5, 2, 7, 9, 6],
-                         [ 0, 0, 0, 0, 0,10, 3, 3, 2, 8, 6, 4, 5,10],
-                         [12, 0, 0, 0, 0, 0, 8,10, 9, 5, 5, 7, 9, 6],
-                         [ 0, 0,10, 0, 0, 0, 0, 5, 3, 6, 3, 4, 6, 7],
-                         [ 0, 0, 0, 0, 8, 0, 0, 0, 2, 8, 6, 3, 2,10],
-                         [ 0, 0, 6, 0, 6, 0,10, 7, 0, 6, 4, 2, 4, 8],
-                         [ 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 6, 8, 2],
-                         [ 5, 0, 3, 6, 0, 0, 6, 0, 0, 9, 0, 5, 7, 4],
-                         [10,10, 8, 0, 0, 0, 0, 3, 6, 0, 0, 0, 2, 8],
-                         [ 0,12, 0, 0, 0, 0, 0, 7, 0, 0, 0, 6, 0,10],
-                         [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,10, 0, 0, 0]])
 def conn2set():
     P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
     cityOrder = sorted(capital_info)
@@ -2582,6 +2521,18 @@ class Player(Image):
             city_actions(self.currenttile.tile)
         else:
             actionGrid({}, True)
+    def make_citypage(self, city):
+        screen = Screen(name='City')
+        self.parentBoard.game_page.city_page = CityPage(city, self)
+        screen.add_widget(self.parentBoard.game_page.city_page)
+        self.parentBoard.game_page.main_screen.add_widget(screen)
+        self.parentBoard.game_page.main_screen.current = 'City'
+        self.parentBoard.game_page.cityscreen = screen
+    def remove_citypage(self):
+        if self.parentBoard.game_page.city_page is not None:
+            self.parentBoard.game_page.main_screen.current = "Board" if self.parentBoard.game_page.toggleView.text=="Player Track" else "Player Track"
+            self.parentBoard.game_page.main_screen.remove_widget(self.parentBoard.game_page.cityscreen)
+            self.parentBoard.game_page.city_page = None
     def moveto(self, coord, trigger_consequence=True, skip_check=False):
         if hasattr(self, 'PlayerTrack'):
             if self.PlayerTrack.Quest.quests[3, 6].status == 'started':
@@ -2597,6 +2548,7 @@ class Player(Image):
             output("Move there on same action (+2 Fatigue)?", 'blue')
             actionGrid({'Yes':(lambda _:self.moveto(coord,trigger_consequence,3)),'No':(lambda _:self.moveto(coord,trigger_consequence,2))}, False, False)
         else:
+            self.remove_citypage() # go back to board page before the avatar moves
             if skip_check != True:
                 socket_client.send('[MOVE]',coord)
             self.currenttile.source = f'images\\tile\\{self.currenttile.tile}.png' # remove green outline of tile moving away from.
@@ -2629,8 +2581,11 @@ class Player(Image):
                         self.addItem(food)
                 elif (self.PlayerTrack.Quest.quests[3, 2].status == 'started') and (self.currenttile.tile in cities):
                     resetFitnessTraining()
-            # Collect any money waiting at bank
+            
             if (self.currenttile.tile in cities):
+                # Make City Page
+                self.make_citypage(self.currenttile.tile)
+                # Collect any money waiting at bank
                 self.coins += self.bank[self.currenttile.tile]
                 self.updateTitleValue('entrepreneur', self.bank[self.currenttile.tile])
                 self.bank[self.currenttile.tile] = 0
@@ -3828,21 +3783,6 @@ class CraftingTable(GridLayout):
         return items
     
 #%% Player Track: Quests
-quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player.max_actions',
-             (1, 8): "'fruit' in self.playerTrack.player.items",
-             (2, 3): "self.quests[2, 6].status != 'started'",
-             (2, 5): "self.quests[1, 6].status == 'complete'",
-             (2, 6): "self.quests[2, 3].status != 'started'",
-             (2, 7): "self.quests[1, 4].status == 'complete'",
-             (3, 4): "self.playerTrack.player.Combat >= 40",
-             (3, 6): "StartofSkirmish()", # [INCOMPLETE] Figure out if beginning of skirmish for a city -- then choose that city
-             (3, 8): "self.quests[1, 7].status == 'complete'",
-             (4, 1): "self.quests[2, 5].status == 'complete'",
-             (4, 7): "(self.quests[1, 2].status == 'complete') and (self.playerTrack.player.skills['Crafting'] >= 6)",
-             (5, 5): "self.playerTrack.player.coins >= 40",
-             (5, 6): "self.quests[1, 8].status == 'complete'",
-             (5, 7): "self.quests[2, 8].status == 'complete'",
-             (5, 8): "self.playerTrack.player.skills['Crafting'] >= 12"}
 
 def getQuest(stage, mission):
     P = lclPlayer()
@@ -3859,11 +3799,12 @@ def FindPet(_=None):
         output("You found the pet! You get 1 coin!", 'green')
         P.coins += 1
         P.PlayerTrack.Quest.update_quest_status((1, 1), 'complete')
-        
+
     else:
         output("Unable to find the pet.", 'yellow')
     exitActionLoop()()
-    
+
+
 def CleanHome(_=None):
     P = lclPlayer()
     if P.paused:
@@ -3876,12 +3817,14 @@ def CleanHome(_=None):
         P.addItem('beads', 1)
         P.PlayerTrack.Quest.update_quest_status((1, 2), 'complete')
     exitActionLoop()()
-    
+
+
 def GaurdHome(_=None):
     P = lclPlayer()
     if P.paused:
         return
     B = getQuest(1, 3)
+
     def Reward():
         actions = {'Tin': getItem('tin', 1, action_amt=0),
                    'Iron': getItem('iron', 1, action_amt=0),
@@ -3890,27 +3833,33 @@ def GaurdHome(_=None):
         P.PlayerTrack.Quest.update_quest_status((1, 3), 'complete')
         output("The owner wants to reward you for gaurding the house! Choose one of the following:", 'blue')
         actionGrid(actions, False)
+
     def Consequence():
         P.PlayerTrack.Quest.update_quest_status((1, 3), 'failed')
+
     B.count = B.count + 1 if hasattr(B, 'count') else 1
     output("You spent an action gaurding the house")
     if B.count >= 2:
-        encounter('Robber', [6, 6], [P.combatstyle], Reward, consequence=Consequence, background_img='images\\resized\\background\\cottage.png')
+        encounter('Robber', [6, 6], [P.combatstyle], Reward, consequence=Consequence,
+                  background_img='images\\resized\\background\\cottage.png')
     else:
         exitActionLoop()()
-        
+
+
 def OfferCraft(_=None):
     P = lclPlayer()
     if P.paused:
         return
+
     def Offer(space, _=None):
         sellprice = P.PlayerTrack.craftingTable.sell_value(space)
         persuasion = P.activateSkill("Persuasion")
-        r = rbtwn(1, 4, None, sellprice+persuasion, 'Persuasion ')
+        r = rbtwn(1, 4, None, sellprice + persuasion, 'Persuasion ')
         if r <= (sellprice + persuasion):
             def lvlUp(skill, _=None):
                 P.updateSkill(skill, 1, 6)
                 exitActionLoop()()
+
             P.activateSkill("Persuasion")
             P.PlayerTrack.craftingTable.rmv_craft(space)
             output("The boy accepted your craft!", 'green')
@@ -3925,13 +3874,15 @@ def OfferCraft(_=None):
         else:
             output("Unable to convince the boy to accept your craft.", 'yellow')
             exitActionLoop()()
-    actions = {'Cancel':exitActionLoop(amt=0)}
+
+    actions = {'Cancel': exitActionLoop(amt=0)}
     if P.PlayerTrack.craftingTable.space_items[0] > 1:
         actions["Craft 1"] = partial(Offer, 0)
     if P.PlayerTrack.craftingTable.space_items[1] > 1:
         actions["Craft 2"] = partial(Offer, 1)
     actionGrid(actions, False)
-    
+
+
 def SpareWithBoy(_=None):
     P = lclPlayer()
     if P.paused:
@@ -3944,6 +3895,7 @@ def SpareWithBoy(_=None):
         P.PlayerTrack.Quest.update_quest_status((1, 5), 'complete')
     exitActionLoop()()
 
+
 def checkBook():
     P = lclPlayer()
     for item in P.items:
@@ -3951,20 +3903,24 @@ def checkBook():
             return True
     return False
 
+
 def OfferBook(_=None):
     P = lclPlayer()
     if P.paused:
         return
+
     def Offer(book, _=None):
         P.addItem(book, -1)
         P.PlayerTrack.Quest.update_quest_status((1, 6), 'complete')
         exitActionLoop()()
+
     actions = {"Cancel": exitActionLoop(amt=0)}
     for item in P.items:
         if 'book' in item:
             actions[item] = partial(Offer, item)
     actionGrid(actions, False)
-    
+
+
 def OfferSand(_=None):
     P = lclPlayer()
     if P.paused:
@@ -3972,14 +3928,16 @@ def OfferSand(_=None):
     P.addItem('sand', -1)
     P.PlayerTrack.Quest.update_quest_status((1, 7), 'complete')
     exitActionLoop()()
-    
+
+
 def ZooKeeper(_=None):
     P = lclPlayer()
     if P.paused:
         return
     P.PlayerTrack.Quest.update_quest_status((1, 8), 'complete')
     exitActionLoop()()
-    
+
+
 def ApplyCubes(_=None):
     P = lclPlayer()
     if P.paused:
@@ -3994,26 +3952,33 @@ def ApplyCubes(_=None):
         P.free_smithing_rent = True
         P.PlayerTrack.Quest.update_quest_status((2, 1), 'complete')
     exitActionLoop()()
-    
+
+
 def WaitforRobber(_=None):
     P = lclPlayer()
     if P.paused:
         return
+
     def Reward(_=None):
-        output("The Robber is scared off! Market owners will now give you a discount of 1 coin for items costing 5+ coins!", 'green')
+        output(
+            "The Robber is scared off! Market owners will now give you a discount of 1 coin for items costing 5+ coins!",
+            'green')
         P.city_discount = 1
-        P.city_discount_threshold = 5        
+        P.city_discount_threshold = 5
         P.PlayerTrack.Quest.update_quest_status((2, 2), 'complete')
+
     stealth = P.activateSkill("Stealth")
     r = rbtwn(0, 4, None, stealth, "Stealth ")
     if r <= stealth:
         P.useSkill("Stealth")
         output("You find and suprise the Robber!")
-        encounter("Robber", [30, 30], [P.combatstyle], Reward, consequence=Reward, encounter=-1, background_img='images\\resized\\background\\city_night.png')
+        encounter("Robber", [30, 30], [P.combatstyle], Reward, consequence=Reward, encounter=-1,
+                  background_img='images\\resized\\background\\city_night.png')
     else:
         output("You were not able to find the Robber", 'yellow')
         exitActionLoop()()
-        
+
+
 def BeginProtection(_=None):
     P = lclPlayer()
     sorted_cities = sorted(cities)
@@ -4023,7 +3988,8 @@ def BeginProtection(_=None):
     furthest_city = np.random.choice(np.array(sorted_cities)[distances == np.max(distances)])
     output(f"The Nobleman requests you to protect him until reaching {furthest_city}", 'blue')
     P.PlayerTrack.Quest.quests[2, 3].furthest_city = furthest_city
-    
+
+
 def MotherSerpent(_=None):
     P = lclPlayer()
     coord, distance, path = P.currenttile.findNearest('pond')
@@ -4031,7 +3997,8 @@ def MotherSerpent(_=None):
     P.PlayerTrack.Quest.quests[2, 4].pond = coord
     P.parentBoard.gridtiles[coord].color = (1, 1.5, 1, 1)
     P.group["Companion"] = npc_stats(35)
-    
+
+
 def LibrariansSecret(_=None):
     P = lclPlayer()
     coord, distance, path = P.currenttile.findNearest('oldlibrary')
@@ -4039,7 +4006,8 @@ def LibrariansSecret(_=None):
     P.PlayerTrack.Quest.quests[2, 5].coord = coord
     P.parentBoard.gridtiles[coord].color = (1, 1.5, 1, 1)
     P.PlayerTrack.Quest.quests[2, 5].has_book = False
-    
+
+
 def HandOverBook(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4047,7 +4015,8 @@ def HandOverBook(_=None):
     P.PlayerTrack.Quest.update_quest_status((2, 5), 'complete')
     output("You can now gain 8xp from reading books!", 'green')
     P.standard_read_xp = 8
-    
+
+
 def TheLetter(_=None):
     P = lclPlayer()
     sorted_cities = sorted(cities)
@@ -4057,14 +4026,17 @@ def TheLetter(_=None):
     furthest_city = np.random.choice(np.array(sorted_cities)[distances == np.max(distances)])
     output(f"You are requested to take the letter to {furthest_city}", 'blue')
     P.PlayerTrack.Quest.quests[2, 6].furthest_city = furthest_city
-    
+
+
 def GiveOresToSmith(_=None):
     P = lclPlayer()
     if P.paused:
         return
+
     def rewards(items, choices_left=2):
-        actions = {(item[0].upper()+item[1:]):partial(choose_ore, item, items, choices_left) for item in items}
+        actions = {(item[0].upper() + item[1:]): partial(choose_ore, item, items, choices_left) for item in items}
         actionGrid(actions, False)
+
     def choose_ore(item, from_items, choices_left, _=None):
         choices_left -= 1
         from_items.pop(item)
@@ -4073,11 +4045,13 @@ def GiveOresToSmith(_=None):
             rewards(from_items, choices_left)
         else:
             exitActionLoop()()
+
     for item in {'aluminum', 'nickel', 'tantalum', 'kevlium'}:
         P.addItem(item, -1)
     P.PlayerTrack.Quest.update_quest_status((2, 7), 'complete')
     output("Choose 2 of the following ores:", 'blue')
     rewards({'titanium', 'chromium', 'tungsten', 'diamond'}, 2)
+
 
 def PursuadeStealthMaster(_=None):
     P = lclPlayer()
@@ -4089,10 +4063,14 @@ def PursuadeStealthMaster(_=None):
     elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'has_book') and P.PlayerTrack.Quest.quests[2, 8].has_book:
         output("You already own the book!", 'yellow')
         exitActionLoop(amt=0)()
-    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]>0) and (P.currentcoord==P.PlayerTrack.Quest.quests[2, 8].coord):
-        output(f"You need to wait {P.PlayerTrack.Quest.quests[2, 8].wait_rounds} more rounds for master to write the book", 'yellow')
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8] > 0) and (
+            P.currentcoord == P.PlayerTrack.Quest.quests[2, 8].coord):
+        output(
+            f"You need to wait {P.PlayerTrack.Quest.quests[2, 8].wait_rounds} more rounds for master to write the book",
+            'yellow')
         exitActionLoop(amt=0)()
-    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8]==0) and (P.currentcoord==P.PlayerTrack.Quest.quests[2, 8].coord):
+    elif hasattr(P.PlayerTrack.Quest.quests[2, 8], 'wait_rounds') and (P.PlayerTrack.Quest.quests[2, 8] == 0) and (
+            P.currentcoord == P.PlayerTrack.Quest.quests[2, 8].coord):
         P.PlayerTrack.Quest.quests[2, 8].has_book = True
         output("The stealth master hands you the book, now present it to the quest giver at home!", 'blue')
         exitActionLoop('minor')()
@@ -4100,7 +4078,9 @@ def PursuadeStealthMaster(_=None):
         persuasion = P.activateSkill("Persuasion")
         r = rbtwn(1, 8, None, persuasion, 'Persuasion ')
         if r <= persuasion:
-            output("You convinced the master stealth master to write you a special stealth book! Come back in 5 rounds to pick it up!", 'blue')
+            output(
+                "You convinced the master stealth master to write you a special stealth book! Come back in 5 rounds to pick it up!",
+                'blue')
             P.PlayerTrack.Quest.quests[2, 8].wait_rounds = 5
             P.PlayerTrack.Quest.quests[2, 8].coord = P.currentcoord
         else:
@@ -4111,6 +4091,7 @@ def PursuadeStealthMaster(_=None):
         output("You have already persuaded a stealth master to write you a book!", 'red')
         exitActionLoop(amt=0)()
 
+
 def PresentStealthBook(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4118,11 +4099,13 @@ def PresentStealthBook(_=None):
     P.PlayerTrack.Quest.update_quest_status((2, 8), 'complete')
     P.updateSkill('Stealth', 2, 8)
     exitActionLoop('minor')()
-            
+
+
 def FeedThePoor(_=None):
     P = lclPlayer()
     if P.paused:
         return
+
     def GiveItem(item, _=None):
         P.addItem(item, -1)
         P.PlayerTrack.Quest.quests[3, 1].food_given += 1
@@ -4132,6 +4115,7 @@ def FeedThePoor(_=None):
             output("Your max eating per action increases by 2!", 'green')
             P.max_eating += 2
         exitActionLoop('minor')
+
     if not hasattr(P.PlayerTrack.Quest.quests[3, 1], 'food_given'):
         P.PlayerTrack.Quest.quests[3, 1].food_given = 0
     actions = {'Cancel': exitActionLoop(amt=0)}
@@ -4146,34 +4130,40 @@ def FeedThePoor(_=None):
     else:
         actionGrid(actions, False)
 
+
 def resetFitnessTraining(_=None):
     P = lclPlayer()
     output("The three adventurers leave you and you must restart the Fitness Training", 'red')
     for i in range(3):
-        P.group.pop(f'Adventurer {i+1}')
+        P.group.pop(f'Adventurer {i + 1}')
     P.PlayerTrack.Quest.update_quest_status((3, 2), 'not started')
+
 
 def finishFitnessTraining(_=None):
     P = lclPlayer()
     output("The three adventurers leave you")
     for i in range(3):
-        P.group.pop(f'Adventurer {i+1}')
+        P.group.pop(f'Adventurer {i + 1}')
     P.PlayerTrack.Quest.update_quest_status((3, 2), 'complete')
     for skill in ['Gathering', 'Excavating', 'Survival']:
         P.updateSkill(skill, 1, 8)
     output("Max fatigue increases by 3", 'green')
     P.max_fatigue += 3
 
+
 def FitnessTraining(_=None):
     P = lclPlayer()
-    output("3 Adventurers group up with you. First go to any mountain and find ores worth a total of 5 coins (sell cost) and climb to the top.", 'blue')
+    output(
+        "3 Adventurers group up with you. First go to any mountain and find ores worth a total of 5 coins (sell cost) and climb to the top.",
+        'blue')
     for i in range(3):
-        P.group[f'Adventurer {i+1}'] = npc_stats(15)
+        P.group[f'Adventurer {i + 1}'] = npc_stats(15)
     P.PlayerTrack.Quest.quests[3, 2].total_ore_cost = 0
     P.PlayerTrack.Quest.quests[3, 2].reached_top = False
     P.PlayerTrack.Quest.quests[3, 2].completed_mountain = False
     P.PlayerTrack.Quest.quests[3, 2].meat_collected = 0
-    
+
+
 def LearnFromMonk(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4184,7 +4174,8 @@ def LearnFromMonk(_=None):
         for skill in ['Excavating', 'Survival']:
             P.updateSkill(skill, 1, 12)
     exitActionLoop()()
-    
+
+
 def SearchForMonster(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4197,11 +4188,15 @@ def SearchForMonster(_=None):
             if rewarded:
                 P.updateAttribute("Cunning", 1, 8)
                 P.updateAttribute("Technique", 1, 8)
-        encounter('Monster', [55, 55], ['Physical', 'Elemental', 'Trooper', 'Wizard'], monster_flees, consequence=partial(monster_flees, False), background_img='images\\resized\\background\\city_night.png')
+
+        encounter('Monster', [55, 55], ['Physical', 'Elemental', 'Trooper', 'Wizard'], monster_flees,
+                  consequence=partial(monster_flees, False),
+                  background_img='images\\resized\\background\\city_night.png')
     else:
         output("You fail to find the monster.", 'yellow')
         exitActionLoop()()
-        
+
+
 def TeachFishing(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4221,6 +4216,7 @@ def TeachFishing(_=None):
         output("Unable to teach a man to fish.", 'yellow')
     exitActionLoop()()
 
+
 def StartofSkirmish(_=None):
     P = lclPlayer()
     firstAction = P.actions == P.max_actions
@@ -4231,13 +4227,15 @@ def StartofSkirmish(_=None):
             skirmStart = True
     return firstAction * sufficientMinor * skirmStart
 
+
 def JoinFight(_=None):
     P = lclPlayer()
     city_against = P.PlayerTrack.Quest.quests[3, 6].city_against
-    foename = city_against[0].upper()+city_against[1:]+' Fighter'
+    foename = city_against[0].upper() + city_against[1:] + ' Fighter'
     foestyle = cities[city_against]['Combat Style']
-    encounter(foename, [30, 50], [foestyle], {'coins':[3, 6]}, enc=0)
-    
+    encounter(foename, [30, 50], [foestyle], {'coins': [3, 6]}, enc=0)
+
+
 def TransportToField(_=None):
     P = lclPlayer()
     skirmishesPossible = set()
@@ -4253,7 +4251,8 @@ def TransportToField(_=None):
     P.PlayerTrack.Quest.quests[3, 6].city_against = city_against
     P.PlayerTrack.Quest.quests[3, 6].action = 1
     JoinFight()
-    
+
+
 def PresentCraftBooks(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4267,7 +4266,8 @@ def PresentCraftBooks(_=None):
         capital_info[P.birthcity]['efficiency'] += 1
         socket_client.send('[EFFICIENCY]', P.birthcity)
     exitActionLoop()()
-    
+
+
 def DistributeSand(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4283,13 +4283,15 @@ def DistributeSand(_=None):
         output("New glass making school gives you 3 pieces of glass", 'green')
         P.addItem('glass', 3)
     exitActionLoop('minor')()
-    
+
+
 def FillLibrary(_=None):
     P = lclPlayer()
     if P.paused:
         return
     if not hasattr(P.PlayerTrack.Quest.quests[4, 1], 'books_given'):
         P.PlayerTrack.Quest.quests[4, 1].books_given = set()
+
     def give_book(book, _=None):
         P.PlayerTrack.Quest.quests[4, 1].books_given.add(book)
         output("You have now given: {', '.join(list(P.PlayerTrack.Quest.quests[4, 1].books_given))}", 'blue')
@@ -4297,12 +4299,14 @@ def FillLibrary(_=None):
             P.PlayerTrack.Quest.update_quest_status((4, 1), 'complete')
             P.updateSkill("Critical Thinking", 2 if P.skills['Critical Thinking'] < 8 else 1)
         exitActionLoop('minor')()
-    actions = {'Cancel':exitActionLoop(amt=0)}
+
+    actions = {'Cancel': exitActionLoop(amt=0)}
     for item in P.items:
         if ('book' in item) and (item not in P.PlayerTrack.Quest.quests[4, 1].books_given):
             actions[item] = partial(give_book, item)
     actionGrid(actions, False)
-    
+
+
 def FindWarrior(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4323,7 +4327,8 @@ def FindWarrior(_=None):
         r = rbtwn(1, 12, None, excavating, 'Excavating ')
         if r <= excavating:
             P.useSkill("Excavating")
-            output(f"You found a {P.birthcity} warrior in {city}! He responds to your call and heads to {P.birthcity}!", 'green')
+            output(f"You found a {P.birthcity} warrior in {city}! He responds to your call and heads to {P.birthcity}!",
+                   'green')
             P.PlayerTrack.Quest.quests[4, 2].cities_found.add(city)
             if len(P.PlayerTrack.Quest.quests[4, 2].cities_found) >= 7:
                 P.PlayerTrack.Quest.update_quest_status((4, 2), 'complete')
@@ -4332,16 +4337,19 @@ def FindWarrior(_=None):
                 P.current[P.attributes["Hit Points"]] += 2
                 P.boosts[P.attributes["Stability"]] += 2
                 P.boosts[P.attributes["Stability"]] += 2
-        elif (len(P.PlayerTrack.Quest.quests[4, 2].cities_searched) - len(P.PlayerTrack.Quest.quests[4, 2].cities_found)) >= 7:
+        elif (len(P.PlayerTrack.Quest.quests[4, 2].cities_searched) - len(
+                P.PlayerTrack.Quest.quests[4, 2].cities_found)) >= 7:
             output("It is no longer possible for you to find 7 warriors!", 'red')
             P.PlayerTrack.Quest.update_quest_status((4, 2), 'failed')
         else:
-            failsleft = 7 - (len(P.PlayerTrack.Quest.quests[4, 2].cities_searched) - len(P.PlayerTrack.Quest.quests[4, 2].cities_found))
+            failsleft = 7 - (len(P.PlayerTrack.Quest.quests[4, 2].cities_searched) - len(
+                P.PlayerTrack.Quest.quests[4, 2].cities_found))
             output(f"You failed to find a warrior in {city}! You can only fail {failsleft} more times!", 'red')
         exitActionLoop()()
     else:
         output("You have already searched this city!", 'yellow')
-        
+
+
 def ConvinceMarketLeader(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4350,7 +4358,7 @@ def ConvinceMarketLeader(_=None):
         P.PlayerTrack.Quest.quests[4, 3].count = 0
     bartering = P.activateSkill("Bartering")
     persuasion = P.activateSkill("Persuasion")
-    r = rbtwn(1, 24, None, bartering+persuasion, 'Convincing Market Leader ')
+    r = rbtwn(1, 24, None, bartering + persuasion, 'Convincing Market Leader ')
     if r <= (bartering + persuasion):
         P.useSkill("Bartering")
         P.useSkill("Persuasion")
@@ -4362,11 +4370,13 @@ def ConvinceMarketLeader(_=None):
             capital_info[P.birthcity]['discount'] += 1
             socket_client.send('[DISCOUNT]', P.birthcity)
         else:
-            output("You still need to convince {6 - P.PlayerTrack.Quest.quests[4, 3].count} more market leaders.", 'blue')
+            output("You still need to convince {6 - P.PlayerTrack.Quest.quests[4, 3].count} more market leaders.",
+                   'blue')
     else:
         output("You were unable to convince them this time.", 'yellow')
     exitActionLoop()()
-    
+
+
 def PursuadeTrader(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4385,7 +4395,8 @@ def PursuadeTrader(_=None):
     else:
         output("Unable to convince the trader.", 'yellow')
     exitActionLoop()()
-    
+
+
 def FindAndPursuadeLeader(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4395,7 +4406,9 @@ def FindAndPursuadeLeader(_=None):
     if not hasattr(P.PlayerTrack.Quest.quests[4, 5], 'skirmish'):
         P.PlayerTrack.Quest.quests[4, 5].skirmish = {P.currenttile.tile, P.birthcity}
     if {P.currenttile.tile, P.birthcity} != P.PlayerTrack.Quest.quests[4, 5].skirmish:
-        output(f"You already began trying to reduce tension between {' and '.join(list(P.PlayerTrack.Quest.quests[4, 5].skirmish))}. You must stick to that!", 'yellow')
+        output(
+            f"You already began trying to reduce tension between {' and '.join(list(P.PlayerTrack.Quest.quests[4, 5].skirmish))}. You must stick to that!",
+            'yellow')
         return
     excavating = P.activateSkill("Excavating")
     r = rbtwn(1, 10, None, excavating, "Excavating ")
@@ -4407,7 +4420,9 @@ def FindAndPursuadeLeader(_=None):
         if r <= persuasion:
             P.useSkill("Persuasion")
             P.PlayerTrack.Quest.quests[4, 5].count += 1
-            output(f"You convinced the leader to lessen the war effort! {5 - P.PlayerTrack.Quest.quests[4, 5].count} left to go!", 'blue')
+            output(
+                f"You convinced the leader to lessen the war effort! {5 - P.PlayerTrack.Quest.quests[4, 5].count} left to go!",
+                'blue')
             if P.PlayerTrack.Quest.quests[4, 5].count >= 5:
                 P.PlayerTrack.Quest.update_quest_status((4, 5), 'complete')
                 skirmish = frozenset([P.birthcity, P.currenttile.tile])
@@ -4419,7 +4434,8 @@ def FindAndPursuadeLeader(_=None):
     else:
         output("Failed to find a leader.", 'yellow')
     exitActionLoop()()
-        
+
+
 def StoreTatteredBook(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4428,18 +4444,22 @@ def StoreTatteredBook(_=None):
         P.PlayerTrack.Quest.quests[4, 6].count = 1
     else:
         P.PlayerTrack.Quest.quests[4, 6].count += 1
-    output(f"You found an old book containing long lost history! You have found {P.PlayerTrack.Quest.quests[4, 6].count} so far.", 'blue')
+    output(
+        f"You found an old book containing long lost history! You have found {P.PlayerTrack.Quest.quests[4, 6].count} so far.",
+        'blue')
     exitActionLoop()()
-    
+
+
 def DeliverTatteredBooks(_=None):
     P = lclPlayer()
     if P.paused:
         return
     P.PlayerTrack.Quest.update_quest_status((4, 6), 'complete')
-    coins = min([40, 10*P.PlayerTrack.Quest.quests[4, 6].count])
+    coins = min([40, 10 * P.PlayerTrack.Quest.quests[4, 6].count])
     output(f"You received {coins} coins!", 'green')
     P.coins += coins
     exitActionLoop()()
+
 
 def IncreaseCapacity(city, amt, _=None):
     P = lclPlayer()
@@ -4447,12 +4467,14 @@ def IncreaseCapacity(city, amt, _=None):
     if P.home[city]:
         P.max_capacity += amt
 
+
 def HomeRenovations(_=None):
     P = lclPlayer()
     if P.paused:
         return
     if not hasattr(P.PlayerTrack.Quest.quests[4, 7], 'remaining'):
-        P.PlayerTrack.Quest.quests[4, 7].remaining = {'bark':5, 'clay':3, 'glass':3, 'leather':2}
+        P.PlayerTrack.Quest.quests[4, 7].remaining = {'bark': 5, 'clay': 3, 'glass': 3, 'leather': 2}
+
     def distribute(item, _=None):
         P.PlayerTrack.Quest.quests[4, 7].remaining[item] -= 1
         allZero = True
@@ -4465,25 +4487,30 @@ def HomeRenovations(_=None):
             IncreaseCapacity(P.birthcity, 3)
             socket_client.send('[CAPACITY]', [P.birthcity, 3])
         exitActionLoop('minor')()
-    actions = {'Cancel':exitActionLoop(amt=0)}
+
+    actions = {'Cancel': exitActionLoop(amt=0)}
     for item in P.items:
-        if (item in P.PlayerTrack.Quest.quests[4, 7].remaining) and (P.PlayerTrack.Quest.quests[4, 7].remaining[item] > 0):
-            actions[item[0].upper()+item[1:]] = partial(distribute, item)
+        if (item in P.PlayerTrack.Quest.quests[4, 7].remaining) and (
+                P.PlayerTrack.Quest.quests[4, 7].remaining[item] > 0):
+            actions[item[0].upper() + item[1:]] = partial(distribute, item)
     actionGrid(actions, False)
-    
+
+
 def ConvinceWarriorsToRaid(_=None):
     P = lclPlayer()
     if P.paused:
         return
     if not hasattr(P.PlayerTrack.Quest.quests[4, 8], 'cities'):
         P.PlayerTrack.Quest.quests[4, 8].cities = {}
-    elif (len(P.PlayerTrack.Quest.quests[4, 8]) >= 4) and (P.currenttile.tile not in P.PlayerTrack.Quest.quests[4, 8].cities):
+    elif (len(P.PlayerTrack.Quest.quests[4, 8]) >= 4) and (
+            P.currenttile.tile not in P.PlayerTrack.Quest.quests[4, 8].cities):
         output("You have already started looking in other cities!", 'yellow')
         return
     if (P.birthcity not in P.PlayerTrack.Quest.quests[4, 8].cities) and (P.currenttile.tile != P.birthcity):
         output("You need to start with your city first!", 'yellow')
         return
-    elif (P.currenttile.tile in P.PlayerTrack.Quest.quests[4, 8].cities) and (P.PlayerTrack.Quest.quests[4, 8].cities[P.currenttile.tile] >= 3):
+    elif (P.currenttile.tile in P.PlayerTrack.Quest.quests[4, 8].cities) and (
+            P.PlayerTrack.Quest.quests[4, 8].cities[P.currenttile.tile] >= 3):
         output("You have already found and convinced 3 warriors in this city", 'yellow')
         return
     elif P.currenttile.tile in Skirmishes[2][P.birthcity]:
@@ -4501,7 +4528,9 @@ def ConvinceWarriorsToRaid(_=None):
         if r <= persuasion:
             P.PlayerTrack.Quest.quests[4, 8].cities[P.currenttile.tile] += 1
             if P.PlayerTrack.Quest.quests[4, 8].cities[P.currenttile.tile] >= 3:
-                output(f"You have convinced 3 warriors in {P.currenttile.tile} to raid the caves. They set out and do so!", 'green')
+                output(
+                    f"You have convinced 3 warriors in {P.currenttile.tile} to raid the caves. They set out and do so!",
+                    'green')
                 if len(P.PlayerTrack.Quest.quests[4, 8].cities) >= 4:
                     allFinished = True
                     for val in P.PlayerTrack.Quest.quests[4, 8].cities.values():
@@ -4510,13 +4539,16 @@ def ConvinceWarriorsToRaid(_=None):
                     if allFinished:
                         P.PlayerTrack.Quest.update_quest_status((4, 8), 'completed')
             else:
-                output("You persuade them to raid the caves once all three in the {P.currentile.tile} are ready. You have convinced {P.PlayerTrack.Quest.quests[4, 8].cities[P.currenttile.tile]} so far in {P.currentile.tile}!", 'blue')
+                output(
+                    "You persuade them to raid the caves once all three in the {P.currentile.tile} are ready. You have convinced {P.PlayerTrack.Quest.quests[4, 8].cities[P.currenttile.tile]} so far in {P.currentile.tile}!",
+                    'blue')
         else:
             output("Unable to persuade the warrior", 'yellow')
     else:
         output("Unable to find any warrior", 'yellow')
     exitActionLoop()()
-    
+
+
 def ConvinceWarriorToJoin(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4525,10 +4557,10 @@ def ConvinceWarriorToJoin(_=None):
     excavating = P.activateSkill("Excavating")
     r = rbtwn(1, 12, None, excavating, 'Excavating ')
     if r <= excavating:
-        lvl = max(rbtwn(40, 80, max([1, excavating//3])))
+        lvl = max(rbtwn(40, 80, max([1, excavating // 3])))
         output(f"You found a warrior lvl {lvl}")
         persuasion = P.activateSkill("Persuasion")
-        r = rbtwn(1, 6 + round((80-lvl)/6), None, persuasion, 'Persuasion ')
+        r = rbtwn(1, 6 + round((80 - lvl) / 6), None, persuasion, 'Persuasion ')
         if r <= persuasion:
             output("You convinced the warrior to join you for 6 rounds! Any other warriors leave you group.", 'green')
             P.has_warrior = 6
@@ -4539,11 +4571,13 @@ def ConvinceWarriorToJoin(_=None):
     else:
         output("Unable to find any warriors.", 'yellow')
     exitActionLoop()()
-    
+
+
 def GoldStart(_=None):
     P = lclPlayer()
     P.PlayerTrack.Quest.quests[5, 1].has_gold = False
-    
+
+
 def SmithGold(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4551,13 +4585,16 @@ def SmithGold(_=None):
     persuasion = P.activateSkill("Persuasion")
     r = rbtwn(1, 14, None, persuasion, 'Persuasion ')
     if r <= persuasion:
-        output("You were able to convince the smith to make the dagger! Mayor rewards you with 20 coins and your impact stability reduces by 1.", 'green')
+        output(
+            "You were able to convince the smith to make the dagger! Mayor rewards you with 20 coins and your impact stability reduces by 1.",
+            'green')
         P.PlayerTrack.Quest.update_quest_status((5, 1), 'complete')
         P.coins += 20
         P.stability_impact += 1
     else:
         output("Unable to convince the smith", 'yellow')
     exitActionLoop()()
+
 
 def PlaceFriend(_=None):
     P = lclPlayer()
@@ -4567,7 +4604,8 @@ def PlaceFriend(_=None):
     randPos = np.random.choice(allPos)
     P.PlayerTrack.Quest.quests[5, 2].coord = randPos
     P.PlayerTrack.Quest.quests[5, 2].has_friend = False
-    
+
+
 def ShowFriend(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4577,7 +4615,8 @@ def ShowFriend(_=None):
     P.coins += 20
     P.max_actions += 1
     exitActionLoop('minor')()
-    
+
+
 def KilledMonster(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4590,13 +4629,15 @@ def KilledMonster(_=None):
         output("You reduced the tensions between {' and '.join(list(skirmish))} by a factor of 1!", 'green')
         socket_client.send('[REDUCED TENSION]', [skirmish, 1])
     exitActionLoop('minor')()
-    
+
+
 def ShowRareOre(_=None):
     P = lclPlayer()
     if P.paused:
         return
     rares = {'shinopsis', 'ebony', 'astatine', 'promethium'}
     raresLeft = rares.intersection(P.items)
+
     def giveRare(raresSelected, raresLeft, _=None):
         if len(raresSelected) >= 2:
             P.PlayerTrack.Quest.update_quest_status((5, 4), 'complete')
@@ -4613,8 +4654,10 @@ def ShowRareOre(_=None):
                 possibleLeft = raresLeft.difference({rare})
                 actions[rare] = partial(giveRare, possibleSelect, possibleLeft)
             actionGrid(actions, False)
+
     giveRare(set(), raresLeft)
-    
+
+
 def ConvinceBarterMaster(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4626,18 +4669,22 @@ def ConvinceBarterMaster(_=None):
     r = rbtwn(1, 20, None, persuasion, 'Persuasion ')
     if r <= persuasion:
         P.useSkill("Persuasion", 2, 7)
-        output("You convinced the Bartering Master to teach the mayor his knowledge! You pay him 40 coins. Your max minor actions increase by 4!", 'green')
+        output(
+            "You convinced the Bartering Master to teach the mayor his knowledge! You pay him 40 coins. Your max minor actions increase by 4!",
+            'green')
         P.coins -= 40
         P.PlayerTrack.Quest.update_quest_status((5, 5), 'complete')
         P.max_minor_actions += 4
     else:
         output("Unable to convince the Bartering Master", 'yellow')
     exitActionLoop()()
-    
+
+
 def HighlightMammothTile(_=None):
     P = lclPlayer()
     P.parentBoard.gridtiles[P.PlayerTrack.Quest.quests[1, 8].coord_found].color = (1, 1.5, 1, 1)
     output("In case you forgot, the tile you found the baby mammoth is tinted green")
+
 
 def KilledMammoth(_=None):
     P = lclPlayer()
@@ -4648,7 +4695,8 @@ def KilledMammoth(_=None):
     P.addItem('gems', 3)
     P.addItem('diamond', 3)
     exitActionLoop('minor')()
-    
+
+
 def AskMasterStealthForMayor(_=None):
     P = lclPlayer()
     if P.paused:
@@ -4656,9 +4704,10 @@ def AskMasterStealthForMayor(_=None):
     persuasion = P.activateSkill("Persuasion")
     cunning = P.current[P.attributes["Cunning"]]
     critthink = P.current[P.attributes["Critical Thinking"]]
-    r = rbtwn(1, 36, None, (persuasion+cunning+critthink), 'Convicing ')
+    r = rbtwn(1, 36, None, (persuasion + cunning + critthink), 'Convicing ')
     if r <= (persuasion + cunning + critthink):
-        output("You convinced the Stealth Master to teach the mayor! You get 2 stealth books and 1 free lesson to use.", 'green')
+        output("You convinced the Stealth Master to teach the mayor! You get 2 stealth books and 1 free lesson to use.",
+               'green')
         P.PlayerTrack.Quest.update_quest_status((5, 7), 'completed')
         P.addItem("stealth book", 2)
         P.PlayerTrack.Quest.quests[5, 7].used_lesson = False
@@ -4671,18 +4720,22 @@ def AskMasterStealthForMayor(_=None):
             if P.PlayerTrack.Quest.quests[5, 7].count >= 2:
                 P.PlayerTrack.Quest.update_quest_status((5, 7), 'failed')
     exitActionLoop()()
-                
+
+
 def GiftPerfectCraft(_=None):
     P = lclPlayer()
     if P.paused:
         return
     perfectCraft = {'gems', 'rubber', 'glass', 'ceramic', 'leather', 'scales', 'beads'}
     gifting = False
+
     def giftCraft(space):
         P.PlayerTrack.craftingTable.rmv_craft(space)
         P.PlayerTrack.Quest.update_quest_status((5, 8), 'completed')
-        output(f"You can now train in {P.birthcity} for free with Adept trainers and half price at Master trainers!", 'green')
+        output(f"You can now train in {P.birthcity} for free with Adept trainers and half price at Master trainers!",
+               'green')
         P.training_discount = True
+
     for space in [0, 1]:
         if P.PlayerTrack.craftingTable.getItems(space) == perfectCraft:
             giftCraft(space)
@@ -4692,7 +4745,22 @@ def GiftPerfectCraft(_=None):
         output(f"You do not posess the perfect craft of: {', '.join(list(perfectCraft))}", 'yellow')
     exitActionLoop('minor')()
     
-# Order: Action Name, Action Condition, Action Function
+quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player.max_actions',
+             (1, 8): "'fruit' in self.playerTrack.player.items",
+             (2, 3): "self.quests[2, 6].status != 'started'",
+             (2, 5): "self.quests[1, 6].status == 'complete'",
+             (2, 6): "self.quests[2, 3].status != 'started'",
+             (2, 7): "self.quests[1, 4].status == 'complete'",
+             (3, 4): "self.playerTrack.player.Combat >= 40",
+             (3, 6): "StartofSkirmish()", # [INCOMPLETE] Figure out if beginning of skirmish for a city -- then choose that city
+             (3, 8): "self.quests[1, 7].status == 'complete'",
+             (4, 1): "self.quests[2, 5].status == 'complete'",
+             (4, 7): "(self.quests[1, 2].status == 'complete') and (self.playerTrack.player.skills['Crafting'] >= 6)",
+             (5, 5): "self.playerTrack.player.coins >= 40",
+             (5, 6): "self.quests[1, 8].status == 'complete'",
+             (5, 7): "self.quests[2, 8].status == 'complete'",
+             (5, 8): "self.playerTrack.player.skills['Crafting'] >= 12"}
+
 quest_activate_response = {(2, 3): BeginProtection,
                            (2, 4): MotherSerpent,
                            (2, 5): LibrariansSecret,
@@ -4731,7 +4799,8 @@ city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (5, 4): ["Show Rare Ore", "len({'shinopsis', 'ebony', 'astatine', 'promethium'}.intersection(self.playerTrack.player.items))>=2", ShowRareOre],
                       (5, 6): ["Claim Reward", "hasattr(self.playerTrack.Quest.quests[5, 6], 'killed')", KilledMammoth],
                       (5, 8): ["Gift Perfect Craft", "({'gems', 'rubber', 'glass', 'ceramic', 'leather', 'scales', 'beads'} == self.playerTrack.craftingTable.getItems(0)) or ({'gems', 'rubber', 'glass', 'ceramic', 'leather', 'scales', 'beads'} == self.playerTrack.craftingTable.getItems(1))", GiftPerfectCraft]}
-   
+
+
 class Quest:
     def __init__(self, playerTrack):
         self.playerTrack = playerTrack
@@ -5617,46 +5686,15 @@ def player_ask_trade(username, _=None):
     socket_client.send('[TRADE]', {username: 'ask'})
 
 #%% City and Board Properties
-cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
-          'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
-          'demetry':{'Combat Style':'Elemental','Coins':9,'Knowledges':[('Bartering',2)],'Combat Boosts':[]},
-          'enfeir':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Cunning',2)]},
-          'fodker':{'Combat Style':'Trooper','Coins':5,'Knowledges':[('Smithing',1)],'Combat Boosts':[('Stability',2),('Def-Physical',2)]},
-          'glaser':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Survival',1)],'Combat Boosts':[('Def-Trooper',3),('Cunning',1)]},
-          'kubani':{'Combat Style':'Physical','Coins':3,'Knowledges':[('Crafting',1),('Gathering',1)],'Combat Boosts':[('Def-Wizard',3),('Agility',1)]},
-          'pafiz':{'Combat Style':'Wizard','Coins':4,'Knowledges':[('Persuasion',1)],'Combat Boosts':[('Def-Elemental',3)]},
-          'scetcher':{'Combat Style':'Physical','Coins':4,'Knowledges':[],'Combat Boosts':[('Attack',1),('Hit Points',1),('Def-Physical',1),('Def-Wizard',1),('Def-Elemental',1),('Def-Trooper',1)]},
-          'starfex':{'Combat Style':'Elemental','Coins':5,'Knowledges':[('Heating',1),('Gathering',1)],'Combat Boosts':[('Attack',2)]},
-          'tamarania':{'Combat Style':'Physical','Coins':7,'Knowledges':[('Smithing',2)],'Combat Boosts':[('Attack',2)]},
-          'tamariza':{'Combat Style':'Wizard','Coins':5,'Knowledges':[('Critical Thinking',1)],'Combat Boosts':[('Def-Physical',1),('Def-Elemental',2),('Hit Points',1)]},
-          'tutalu':{'Combat Style':'Trooper','Coins':3,'Knowledges':[('Excavating',2)],'Combat Boosts':[('Attack',3)]},
-          'zinzibar':{'Combat Style':'Physical','Coins':2,'Knowledges':[('Stealth',2)],'Combat Boosts':[('Agility',2),('Attack',1)]}}
-city_villages = {city: [] for city in cities} # Updated once the neighbors are defined
-sellPrice = {1:0, 2:1, 3:2, 4:2, 5:3, 6:3, 7:4, 8:5, 9:6}
-mrktPrice = {1:1, 2:3, 3:5, 4:6, 5:8, 6:9, 7:10, 8:12, 9:20}
-price2smithlvl = {1:1, 3:2, 6:3, 9:4}
-gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish':1,'cooked fish':2,'well cooked fish':3,'fruit':2},
-             'Crafting':{'string':1,'beads':1,'hide':1,'sand':1,'clay':2,'scales':2,'leather':2,'bark':2,'ceramic':3,'glass':5,'rubber':6,'gems':8},
-             'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
-             'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'crafting book':4, 'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
-             'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':3},
-             'Quests':{'cooling cubes':2}}
-clothSpecials = {'benfriege cloth':{'zinzibar','glaser','enfeir','starfex'},
-                 'enfeir cloth':{'benfriege','tutalu','pafiz'},
-                 'glaser cloth':{'pafiz','fodker','benfriege','tutalu','scetcher'},
-                 'pafiz cloth':{'zinzibar','glaser'},
-                 'scetcher cloth':{'glaser'},
-                 'starfex cloth':{'benfriege','tutalu','pafiz'},
-                 'tutalu cloth':{'zinzibar','glaser','enfeir'},
-                 'zinzibar cloth':{'benfriege','tutalu','pafiz','fodker'},
-                 'old fodker cloth':{'zinzibar','glaser'},
-                 'old zinzibar cloth':{'benfriege','tutalu','pafiz','fodker'},
-                 'luxurious cloth':{}}
-valid_items = []
-for category in gameItems:
-    valid_items += list(gameItems[category].keys())
-valid_items += list(clothSpecials.keys())
-valid_items = set(valid_items)
+cities = var.cities
+city_villages = var.city_villages
+sellPrice = var.sellPrice
+mrktPrice = var.mrktPrice
+price2smithlvl = var.price2smithlvl
+gameItems = var.gameItems
+clothSpecials = var.clothSpecials
+valid_items = var.valid_items
+
 game_launched = [False]
 hovering = [0]
 
@@ -5697,25 +5735,8 @@ def merge_positions(pos1, pos2):
             pos[key] = pos2[key]
     return pos
 
-positions = {'road': [(3, 1),(4, 1),(5, 1),(6, 1),(8, 1),(9, 1),(10, 1),(11, 2),(12, 2),(13, 2),(2, 2),(3, 2),(3, 3),(1, 3),(1, 4),(1, 5),(2, 5),(3, 5),
-                      (4, 6),(8, 2),(7, 3),(14, 3),(5, 4),(6, 4),(7, 4),(9, 4),(10, 4),(11, 4),(12, 4),(15, 4),(6, 5),(10, 5),(12, 5),(14, 5),(6, 6),(11, 6),
-                      (13, 6),(14, 6),(1, 7),(5, 7),(6, 7),(7, 7),(8, 7),(9, 7),(10, 7),(12, 7),(2, 8),(4, 8),(12, 8),(2, 9),(3, 9),(4, 9),(12, 9),(5, 10),
-                      (13, 10),(5, 11),(13, 11),(6, 12),(13, 12)],
-             'randoms': [(4, 2),(5, 2),(6, 2),(2, 3),(9, 2),(10, 2),(11, 1),(5, 3),(6, 3),(9, 3),(13, 3),(2, 4),(13, 4),(14, 4),(5, 5),(9, 5),(11, 5),(13, 5),
-                         (3, 6),(7, 6),(8, 6),(9, 6),(10, 6),(2, 7),(13, 7),(1, 8),(3, 8),(6, 8),(7, 8),(8, 8),(9, 8),(10, 8),(13, 8),(14, 8),(15, 8),(5, 9),
-                         (6, 9),(7, 9),(8, 9),(9, 9),(10, 9),(11, 9),(13, 9),(14, 9),(4, 10),(6, 10),(11, 10),(12, 10),(14, 10),(3, 11),(4, 11),(6, 11),
-                         (11, 11),(12, 11),(4, 12),(7, 12),(12, 12)],
-             'ruins': [(1, 1), (2, 0), (3, 0), (14, 0), (15, 1)],
-             'battle1': [(14, 2)], 'battle2': [(14, 1)],
-             'village1': [(0, 5),(7, 0),(4, 3),(12, 1),(8, 3),(10, 3),(15, 3),(5, 6),(12, 6),(14, 7),(1, 9),(5, 12),(12, 13)],
-             'village2': [(8, 0),(0, 6),(16, 2),(12, 3),(3, 4),(7, 5),(3, 7),(15, 7),(11, 8),(1, 10),(4, 13),(13, 14)],
-             'village3': [(7, 2),(4, 5),(8, 5),(16, 6),(0, 7),(5, 8),(1, 11),(5, 14),(14, 14)],
-             'village4': [(15, 5), (2, 6), (2, 11), (14, 13), (6, 14)],
-             'village5': [(3, 10), (14, 12), (6, 13)],
-             'fodker': [(2, 1)],'kubani': [(7, 1)],'scetcher': [(4, 4)],'pafiz': [(1, 6)],'tamariza': [(4, 7)],'zinzibar': [(15, 2)],'enfeir': [(13, 1)],
-             'tamarania': [(11, 3)],'demetry': [(8, 4)],'starfex': [(15, 6)],'anafola': [(11, 7)],'tutalu': [(2, 10)],'benfriege': [(5, 13)],'glaser': [(13, 13)],
-             'wilderness': [(7, 10),(8, 10),(9, 10),(10, 10),(7, 11),(8, 11),(9, 11),(10, 11),(8, 12),(9, 12),(10, 12),(11, 12),(7, 13),(11, 13)]}
-randoms = ['oldlibrary','outpost','cave','mountain','plains','pond']
+positions = var.positions
+randoms = var.randoms
 
 def get_dim(dx, dy):
     return int(xpix*dx), int((ypix * (dy-(dy//2))) + (xpix * (dy//2) / np.sqrt(3)))
@@ -5899,6 +5920,36 @@ def city_actions(city, _=None):
     if (P.PlayerTrack.Quest.quests[5, 7].status=='started') and (P.currentcoord == P.PlayerTrack.Quest.quests[2, 8].coord):
         actions["Approach Stealth Master"] = AskMasterStealthForMayor
     actionGrid(actions, True)
+    
+class CityPage(FloatLayout):
+    def __init__(self, city, player=None, **kwargs):
+        super().__init__(**kwargs)
+        logging.debug(f"Initiating City Page for {city}")
+        self.city = city
+        self.P = game_app.game_page.board_page.localPlayer if player is None else player
+        
+        # Set City Values
+        image_source = f'images\\cities\\{city}.png'
+        city_image = Image(source=image_source, pos=(0,0), size_hint=(1,1))
+        city_image.allow_stretch = True
+        city_image.fit_mode = 'contain'
+        self.add_widget(city_image)
+        
+        # Set Gate Buttons
+        for g, gate in var.gates.items():
+            gate_button = Button(text='Board', **gate)
+            gate_button.bind(on_press=self.switch2board)
+            self.add_widget(gate_button)
+
+        # Shack Rest if Birthcity
+        if city == self.P.birthcity:
+            shack_rest = Button(text='Rest (2)', **var.shack_rest)
+            shack_rest.bind(on_press=partial(self.P.recover, 2))
+            self.add_widget(shack_rest)
+    
+    def switch2board(self, instance):
+        game_app.game_page.main_screen.current = 'Board'
+        
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
     def __init__(self, tile, x, y, **kwargs):
@@ -6124,6 +6175,9 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             # If the tile is a neighbor and the player is not descended in a cave or ontop of a mountain... (tiered)
             elif self.is_neighbor() and (not self.parentBoard.localPlayer.tiered):
                 self.parentBoard.localPlayer.moveto((self.gridx, self.gridy))
+            # If they click the tile they are on, and they are on a city tile, then switch bck to the city page.
+            elif (self.tile in cities) and (self == self.parentBoard.localPlayer.currenttile):
+                self.parentBoard.game_page.main_screen.current = 'City'
 
 trns_clr = {'red':get_hexcolor((255,0,0)),'green':get_hexcolor((0,255,0)),'yellow':get_hexcolor((147,136,21)),'blue':get_hexcolor((0,0,255)),'cyan':get_hexcolor((0, 255, 255))}
 class BoardPage(FloatLayout):
@@ -6443,6 +6497,7 @@ class GamePage(GridLayout):
         # Add the Main Screen
         self.main_screen = ScreenManager()
         self.board_page = BoardPage(self)
+        self.city_page = None
         screen = Screen(name='Board')
         screen.add_widget(self.board_page)
         self.main_screen.add_widget(screen)
@@ -6945,14 +7000,14 @@ class LaunchPage(GridLayout):
                     valid = False
                     break
                 setting, spec = psplit
-                if not isint(spec):
+                if not essf.isint(spec):
                     valid = False
                     break
                 spec = int(spec)
                 if (int(spec) > 120) or (int(spec) < 0):
                     valid = False
                     break
-                if isint(setting) and (int(setting) <= 4) and (int(setting) >= 1):
+                if essf.isint(setting) and (int(setting) <= 4) and (int(setting) >= 1):
                     setting = int(setting)
                 elif setting.lower() in {'reputation', 'combat', 'capital', 'knowledge'}:
                     setting = setting.lower()[0].upper()+setting.lower()[1:]
