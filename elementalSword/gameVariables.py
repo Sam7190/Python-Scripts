@@ -43,8 +43,8 @@ city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':
              'starfex':{'Hit Points':8, 'Elemental':12, 'Def-Trooper':8, 'Heating':8, 'Gathering':8, 'Excavating':8, 'Smithing':4, 'entry':8, 'sell':{'raw fish', 'cooked fish', 'fruit', 'string', 'beads', 'scales', 'lead', 'tantalum', 'tungsten', 'heating book'}},
              'tamarania':{'Hit Points':8, 'Stability':8, 'Physical':12, 'Def-Wizard':8, 'Smithing':12, 'entry':14, 'sell':{'raw meat', 'cooked meat', 'well cooked meat', 'string', 'beads', 'hide', 'clay', 'leather', 'lead', 'tin', 'copper', 'iron', 'tantalum', 'aluminum', 'kevlium', 'nickel', 'titanium', 'diamond', 'smithing book'}},
              'tamariza':{'Hit Points':8, 'Cunning':8, 'Wizard':12, 'Def-Elemental':8, 'Critical Thinking':8, 'Persuasion':8, 'Heating':8, 'Smithing':4, 'entry':15, 'sell':{'fruit', 'string', 'beads', 'bark', 'rubber', 'iron', 'nickel', 'chromium', 'heating book'}},
-             'tutalu':{'Hit Points':8, 'Trooper':12, 'Def-Physical':8, 'Smtihing':8, 'Excavating':8, 'entry':8, 'sell':{'raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'}},
-             'zinzibar':{'Agility':12, 'Physical':8, 'Def-Wizard':8, 'Persuasion':8, 'Smithing':8, 'Survival':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum'}}}
+             'tutalu':{'Hit Points':8, 'Trooper':12, 'Def-Physical':8, 'Smithing':8, 'Excavating':8, 'entry':8, 'sell':{'raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'}},
+             'zinzibar':{'Agility':12, 'Physical':8, 'Def-Wizard':8, 'Persuasion':8, 'Smithing':8, 'Stealth':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum'}}}
 
 village_invest = {'village1':'Food', 'village2':'Crafting', 'village3':'Cloth', 'village4':'Food', 'village5':'Crafting'}
 
@@ -140,14 +140,16 @@ gates = {'sw': {'pos_hint': {'x': 0.045, 'y': 0.03}, 'size_hint': corner_gate_si
 shack_rest = {'pos_hint': {'x': 0.721, 'y': 0.326}, 'size_hint': (0.026, 0.026), 'background_color': (0.561, 0.337, 0.231, 0.4)}
 
 # hex colors indicate corresponding selection image
-region_colors = {'736a37': 'shack',
-                 'fb36a3': 'gate',
+region_colors = {'000000': None,
+                 '736a37': 'shack',
+                 'fb36a3': 'gates',
                  'cd1111': 'skirmishes',
-                 '76428a': 'inn',
-                 '36fb9d': 'market',
-                 'ce853b': 'sparring',
+                 '76428a': 'inn', # 'Inn (2): 1 coin'
+                 '36fb9d': 'market', # 'Market'
+                 'ce853b': 'sparring', # 'Sparring'
                  '3657fb': 'house',
                  '99e068': 'personal_market',
+                 'fb5e36': 'jobs', # Job Posting
                  'b37ec8': 'smithing',
                  # People
                  '6a7508': 'mayor', # S5
@@ -174,5 +176,83 @@ region_colors = {'736a37': 'shack',
                  '07793d': 'mother_serpent', # S2M4
                  'ff1515': 'librarians_secret', # S2M5
                  '4f2902': 'the_letter', #S2M6
-
+                 '5d6167': 'ninjas_way', #S2M8
+                # Trainers
+                 '169f3c': 'excavating_trainer',
+                 '68c481': 'criticalthinking_trainer',
+                 '7af79d': 'cunning_trainer',
+                 'c9c537': 'crafting_trainer',
+                 '898629': 'persuasion_trainer',
+                 'e2dd02': 'bartering_trainer',
+                 'e22402': 'agility_trainer',
+                 'c48377': 'stealth_trainer',
+                 '7a3225': 'hitpoints_trainer',
+                 '841400': 'stability_trainer',
+                 'e7e21e': 'wizard_trainer',
+                 '9f9b16': 'elemental_trainer',
+                 'c4c164': 'physical_trainer',
+                 'fcf622': 'trooper_trainer',
+                 '424239': 'def-trooper_trainer',
+                 '45452d': 'def-elemental_trainer',
+                 '4a491f': 'def-physical_trainer',
+                 '31311f': 'def-wizard_trainer',
+                 '504c8e': 'smithing_trainer',
+                 '48d3c1': 'survival_trainer',
+                 '25ac9b': 'heating_trainer',
+                 '82d6cc': 'gathering_trainer',
+                # Hallmarks
+                 '00a483': 'castle_of_conjurors', # anafola
+                 '2cb89c': 'grand_library', # benfriege
+                 'caf8ef': 'grand_bank', # demetry
+                 '2f6e61': 'reaquisition_guild', # enfeir
+                 '1f9f85': 'defenders_guild', # fodker
+                 '98bdb6': 'peace_embassy', # glaser
+                 '3f7996': 'ancestrial_order', # kubani
+                 '85d8c9': 'meditation_chamber', # pafiz
+                 '083044': 'colosseum', # scetcher
+                 '395969': 'ancient_magic_museum', # starfex
+                 'a7b2b8': 'smithing_guild', # tamarania
+                 'c4ebff': 'wizards_tower', # tamariza
+                 '195776': 'hunters_guild', # tutalu
+                 '01141d': 'hidden_lair' # zinzibar
                  }
+
+action_mapper = {'shack': 'Rest (2)',
+                 'inn': 'Inn (2): 1 coin',
+                 'market': 'Market',
+                 'sparring': 'Sparring',
+                 'jobs': 'Job Posting'}
+
+inverse_region_colors = {value: key for key, value in region_colors.items()}
+
+region_quest_mapper = {'mayor': [(5,1), (5,2), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8)],
+                 'district_counselor_1': [(4, 5), (4, 7)], # S4M5+7
+                 'district_counselor_2': [(4, 4), (4, 6)], # S4M4+6
+                 'district_counselor_3': [(4, 2), (4, 8)], # S4M2+8
+                 'district_counselor_4': [(4, 1), (4, 3)], # S4M1+3
+                 'smither': [(2, 1), (2, 7)], # S2M1+7
+                 'district_leader_1': [(3, 1), (3, 5)], # S3M1+5
+                 'district_leader_2': [(3, 2), (3, 3)], # S3M2+3
+                 'district_leader_3': [(3, 4), (3, 6)], # S3M4+6
+                 'district_leader_4': [(3, 7), (3, 8)], # S3M7+8
+                 # Quest Lines
+                 'lost_pet': [(1, 1)], # S1M1
+                 'untidy_home': [(1, 2)], # S1M2
+                 'gaurd_duty': [(1, 3)], # S1M3
+                 'something_special': [(1, 4)], # S1M4
+                 'young_warrior': [(1, 5)], # S1M5
+                 'librarians_son': [(1, 6)], # S1M6
+                 'play_pin': [(1, 7)], # S1M7
+                 'animal_keeper': [(1, 8)], # S1M8
+                 'mystery_robber': [(2, 2)], # S2M2
+                 'protection_services': [(2, 3)], # S2M3
+                 'mother_serpent': [(2, 4)], # S2M4
+                 'librarians_secret': [(2, 5)], # S2M5
+                 'the_letter': [(2, 6)], #S2M6
+                 'ninjas_way': [(2, 8)] #S2M8
+                       }
+
+inverse_quest_mapper = {}
+for person, quests in region_quest_mapper.items():
+    for quest in quests:
+        inverse_quest_mapper[quest] = person
