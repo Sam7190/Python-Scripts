@@ -168,15 +168,15 @@ region_colors = {'000000': None,
                  '666288': 'gaurd_duty', # S1M3
                  '36fb57': 'something_special', # S1M4
                  'b39190': 'young_warrior', # S1M5
-                 '8f974a': 'librarians_son', # S1M6
+                 '8f974a': "librarian's_son", # S1M6
                  'a3deff': 'play_pin', # S1M7
                  'e9d4d4': 'animal_keeper', # S1M8
                  'd38560': 'mystery_robber', # S2M2
                  '8d2b2f': 'protection_services', # S2M3
                  '07793d': 'mother_serpent', # S2M4
-                 'ff1515': 'librarians_secret', # S2M5
+                 'ff1515': "librarian's_secret", # S2M5
                  '4f2902': 'the_letter', #S2M6
-                 '5d6167': 'ninjas_way', #S2M8
+                 '5d6167': "ninja's_way", #S2M8
                 # Trainers
                  '169f3c': 'excavating_trainer',
                  '68c481': 'criticalthinking_trainer',
@@ -241,18 +241,22 @@ region_quest_mapper = {'mayor': [(5,1), (5,2), (5, 3), (5, 4), (5, 5), (5, 6), (
                  'gaurd_duty': [(1, 3)], # S1M3
                  'something_special': [(1, 4)], # S1M4
                  'young_warrior': [(1, 5)], # S1M5
-                 'librarians_son': [(1, 6)], # S1M6
+                 "librarian's_son": [(1, 6)], # S1M6
                  'play_pin': [(1, 7)], # S1M7
                  'animal_keeper': [(1, 8)], # S1M8
                  'mystery_robber': [(2, 2)], # S2M2
                  'protection_services': [(2, 3)], # S2M3
                  'mother_serpent': [(2, 4)], # S2M4
-                 'librarians_secret': [(2, 5)], # S2M5
+                 "librarian's_secret": [(2, 5)], # S2M5
                  'the_letter': [(2, 6)], #S2M6
-                 'ninjas_way': [(2, 8)] #S2M8
+                 "ninja's_way": [(2, 8)] #S2M8
                        }
+quest_button_size = (0.05, 0.02)
 
 inverse_quest_mapper = {}
 for person, quests in region_quest_mapper.items():
     for quest in quests:
         inverse_quest_mapper[quest] = person
+
+#%% Mappers
+action_color_map = {'*b': {'text': (0, 0, 0, 1), 'background': (0.192, 0.737, 1.0, 1.0)}}

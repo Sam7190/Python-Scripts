@@ -59,6 +59,7 @@ from kivy.graphics import Color,Rectangle,Ellipse,InstructionGroup
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.behaviors import HoverBehavior
 from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.properties import ListProperty
 from kivy.clock import Clock
 from kivy.core.window import Window
 from PIL import Image as PILImage
@@ -1308,7 +1309,7 @@ def buyItem(item, cost, from_trader, amt=1, consume='minor'):
             P.unsellable.add(item)
             P.coins -= int(cost*amt)
             if amt == 1:
-                output(f"Bought {item} for {cost}")
+                output(f"Bought {item} for {cost} coins")
             else:
                 output("Bought {amt} {item} for {cost*amt}")
             if from_trader:
@@ -4926,7 +4927,7 @@ class Quest:
             if B.status == 'started':
                 quest = (B.stage, B.mission)
                 if (quest in city_quest_actions) and eval(city_quest_actions[quest][1]):
-                    actions[city_quest_actions[quest][0]] = city_quest_actions[quest][2]
+                    actions['*b|'+city_quest_actions[quest][0]] = city_quest_actions[quest][2]
         return actions
         
 #%% Player Track: Grid
@@ -5931,6 +5932,25 @@ def city_actions(city, _=None):
         actions["Approach Stealth Master"] = AskMasterStealthForMayor
     actionGrid(actions, True)
 
+class HoveringLabel(Label):
+    background_color = ListProperty([0.3, 0.3, 0.3, 0.7])  # Default background color
+
+    def __init__(self, **kwargs):
+        super(HoveringLabel, self).__init__(**kwargs)
+        # Ensure size and position updates redraw the background
+        self.bind(pos=self.update_background, size=self.update_background)
+        # Initial draw of the background
+        self.draw_background()
+
+    def draw_background(self):
+        with self.canvas.before:
+            self.bg_color = Color(*self.background_color)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+
+    def update_background(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
 class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
     def __init__(self, city, player=None, **kwargs):
         super(CityPage, self).__init__(**kwargs)
@@ -5949,17 +5969,34 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
         self.slct_img = None
         self.slct_region = None
         self.hover_label = None
+        self.filter_color = Color(0, 0, 0, 0)
+        self.filter_rect = None
+        self.draw_filter() # almost makes the two lines above redundant.
         self.persons_active = {}
+        self.quest_buttons_active = []
         self.persons_active_found = False
 
         Window.bind(mouse_pos=self.on_mouse_pos)
         self.bind(on_press=self.activate)
-        #self.find_active_quests()
+
+    def draw_filter(self):
+        with self.img.canvas.after:
+            self.filter_color = Color(0, 0, 0, .1)  # Semi-transparent black filter
+            self.filter_rect = Rectangle(pos=self.img.pos, size=self.img.size)
+            # Initially, make the filter fully transparent
+            self.filter_color.rgba = (0, 0, 0, 0)
+
+    def update_filter_visibility(self, visible):
+        if visible:
+            self.filter_color.rgba = (0, 0, 0, .1)  # Make filter visible
+        else:
+            self.filter_color.rgba = (0, 0, 0, 0)  # Make filter invisible
 
     def get_actionGrid(self):
         actionGrid = game_app.game_page.get_actionGrid()
         actionGrid[game_app.game_page.recover_button.text] = lclPlayer().recover
         return actionGrid
+
     def switch2board(self, instance):
         game_app.game_page.main_screen.current = 'Board'
 
@@ -5998,14 +6035,25 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
                 # at this point delete the explanation point hovering over person
                 self.remove_widget(self.persons_active[person]['img'])
                 self.persons_active.pop(person)
+
+    def add_hover_label(self, region, pos):
+        if pos is not None:
+            txt = var.action_mapper[region] if region in var.action_mapper else ' '.join([l.capitalize() for l in region.split('_')])
+            self.hover_label = HoveringLabel(text=txt, color=(1, 1, 1, 1), markup=True, pos=pos,
+                                             size_hint=(0.0075 * len(txt), 0.03))
+            # self.hover_label = Button(text=txt, color=(1,1,1,1), markup=True, pos=pos, size_hint=(None, None), background_color=(0.3, 0.3, 0.3, 0.7)) # deprecate b/c the button was getting in the way of clicking the image
+            self.add_widget(self.hover_label)
+
+    def remove_hover_label(self):
+        if self.hover_label is not None:
+            self.remove_widget(self.hover_label)
+            self.hover_label = None
     def select(self, region, pos=None):
         if self.slct_img is not None:
             self.remove_widget(self.slct_img)
             self.slct_img = None
             self.slct_region = None
-            if self.hover_label is not None:
-                self.remove_widget(self.hover_label)
-                self.hover_label = None
+            self.remove_hover_label()
         self.slct_region = region
         if region is not None:
             image_source = f'images\\cities\\selection\\{region}.png'
@@ -6013,10 +6061,7 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
             self.slct_img.allow_stretch = True
             self.slct_img.fit_mode = 'contain'
             self.add_widget(self.slct_img)
-            if pos is not None:
-                txt = var.action_mapper[region] if region in var.action_mapper else (' '.join(region.split('_'))).title()
-                self.hover_label = Button(text=txt, color=(1,1,1,1), markup=True, pos=pos, size_hint=(None, None), background_color=(0.3, 0.3, 0.3, 0.7))
-                self.add_widget(self.hover_label)
+            self.add_hover_label(region, pos)
 
     def _gates(self):
         self.switch2board(None)
@@ -6025,7 +6070,14 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
         if game_app.game_page.main_screen.current != 'City':
             return False
 
-        if self.slct_region is not None:
+        if len(self.quest_buttons_active) > 0:
+            outside = all(not button.collide_point(*Window.mouse_pos) for button in self.quest_buttons_active)
+            if outside:
+                while len(self.quest_buttons_active) > 0:
+                    button = self.quest_buttons_active.pop()
+                    self.remove_widget(button)
+
+        elif self.slct_region is not None:
             if hasattr(self, f'_{self.slct_region}'):
                 getattr(self, f'_{self.slct_region}')()
             elif self.slct_region in var.action_mapper:
@@ -6037,8 +6089,26 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
                     output('You no longer live in the shack! You can rest at home.', 'yellow')
                 else:
                     output('This option is not available to you!', 'yellow')
-
-
+            elif (self.slct_region in var.region_quest_mapper) and (self.slct_region != 'smither'):
+                if len(var.region_quest_mapper[self.slct_region]) == 1:
+                    stage, mission = var.region_quest_mapper[self.slct_region][0]
+                    B = getQuest(stage, mission) # quest button
+                    lclPlayer().PlayerTrack.Quest.activate(B)
+                else:
+                    #display_size = (len(var.region_quest_mapper[self.slct_region]) * var.quest_button_size[0], var.quest_button_size[1]*3)
+                    pos = Window.mouse_pos
+                    size_hint = (0.04, 0.04)
+                    l = len(var.region_quest_mapper[self.slct_region])
+                    #display_pos = (pos[0] )
+                    #display = Button(text='', disabled=True, background_normal='', pos=)
+                    for i, (stage, mission) in enumerate(var.region_quest_mapper[self.slct_region]):
+                        B = getQuest(stage, mission)
+                        func = partial(lclPlayer().PlayerTrack.Quest.activate, B)
+                        b_pos = (pos[0] - (size_hint[0]*l)/2 + (size_hint[0] * i), pos[1] + size_hint[1])
+                        H = Button(text=B.text, pos=b_pos, size_hint=size_hint)
+                        H.bind(on_press = func)
+                        self.quest_buttons_active.append(H)
+                        self.add_widget(H)
     def on_mouse_pos(self, window, pos):
         # Ensure that the current main_page is the CityPage
         if game_app.game_page.main_screen.current != 'City':
@@ -6046,6 +6116,10 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
 
         # Check if the mouse is over the widget - perhaps redundant to the above check.
         if not self.img.collide_point(*pos):
+            return
+
+        # if quest buttons are active then don't update these select widgets.
+        if len(self.quest_buttons_active) > 0:
             return
 
         # Get the position and size of the widget
@@ -6738,7 +6812,11 @@ class GamePage(GridLayout):
     def make_actionGrid(self, funcDict, save_rest=False, occupied=True):
         self.clear_actionGrid(save_rest, occupied)
         for txt, func in funcDict.items():
-            B = Button(text=txt, markup=True)
+            if txt[0] == '*':
+                clr, txt = txt.split('|')
+                B = Button(text=txt, markup=True, color=var.action_color_map[clr]['text'], background_normal='', background_color=var.action_color_map[clr]['background'])
+            else:
+                B = Button(text=txt, markup=True)
             B.bind(on_press=func)
             self.actionFuncs[txt] = func
             self.actionButtons.append(B)
