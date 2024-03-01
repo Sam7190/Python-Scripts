@@ -3766,7 +3766,7 @@ class CraftingTable(GridLayout):
                     sellprice += 1
                 self.P.coins += sellprice
                 output(f"Sold craft {space+1} for {sellprice}.")
-                self.updateTitleValue('merchant', sellprice)
+                self.P.updateTitleValue('merchant', sellprice)
                 self.rmv_craft(space, True)
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
@@ -3775,7 +3775,7 @@ class CraftingTable(GridLayout):
             sellprice += self.P.bartering_mode
             output(f"Sold craft {space+1} for {sellprice}.")
             self.P.coins += sellprice
-            self.updateTitleValue('merchant', sellprice)
+            self.P.updateTitleValue('merchant', sellprice)
             self.rmv_craft(space, True)
     def getItems(self, space):
         items = set()
@@ -4775,7 +4775,7 @@ quest_activate_response = {(2, 3): BeginProtection,
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
-                      (1, 4): ["Gift Craft", "(self.playerTrack.craftingTable.space_items[0] <= 1) and (self.playerTrack.craftingTable.space_items[1] <= 1)", OfferCraft],
+                      (1, 4): ["Gift Craft", "(self.playerTrack.craftingTable.space_items[0] > 1) or (self.playerTrack.craftingTable.space_items[1] > 1)", OfferCraft],
                       (1, 5): ["Spare with Boy", "True", SpareWithBoy],
                       (1, 6): ["Gift Book", "checkBook()", OfferBook],
                       (1, 7): ["Gift Sand", "'sand' in self.playerTrack.player.items", OfferSand],
@@ -6026,7 +6026,7 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
 
     def disable_active_quest(self, stage, mission):
         person = var.inverse_quest_mapper[(stage, mission)]
-        if (person in self.persons_active) and (person != 'smither'):
+        if (person in self.persons_active):
             try:
                 self.persons_active[person]['quests'].remove((stage, mission))
             except KeyError:
@@ -6065,17 +6065,33 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
 
     def _gates(self):
         self.switch2board(None)
+
+    def remove_multi_options(self):
+        outside = all(not button.collide_point(*Window.mouse_pos) for button in self.quest_buttons_active)
+        if outside:
+            while len(self.quest_buttons_active) > 0:
+                button = self.quest_buttons_active.pop()
+                self.remove_widget(button)
+            self.update_filter_visibility(False)
+
+    def add_multi_options(self, texts, functions):
+        pos = Window.mouse_pos
+        size_hint = var.multi_button_size
+        l = len(texts)
+        for i, (text, func) in zip(texts, functions):
+            b_pos = (pos[0] - (size_hint[0] * l) / 2 + (size_hint[0] * i), pos[1] + size_hint[1])
+            H = Button(text=text, pos=b_pos, size_hint=size_hint)
+            H.bind(on_press=func)
+            self.quest_buttons_active.append(H)
+            self.add_widget(H)
+        self.update_filter_visibility(True)
     def activate(self, instance):
         logging.debug(f'clicking region {self.slct_region}')
         if game_app.game_page.main_screen.current != 'City':
             return False
 
         if len(self.quest_buttons_active) > 0:
-            outside = all(not button.collide_point(*Window.mouse_pos) for button in self.quest_buttons_active)
-            if outside:
-                while len(self.quest_buttons_active) > 0:
-                    button = self.quest_buttons_active.pop()
-                    self.remove_widget(button)
+            self.remove_multi_options()
 
         elif self.slct_region is not None:
             if hasattr(self, f'_{self.slct_region}'):
@@ -6089,26 +6105,19 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
                     output('You no longer live in the shack! You can rest at home.', 'yellow')
                 else:
                     output('This option is not available to you!', 'yellow')
-            elif (self.slct_region in var.region_quest_mapper) and (self.slct_region != 'smither'):
+            elif self.slct_region in var.region_quest_mapper:
                 if len(var.region_quest_mapper[self.slct_region]) == 1:
                     stage, mission = var.region_quest_mapper[self.slct_region][0]
                     B = getQuest(stage, mission) # quest button
                     lclPlayer().PlayerTrack.Quest.activate(B)
                 else:
-                    #display_size = (len(var.region_quest_mapper[self.slct_region]) * var.quest_button_size[0], var.quest_button_size[1]*3)
-                    pos = Window.mouse_pos
-                    size_hint = (0.04, 0.04)
-                    l = len(var.region_quest_mapper[self.slct_region])
-                    #display_pos = (pos[0] )
-                    #display = Button(text='', disabled=True, background_normal='', pos=)
-                    for i, (stage, mission) in enumerate(var.region_quest_mapper[self.slct_region]):
+                    texts, functions = [], []
+                    for stage, mission in var.region_quest_mapper[self.slct_region]:
                         B = getQuest(stage, mission)
-                        func = partial(lclPlayer().PlayerTrack.Quest.activate, B)
-                        b_pos = (pos[0] - (size_hint[0]*l)/2 + (size_hint[0] * i), pos[1] + size_hint[1])
-                        H = Button(text=B.text, pos=b_pos, size_hint=size_hint)
-                        H.bind(on_press = func)
-                        self.quest_buttons_active.append(H)
-                        self.add_widget(H)
+                        functions.append(partial(lclPlayer().PlayerTrack.Quest.activate, B))
+                        texts.append(B.text)
+                    self.add_multi_options(texts, functions)
+
     def on_mouse_pos(self, window, pos):
         # Ensure that the current main_page is the CityPage
         if game_app.game_page.main_screen.current != 'City':
@@ -6154,7 +6163,7 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
             region = var.region_colors[hex_value]
 
             unlock_region = False
-            if (region in var.region_quest_mapper) and (region != 'smither'): # exclude smither because they should always be unlocked.
+            if region in var.region_quest_mapper:
                 for stage, mission in var.region_quest_mapper[region]:
                     quest = getQuest(stage, mission)
                     if not quest.disabled:

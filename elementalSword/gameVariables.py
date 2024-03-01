@@ -251,7 +251,8 @@ region_quest_mapper = {'mayor': [(5,1), (5,2), (5, 3), (5, 4), (5, 5), (5, 6), (
                  'the_letter': [(2, 6)], #S2M6
                  "ninja's_way": [(2, 8)] #S2M8
                        }
-quest_button_size = (0.05, 0.02)
+#quest_button_size = (0.05, 0.02)
+multi_button_size = (0.04, 0.04)
 
 inverse_quest_mapper = {}
 for person, quests in region_quest_mapper.items():
