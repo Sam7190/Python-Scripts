@@ -2837,13 +2837,22 @@ class Player(Image):
         if (skill == 'Crafting') and (hasattr(self, 'PlayerTrack')):
             self.PlayerTrack.craftingTable.update_lbls()
     def addXP(self, skill, xp, msg=''):
+        if self.skills[skill] >= 8:
+            # Ensure that xp is not beyond the max level of 8
+            return
         output(f"{msg}Gained {xp}xp for {skill}.",'green')
         self.xps[skill] += xp
         while (self.xps[skill] >= (3 + self.skills[skill])):
             self.xps[skill] -= (3 + self.skills[skill])
             # When gaining xp, you can't level up beyond level 8
+            previousLevel = self.skills[skill]
             self.updateSkill(skill, 1, 8)
-            output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
+            if self.skills[skill] != previousLevel:
+                # Ensure that we only display this message if the player is actually leveling up.
+                # For example, adding 100xp from cheat command could throw this message mutliple times otherwise.
+                output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
+            else:
+                output(f'Cannot level {skill} beyond {previousLevel} by adding XP!', 'yellow')
     def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
         if rbtwn(1,self.max_fatigue) <= self.fatigue:
@@ -5894,7 +5903,7 @@ def city_actions(city, _=None):
             output("Insufficient coin", 'yellow')
             return
         P.coins -= 1
-        P.recover(2)
+        P.recover(3)
     logging.debug(f"Generating city actions for {city}.")
     T = game_app.game_page.board_page.citytiles[city]
     actions = {}
@@ -5910,7 +5919,7 @@ def city_actions(city, _=None):
     elif (P is not None) and (P.birthcity == city):
         actions['Sparring'] = Sparring
     if (P is not None) and (P.birthcity != city) and (not P.homes[city]):
-        actions['Inn (2): 1 coin'] = Inn
+        actions['Inn (3): 1 coin'] = Inn
     if P.currenttile.tile == P.birthcity:
         # If player is in their birth city then allow more actions depending on active quests
         actions = P.PlayerTrack.Quest.add_active_city_actions(actions)
