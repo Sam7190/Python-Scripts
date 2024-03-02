@@ -6065,7 +6065,6 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
 
     def _gates(self):
         self.switch2board(None)
-
     def remove_multi_options(self):
         outside = all(not button.collide_point(*Window.mouse_pos) for button in self.quest_buttons_active)
         if outside:
@@ -6073,7 +6072,6 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
                 button = self.quest_buttons_active.pop()
                 self.remove_widget(button)
             self.update_filter_visibility(False)
-
     def add_multi_options(self, texts, functions):
         pos = Window.mouse_pos
         size_hint = var.multi_button_size
