@@ -144,7 +144,7 @@ region_colors = {'000000': None,
                  '736a37': 'shack',
                  'fb36a3': 'gates',
                  'cd1111': 'skirmishes',
-                 '76428a': 'inn', # 'Inn (2): 1 coin'
+                 '76428a': 'inn', # 'Inn (3): 1 coin'
                  '36fb9d': 'market', # 'Market'
                  'ce853b': 'sparring', # 'Sparring'
                  '3657fb': 'house',

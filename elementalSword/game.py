@@ -18,6 +18,7 @@ import skillGames
 import gameVariables as var
 import fightingSystem as fightsys
 import essentialfuncs as essf
+import person_quest_positions as pqp
 
 # Import standard modules
 import numpy as np
@@ -58,6 +59,7 @@ from kivy.graphics import Color,Rectangle,Ellipse,InstructionGroup
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.behaviors import HoverBehavior
 from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.properties import ListProperty
 from kivy.clock import Clock
 from kivy.core.window import Window
 from PIL import Image as PILImage
@@ -94,7 +96,7 @@ def rbtwn(mn, mx, size=None, chance=None, msg=''):
 def Clocked(function, delay, debug_msg=None):
     if debug_msg is not None: logging.debug(f'Clocked @{delay}sec | {debug_msg}')
     Clock.schedule_once(function, delay)
-    
+
 #%% Fighting System
 
 class HitBox(Button):
@@ -322,7 +324,7 @@ class HitBox(Button):
         #for B in self.lbls:
         #    self.fpage.remove_widget(B)
         self.fpage.remove_widget(self)
-            
+
 class DefBox(Button):
     def __init__(self, fpage, **kwargs):
         super().__init__(**kwargs)
@@ -533,7 +535,7 @@ class DefBox(Button):
         self.fpage.canvas.after.remove(self.realDodge)
         self.fpage.canvas.after.remove(self.fakeDodge)
         self.fpage.remove_widget(self)
-              
+
 
 class FightPage(FloatLayout):
     def __init__(self, name, style, lvl, stats, encountered=True, logDef=False, reward=None, consume=None, action_amt=1, foeisNPC=True, background_img=None, consequence=None, foeStealth=0, **kwargs):
@@ -548,12 +550,12 @@ class FightPage(FloatLayout):
         self.foeisNPC = foeisNPC
         self.order_refresh_count = 0
         self.attack_count = 0
-        
+
         # Player objects
         self.P = lclPlayer()
         self.P.paused = True # prevents player from switching to another page and making an action.
         self.fighting = True
-        
+
         # Stats
         if self.logDef:
             self.pstats = npc_stats(rbtwn(3, 120))
@@ -591,7 +593,7 @@ class FightPage(FloatLayout):
         # If fighting between people objects
         self.pconfirmed = False
         self.foeconfirmed = False
-        
+
         # Calculate Disadvantages
         self.p_affected_stats = set()
         self.f_affected_stats = set()
@@ -615,13 +617,13 @@ class FightPage(FloatLayout):
         else:
             bkgSource = background_img
         self.add_widget(Image(source=bkgSource, pos=(0,0), size_hint=(1,1)))
-        
+
         # Ideally the ratio will be determined by the ratio of the image with fixed width
         psource = f'images\\resized\\origsize\\{self.P.birthcity}.png'
         x_max, y_max = 0.3, 0.7 # These ratios are also used in resize_images!
         #x_hint, y_hint = self.get_size_hint(x_max, y_max, psource)
         x_hint, y_hint = x_max, y_max
-        
+
         # Plot Player
         self.pimg = Image(source=psource, pos_hint={'x':0.02, 'y':0.02}, size_hint=(x_hint, y_hint))
         self.add_widget(self.pimg)
@@ -664,7 +666,7 @@ class FightPage(FloatLayout):
         self.fightButton.bind(on_press=self.startBattle)
         self.add_widget(self.runButton)
         self.add_widget(self.fightButton)
-        
+
         # Determine Stealth Attack
         if (self.foestealth > 0) and encountered and foeisNPC:
             r = rbtwn(1, 12)
@@ -791,13 +793,13 @@ class FightPage(FloatLayout):
         stability = self.pstats[self.P.attributes['Stability']]
         if self.curAtk > stability:
             if rbtwn(0,self.P.stability_impact):
-                self.msgBoard.text = f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!' 
+                self.msgBoard.text = f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!'
             else:
                 self.curAtk = stability
                 strike = 'You missed.' if self.curAtk == 0 else f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!'
                 self.msgBoard.text = f'Your attack was unstable!\n{strike}'
         else:
-            self.msgBoard.text = 'You missed.' if self.curAtk == 0 else f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!' 
+            self.msgBoard.text = 'You missed.' if self.curAtk == 0 else f'Strike with {self.curAtk} {self.P.combatstyle.lower()} attack!'
         if self.curAtk > 0:
             logging.debug("Scaling hit box")
             hitBoxScale = (1 - 0.055*self.foestats[self.P.attributes["Stability"]])
@@ -866,7 +868,7 @@ class FightPage(FloatLayout):
             if (self.foestats[self.P.attributes['Hit Points']] == 0) and (callable(self.reward)):
                 # Player must have won -- claim the reward if it was callable
                 self.reward()
-        elif (ran or (self.pstats[self.P.attributes['Hit Points']] == 0)) and (self.consequence is not None): 
+        elif (ran or (self.pstats[self.P.attributes['Hit Points']] == 0)) and (self.consequence is not None):
             # They must have fainted and lost the battle
             self.consequence()
     def foeTakesDamage(self, amt=1):
@@ -1042,7 +1044,7 @@ def encounter(name, lvlrange, styles, reward, fixed=None, party_size=1, consume=
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Battle"
     P.parentBoard.game_page.fightscreen = screen
-    
+
 def resize_img(source, scale=3, saveto=None, overwrite=False):
     saveto = os.path.dirname(os.path.dirname(source))+'\\resized\\'+'\\'.join(source.split('\\')[-2:]) if saveto is None else saveto
     if overwrite or (not os.path.exists(saveto)):
@@ -1056,7 +1058,7 @@ def resize_img(source, scale=3, saveto=None, overwrite=False):
         new_size = (int_size_x, int_size_y)
         im_resized = im.resize(new_size, pilImage.ANTIALIAS)
         im_resized.save(saveto, "PNG")
-    
+
 def resize_images(new_width, new_height):
     gsize = new_width, new_height
     def scale_save(full_imgSource, saveTo):
@@ -1076,7 +1078,7 @@ def isbetween(mn, mx, numb):
     return (numb >= mn) * (numb <= mx)
 
 #%% Player to Player Interactions: Fighting
-    
+
 def player_fight(username, stats, encounter):
     P = lclPlayer()
     def consequence():
@@ -1307,7 +1309,7 @@ def buyItem(item, cost, from_trader, amt=1, consume='minor'):
             P.unsellable.add(item)
             P.coins -= int(cost*amt)
             if amt == 1:
-                output(f"Bought {item} for {cost}")
+                output(f"Bought {item} for {cost} coins")
             else:
                 output("Bought {amt} {item} for {cost*amt}")
             if from_trader:
@@ -1431,7 +1433,7 @@ def heatitem(item, _=None):
     else:
         output(f"You produce {amtReceived} of {recvd}",'green')
         P.addItem(recvd, amtReceived)
-    P.addItem(item, -1)   
+    P.addItem(item, -1)
     exitActionLoop('minor')()
 
 def readbook(book, _=None):
@@ -1621,7 +1623,7 @@ def C_road(action=1):
         exitActionLoop('road')()
     else:
         exitActionLoop('road')()
-    
+
 def C_plains():
     P = lclPlayer()
     survival = P.activateSkill("Survival")
@@ -1636,8 +1638,8 @@ def C_plains():
         # If the player is paralyzed then they should still get the actions listed.
         action_amt = 0 if paralyzed else 1
         exitActionLoop(amt=action_amt)()
-    
-    
+
+
 def C_cave(tier=1, skip=False):
     P = lclPlayer()
     def enemy_approach(_=None):
@@ -1664,7 +1666,7 @@ def C_cave(tier=1, skip=False):
         if not fainted: enemy_approach()
     else:
         return enemy_approach
-    
+
 def C_outpost(skip=False):
     def enemy_approach(_=None):
         P = lclPlayer()
@@ -1684,7 +1686,7 @@ def C_outpost(skip=False):
             exitActionLoop()()
     else:
         return enemy_approach
-    
+
 def C_mountain(tier=1):
     P = lclPlayer()
     survival = P.activateSkill('Survival')
@@ -1698,7 +1700,7 @@ def C_mountain(tier=1):
         fainted_or_paralyzed = P.takeDamage(tier, tier)
     action_amt = 0 if fainted_or_paralyzed else 1
     exitActionLoop(f'tiered {tier}', amt=action_amt)()
-    
+
 def C_oldlibrary(skip=False):
     def hermit_approach(_=None):
         P = lclPlayer()
@@ -1730,7 +1732,7 @@ def C_oldlibrary(skip=False):
             exitActionLoop()()
     else:
         return hermit_approach
-    
+
 def C_ruins(skip=False, ret_func=False):
     P = lclPlayer()
     def spring_trap(_=None):
@@ -1776,7 +1778,7 @@ def C_ruins(skip=False, ret_func=False):
         return get_cloth
     else:
         return approach
-    
+
 def C_battlezone(skip=False):
     P = lclPlayer()
     def ninja_encounter(_=None):
@@ -1977,7 +1979,7 @@ def A_plains(inspect=False):
             exc['Baby Mammoth'] = [2, 6, FindBabyMammoth]
         actions = {'Excavate':Excavate(exc,9)}
         actionGrid(actions, True)
-    
+
 def A_pond(inspect=False):
     exc = {'Go Fishing':[1,5,Gather('raw fish',0)],
            'Clay':[6,8,getItem('clay')],
@@ -2010,7 +2012,7 @@ def A_pond(inspect=False):
             exc['Giant Serpent'][2] = func
         actions = {'Excavate':Excavate(exc,12)}
         actionGrid(actions, True)
-    
+
 def A_cave(tier=1, inspect=False):
     def move_down(_):
         P = lclPlayer()
@@ -2032,7 +2034,7 @@ def A_cave(tier=1, inspect=False):
                         2:{'Excavate':Excavate(exc[2],20),'Descend':move_down,'Ascend':move_up},
                         3:{'Excavate':Excavate(exc[3],20),'Ascend':move_up}}
         actionGrid(action_tiers[tier], True)
-            
+
 def A_outpost(inspect=False):
     exc = {'String':[1,3,getItem('string')],
            'Beads':[4,6,getItem('beads')],
@@ -2043,7 +2045,7 @@ def A_outpost(inspect=False):
     else:
         actions = {'Excavate':Excavate(exc,12)}
         actionGrid(actions, True)
-    
+
 def A_mountain(tier=1, inspect=False):
     def move_down(_):
         P = lclPlayer()
@@ -2084,7 +2086,7 @@ def A_mountain(tier=1, inspect=False):
                         2:{'Excavate':Excavate(exc[2],20),'Descend':move_down,'Ascend':move_up},
                         3:{'Excavate':Excavate(exc[3],20),'Descend':move_down}}
         actionGrid(action_tiers[tier], True)
-    
+
 def A_oldlibrary(inspect=False):
     exc = {'Book':[1,8,getBook()],'Hermit':[9,14,C_oldlibrary(True)]}
     if inspect:
@@ -2092,7 +2094,7 @@ def A_oldlibrary(inspect=False):
     else:
         actions = {'Excavate':Excavate(exc,20)}
         actionGrid(actions, True)
-    
+
 def A_ruins(inspect=False):
     def read_attempt(_):
         P = lclPlayer()
@@ -2123,7 +2125,7 @@ def A_ruins(inspect=False):
             exc['Old Book'][2] = StoreTatteredBook
         actions = {'Excavate':Excavate(exc,20)}
         actionGrid(actions, True)
-    
+
 def A_battlezone(inspect=False):
     def rare_find(_):
         r = rbtwn(1, 4)
@@ -2151,7 +2153,7 @@ def A_battlezone(inspect=False):
     else:
         actions = {'Excavate':Excavate(exc,20)}
         actionGrid(actions, True)
-    
+
 def A_wilderness(inspect=False):
     P = lclPlayer()
     def rare_find(_):
@@ -2259,7 +2261,7 @@ class LockIcon(Image):
         self.source = ''
         self.opacity = 0
         self.locked = False
-        
+
 class SkirmishIcon(Image):
     def __init__(self, tile, stage, **kwargs):
         super().__init__(**kwargs)
@@ -2275,8 +2277,8 @@ class SkirmishIcon(Image):
         else:
             self.source = f'images\\icons\\skirmish\\{stage}.png'
             self.opacity = 0.65
-            
-                
+
+
 #%% Player
 class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
@@ -2287,7 +2289,7 @@ class Player(Image):
         self.birthcity = birthcity
         self.is_trading = False
         self.imgSize = pilImage.open(self.source).size
-        
+
         # Player Victory Points
         self.Combat = 3
         self.Capital = 0
@@ -2296,7 +2298,7 @@ class Player(Image):
         self.Fellowship = 0
         self.Titles = 0
         self.TotalVP = 3
-        
+
         # Constraints
         self.round_ended = False
         self.paused = False
@@ -2310,7 +2312,7 @@ class Player(Image):
         self.max_fatigue = 12
         self.stability_impact = 1
         self.combatstyle = cities[self.birthcity]['Combat Style']
-        
+
         # Current Stats
         self.road_moves = 2
         self.actions = 2
@@ -2331,14 +2333,14 @@ class Player(Image):
         self.has_warrior = 0
         self.training_discount = False
         self.round_num = 0
-        
+
         self.coins = cities[self.birthcity]['Coins']
         self.working = [None, 0]
         self.paralyzed_rounds = 0
         self.tiered = False
         self.cspace = [[None]*7, [None]*7]
         self.aspace = [[None, None], [None]*4, [None]*4]
-        
+
         # Player Track
         #Combat
         self.combatxp = 0
@@ -2416,7 +2418,7 @@ class Player(Image):
             self.titles[key]['maxRecord'] = {'value': -float('inf') if key=='decisive' else 0, 'holder': None, 'title': key}
         self.titleOrder = [T[0] for T in sorted(self.titles.items(), key=lambda kv: kv[1]['titleVP'])]
         self.titleIndex = {T: i for i, T in enumerate(self.titleOrder)}
-        
+
         # Position Player
         self.currentcoord = positions[birthcity][0]
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
@@ -2452,7 +2454,7 @@ class Player(Image):
         self.titles[maxRecord['title']]['maxRecord'] = maxRecord
         if hasattr(self, 'PlayerTrack'):
             self.PlayerTrack.update_single_title(maxRecord['title'])
-            #self.PlayerTrack.updateTitles() 
+            #self.PlayerTrack.updateTitles()
     def savePlayer(self):
         self.PlayerTrack.Quest.saveTable()
         self.PlayerTrack.craftingTable.saveTable()
@@ -2581,7 +2583,7 @@ class Player(Image):
                         self.addItem(food)
                 elif (self.PlayerTrack.Quest.quests[3, 2].status == 'started') and (self.currenttile.tile in cities):
                     resetFitnessTraining()
-            
+
             if (self.currenttile.tile in cities):
                 # Make City Page
                 self.make_citypage(self.currenttile.tile)
@@ -2672,7 +2674,7 @@ class Player(Image):
             self.useSkill("Survival")
         restoring_list = []
         if ftg > 0: restoring_list.append(f'FTG by {ftg}')
-        if hp > 0: 
+        if hp > 0:
             restoring_list.append(f'HP by {hp}')
             self.titles['brave']['currentStreak'] = 0
         output(f'Restored {", ".join(restoring_list)}','green')
@@ -2750,7 +2752,7 @@ class Player(Image):
         self.actions -= 1
         if self.activated_bartering:
             # Player performed an action after bartering - make sure you give them an extra fatigue if they bartered and didn't do 3 transactions except if rested
-            if not from_recovery: 
+            if not from_recovery:
                 output("Take an extra fatigue for bartering this turn", 'yellow')
                 fatigue += 1
             self.activated_bartering = False
@@ -2840,11 +2842,8 @@ class Player(Image):
         while (self.xps[skill] >= (3 + self.skills[skill])):
             self.xps[skill] -= (3 + self.skills[skill])
             # When gaining xp, you can't level up beyond level 8
-            previous_level = self.skills[skill]
             self.updateSkill(skill, 1, 8)
-            if self.skills[skill] != previous_level:
-                # This check ensures that if a player receives a huge xp boost, they don't get a message beyond lvl 8
-                output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
+            output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
     def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
         if rbtwn(1,self.max_fatigue) <= self.fatigue:
@@ -3136,7 +3135,7 @@ class Table(GridLayout):
         if super_header is not None:
             super_kwargs = {}
             if text_color is not None: super_kwargs['color'] = text_color
-            if header_height_hint is not None: 
+            if header_height_hint is not None:
                 super_kwargs['height'] = Window.size[1]*header_height_hint
                 super_kwargs['size_hint_y'] = None
             self.super_header = Label(text=super_header, markup=True, valign='bottom', halign='left', bold=True, **super_kwargs)
@@ -3220,7 +3219,7 @@ class Table(GridLayout):
         if self.wrap_text:
             for L in self.children:
                 L.text_size = L.size
-                
+
 class ArmoryTable(GridLayout):
     def __init__(self, relative_height=0.2, fsize=12, **kwargs):
         super().__init__(**kwargs)
@@ -3307,7 +3306,7 @@ class ArmoryTable(GridLayout):
             self.aspace[space][-1].background_color = (1,1,1,0)
         else:
             clr = 'ffff75' if self.P.bartering_mode == 0 else '00ff75'
-            self.aspace[space][-1].text = f'Sell: [color={clr}]{sellprice+self.P.bartering_mode}[/color]' 
+            self.aspace[space][-1].text = f'Sell: [color={clr}]{sellprice+self.P.bartering_mode}[/color]'
             if (self.P.currenttile.tile in cities) or (self.P.currenttile.trader_rounds > 0):
                 self.enable_selling()
     def reassign_lbl(self, space, slot, update_stat=False):
@@ -3506,7 +3505,7 @@ class ArmoryTable(GridLayout):
                     attempt_smith(smithing>=12, 2, smithing_on_own)
             else:
                 # Armor slot
-                lvready = max([1, (smithing - 2)//3 + 1]) 
+                lvready = max([1, (smithing - 2)//3 + 1])
                 slotunlocked = smithing//3 + 1
                 if (self.space_items[space] == 0) and smithing in {0,1}:
                     attempt_smith(rbtwn(0,1) * (lvready >= reqlvl), 1, smithing_on_own)
@@ -3554,7 +3553,7 @@ class ArmoryTable(GridLayout):
             self.P.coins += sellprice
             self.P.updateTitleValue('merchant', sellprice)
             self.rmv(space, True)
-                
+
 class CraftingTable(GridLayout):
     def __init__(self, relative_height = 0.15, fsize=12, **kwargs):
         super().__init__(**kwargs)
@@ -3613,7 +3612,7 @@ class CraftingTable(GridLayout):
             self.cspace[space][-1].background_color = (1,1,1,0)
         else:
             clr = 'ffff75' if self.P.bartering_mode == 0 else '00ff75'
-            self.cspace[space][-1].text = f'Sell: [color={clr}]{sellprice+self.P.bartering_mode}[/color]' 
+            self.cspace[space][-1].text = f'Sell: [color={clr}]{sellprice+self.P.bartering_mode}[/color]'
             if (self.P.currenttile.tile in cities) or (self.P.currenttile.trader_rounds > 0):
                 self.enable_selling()
     def reassign_lbl(self, space, slot):
@@ -3767,7 +3766,7 @@ class CraftingTable(GridLayout):
                     sellprice += 1
                 self.P.coins += sellprice
                 output(f"Sold craft {space+1} for {sellprice}.")
-                self.updateTitleValue('merchant', sellprice)
+                self.P.updateTitleValue('merchant', sellprice)
                 self.rmv_craft(space, True)
             else:
                 output("You failed to barter, sell anyway?", 'yellow')
@@ -3776,7 +3775,7 @@ class CraftingTable(GridLayout):
             sellprice += self.P.bartering_mode
             output(f"Sold craft {space+1} for {sellprice}.")
             self.P.coins += sellprice
-            self.updateTitleValue('merchant', sellprice)
+            self.P.updateTitleValue('merchant', sellprice)
             self.rmv_craft(space, True)
     def getItems(self, space):
         items = set()
@@ -3784,7 +3783,7 @@ class CraftingTable(GridLayout):
             if B.text in gameItems['Crafting']:
                 items.add(B.text)
         return items
-    
+
 #%% Player Track: Quests
 
 def getQuest(stage, mission):
@@ -4745,9 +4744,9 @@ def GiftPerfectCraft(_=None):
             gifting = True
             break
     if not gifting:
-        output(f"You do not posess the perfect craft of: {', '.join(list(perfectCraft))}", 'yellow')
+        output(f"You do not possess the perfect craft of: {', '.join(list(perfectCraft))}", 'yellow')
     exitActionLoop('minor')()
-    
+
 quest_req = {(1, 3): 'self.playerTrack.player.actions == self.playerTrack.player.max_actions',
              (1, 8): "'fruit' in self.playerTrack.player.items",
              (2, 3): "self.quests[2, 6].status != 'started'",
@@ -4776,7 +4775,7 @@ quest_activate_response = {(2, 3): BeginProtection,
 city_quest_actions = {(1, 1): ["Find Pet", "True", FindPet],
                       (1, 2): ["Clean House", "True", CleanHome],
                       (1, 3): ["Gaurd Home", "True", GaurdHome],
-                      (1, 4): ["Gift Craft", "(self.playerTrack.craftingTable.space_items[0] <= 1) and (self.playerTrack.craftingTable.space_items[1] <= 1)", OfferCraft],
+                      (1, 4): ["Gift Craft", "(self.playerTrack.craftingTable.space_items[0] > 1) or (self.playerTrack.craftingTable.space_items[1] > 1)", OfferCraft],
                       (1, 5): ["Spare with Boy", "True", SpareWithBoy],
                       (1, 6): ["Gift Book", "checkBook()", OfferBook],
                       (1, 7): ["Gift Sand", "'sand' in self.playerTrack.player.items", OfferSand],
@@ -4838,6 +4837,7 @@ class Quest:
         for B in self.quests.values():
             if B.status == 'not started':
                 B.disabled = False if self.req_met((B.stage, B.mission)) else True
+                self.update_citypage((B.stage, B.mission))
                 if B.disabled: B.color = (1, 1, 1, 1)
     def saveTable(self):
         variableExclusions = {'_trigger_texture', '_context', '_disabled_value', '_disabled_count', 'canvas', '_proxy_ref', '_label', '_ButtonBehavior__state_event', '_ButtonBehavior__touch_time', 'display', 'message', 'mission', 'stage'}
@@ -4858,6 +4858,13 @@ class Quest:
         init_req = eval(quest_req[quest]) if quest in quest_req else True
         inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
         return init_req * inCity if (quest[0] == 1) else init_req * (self.stage_completion[quest[0]-1] >= 4) * inCity
+
+    def update_citypage(self, quest):
+        if self.playerTrack.player.parentBoard.game_page.city_page is not None:
+            if self.quests[quest].disabled:
+                self.playerTrack.player.parentBoard.game_page.city_page.disable_active_quest(quest[0], quest[1])
+            else:
+                self.playerTrack.player.parentBoard.game_page.city_page.enable_quest(quest[0], quest[1])
     def update_quest_status(self, quest, new_status=None, verbose=True):
         if (new_status == 'started'):
             self.quests[quest].disabled = True
@@ -4903,6 +4910,7 @@ class Quest:
             # Each statement was failed so assume that the status should not be changed
             return
         self.quests[quest].status = new_status
+        self.update_citypage(quest)
     def activate(self, instance):
         if self.playerTrack.player.paused:
             return
@@ -4919,9 +4927,9 @@ class Quest:
             if B.status == 'started':
                 quest = (B.stage, B.mission)
                 if (quest in city_quest_actions) and eval(city_quest_actions[quest][1]):
-                    actions[city_quest_actions[quest][0]] = city_quest_actions[quest][2]
+                    actions['*b|'+city_quest_actions[quest][0]] = city_quest_actions[quest][2]
         return actions
-        
+
 #%% Player Track: Grid
 def level_up_color(level, min_lvl=1, max_lvl=12):
     if level < min_lvl:
@@ -4986,7 +4994,7 @@ class PlayerTrack(GridLayout):
         # Fellowship Screen
         fellowshipGrid = GridLayout(cols=1)
         screen = Screen(name='Fellowship')
-        
+
         screen.add_widget(fellowshipGrid)
         self.track_screen.add_widget(screen)
         # Titles Screen
@@ -5209,7 +5217,7 @@ class PlayerTrack(GridLayout):
             T = self.player.titles[title]
             data.append([as_button(str(i+1)+'. The '+title.capitalize(), title),
                          as_button(T['category'], title),
-                         as_button(T['titleVP'], title), 
+                         as_button(T['titleVP'], title),
                          as_button('-' if title=='decisive' else T['minTitleReq'], title),
                          as_button(T['value'] if title != 'decisive' else toReadableTime(T['value'], 2), title),
                          as_button(self.get_holder(T), title)])
@@ -5300,7 +5308,7 @@ class PlayerTrack(GridLayout):
         self.Items.update_data_cells(self.get_Items())
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
 
-#%% Player to Player Interactions: Trading 
+#%% Player to Player Interactions: Trading
 
 class TradePage(FloatLayout):
     def __init__(self, username, **kwargs):
@@ -5326,16 +5334,16 @@ class TradePage(FloatLayout):
                 self.master.add(atr)
             elif lvl >= 8:
                 self.adept.add(atr)
-        
+
         bkgSource = f'images\\resized\\background\\{self.P.currenttile.tile}.png' if (self.P.currenttile.tile+'.png') in os.listdir('images\\background') else f'images\\resized\\background\\{self.P.currenttile.tile[:-1]}.png'
         self.add_widget(Image(source=bkgSource, pos=(0,0), size_hint=(1,1)))
-        
+
         psource = f'images\\resized\\origsize\\{self.P.birthcity}.png'
         x_person, y_person = 0.125, 0.3
         x_grid, y_grid = 0.3, 0.7
         x_middle, y_middle = 0.15, 0.7
         y_bottom = 0.3
-        
+
         # Plot Player
         self.pimg = Image(source=psource, pos_hint={'x':0, 'y':y_bottom}, size_hint=(x_person, y_person))
         self.add_widget(self.pimg)
@@ -5343,11 +5351,11 @@ class TradePage(FloatLayout):
         osource = f'images\\resized\\origsize\\{self.P.parentBoard.Players[self.O].birthcity}.png'
         self.oimg = Image(source=osource, pos_hint={'right':1, 'y':y_bottom}, size_hint=(x_person, y_person))
         self.add_widget(self.oimg)
-        
+
         pGrid = GridLayout(cols=3, pos_hint={'x':x_person, 'y':y_bottom}, size_hint=(x_grid, y_grid))
         mGrid = GridLayout(cols=1, pos_hint={'x':(x_person+x_grid), 'y':y_bottom}, size_hint=(x_middle, y_middle))
         oGrid = GridLayout(cols=3, pos_hint={'right':(1-x_person),'y':y_bottom}, size_hint=(x_grid, y_grid))
-        
+
         slot_shape = (7, 3)
         self.offered = [{}, {}]
         self.slots = [np.empty(slot_shape,dtype=object), np.empty(slot_shape,dtype=object)]
@@ -5362,7 +5370,7 @@ class TradePage(FloatLayout):
                         pGrid.add_widget(self.slots[side][i, j])
                     else:
                         oGrid.add_widget(self.slots[side][i, j])
-        
+
         self.confirm = Button(text='Accept', color=(0.3, 1, 0.3, 1), background_color=(1.3, 1.5, 1.3, 1))
         self.confirm.bind(on_press=self.make_confirmation)
         self.decline = Button(text='Decline', color=(1, 0.3, 0.3, 1), background_color=(1.5, 1.3, 1.3, 1))
@@ -5380,7 +5388,7 @@ class TradePage(FloatLayout):
         mGrid.add_widget(Widget())
         mGrid.add_widget(self.abort)
         mGrid.add_widget(self.display)
-        
+
         buffer, max_col = 0.95, 11
         coinGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom}, size_hint=(1, buffer*y_bottom/3))
         coinGrid.add_widget(Button(text="Add Coins:", disabled=True, background_disabled_normal='', color=(0,0,0,1)))
@@ -5388,7 +5396,7 @@ class TradePage(FloatLayout):
             B = Button(text=f'+{add}', font_size=16, background_color=(1, 1, 0, 1))
             B.bind(on_press=partial(self.add_coins, add, 0, None))
             coinGrid.add_widget(B)
-        
+
         itemGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom-(y_bottom/3)}, size_hint=(1, buffer*y_bottom/3))
         itemGrid.add_widget(Button(text='Add Item:', disabled=True, background_disabled_normal='', color=(0,0,0,1)))
         self.item_buttons = {}
@@ -5397,7 +5405,7 @@ class TradePage(FloatLayout):
             B.bind(on_press=partial(self.add_item, item, 0, None))
             self.item_buttons[item] = B
             itemGrid.add_widget(B)
-            
+
         trainGrid = GridLayout(cols=max_col, pos_hint={'x':0, 'top':y_bottom-2*(y_bottom/3)}, size_hint=(1, buffer*y_bottom/3))
         trainGrid.add_widget(Button(text='Offer Training:', disabled=True, background_disabled_normal='', color=(0,0,0,1)))
         for ability in self.adept:
@@ -5408,7 +5416,7 @@ class TradePage(FloatLayout):
             B = Button(text=f'Master\n{ability}', background_color=(1, 1.5, 0, 1))
             B.bind(on_press=partial(self.add_train, ability, 1, 0, None))
             trainGrid.add_widget(B)
-        
+
         self.add_widget(pGrid)
         self.add_widget(mGrid)
         self.add_widget(oGrid)
@@ -5652,7 +5660,7 @@ class TradePage(FloatLayout):
             socket_client.send('[TRADE]', [self.O, (ability, master), None, slot])
         else:
             self.is_trainee = (ability, master)
-        
+
 def player_trade(username, _=None):
     P = lclPlayer()
     screen = Screen(name="Trade")
@@ -5660,7 +5668,7 @@ def player_trade(username, _=None):
     P.parentBoard.game_page.main_screen.add_widget(screen)
     P.parentBoard.game_page.main_screen.current = "Trade"
     P.parentBoard.game_page.tradescreen = screen
-    
+
 def player_confirm_trade(username, _=None):
     P = lclPlayer()
     def reject_trade(_=None):
@@ -5680,7 +5688,7 @@ def player_confirm_trade(username, _=None):
     else:
         output(f"{username} wants to trade with you. Conduct trade?", 'blue')
         actionGrid({'Yes': start_trade, 'No': reject_trade}, False)
-    
+
 def player_ask_trade(username, _=None):
     P = lclPlayer()
     if P.paused:
@@ -5765,12 +5773,12 @@ def get_relpos(x, y):
 
 def get_hexcolor(rgb):
     return '%02x%02x%02x' % rgb
-        
+
 def city_trainer(abilities, mastery, _=None):
     actions = {ability:partial(Train, ability, mastery, False) for ability in abilities}
     actions["Back"] = exitActionLoop(amt=0)
     actionGrid(actions, False)
-    
+
 skill_users = {'Persuasion':'Politician', 'Critical Thinking':'Librarian', 'Heating':'Chef', 'Survival':'Explorer', 'Smithing':'Smith', 'Crafting':'Innovator', 'Excavating':'Miner', 'Stealth':'General', 'Gathering':'Huntsman', 'Bartering':'Merchant'}
 
 def perform_labor(skill=None, _=None):
@@ -5819,7 +5827,7 @@ def city_labor(_=None):
     for skill in P.currenttile.city_jobs:
         actions[skill_users[skill]] = partial(confirm_labor, skill)
     actionGrid(actions, False)
-    
+
 def TendMarket(_=None):
     P = lclPlayer()
     if P.paused:
@@ -5886,7 +5894,7 @@ def city_actions(city, _=None):
             output("Insufficient coin", 'yellow')
             return
         P.coins -= 1
-        P.recover(3)
+        P.recover(2)
     logging.debug(f"Generating city actions for {city}.")
     T = game_app.game_page.board_page.citytiles[city]
     actions = {}
@@ -5899,10 +5907,10 @@ def city_actions(city, _=None):
         actions['Tend Market'] = TendMarket
     if (P is not None) and (P.currenttile.tile == 'scetcher'):
         actions['Duel'] = Duelling
-    elif (P is not None) and (P.birthcity == city): 
+    elif (P is not None) and (P.birthcity == city):
         actions['Sparring'] = Sparring
     if (P is not None) and (P.birthcity != city) and (not P.homes[city]):
-        actions['Inn (3): 1 coin'] = Inn
+        actions['Inn (2): 1 coin'] = Inn
     if P.currenttile.tile == P.birthcity:
         # If player is in their birth city then allow more actions depending on active quests
         actions = P.PlayerTrack.Quest.add_active_city_actions(actions)
@@ -5923,36 +5931,248 @@ def city_actions(city, _=None):
     if (P.PlayerTrack.Quest.quests[5, 7].status=='started') and (P.currentcoord == P.PlayerTrack.Quest.quests[2, 8].coord):
         actions["Approach Stealth Master"] = AskMasterStealthForMayor
     actionGrid(actions, True)
-    
-class CityPage(FloatLayout):
+
+class HoveringLabel(Label):
+    background_color = ListProperty([0.3, 0.3, 0.3, 0.7])  # Default background color
+
+    def __init__(self, **kwargs):
+        super(HoveringLabel, self).__init__(**kwargs)
+        # Ensure size and position updates redraw the background
+        self.bind(pos=self.update_background, size=self.update_background)
+        # Initial draw of the background
+        self.draw_background()
+
+    def draw_background(self):
+        with self.canvas.before:
+            self.bg_color = Color(*self.background_color)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+
+    def update_background(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
     def __init__(self, city, player=None, **kwargs):
-        super().__init__(**kwargs)
+        super(CityPage, self).__init__(**kwargs)
         logging.debug(f"Initiating City Page for {city}")
         self.city = city
         self.P = game_app.game_page.board_page.localPlayer if player is None else player
-        
+
         # Set City Values
         image_source = f'images\\cities\\{city}.png'
-        city_image = Image(source=image_source, pos=(0,0), size_hint=(1,1))
-        city_image.allow_stretch = True
-        city_image.fit_mode = 'contain'
-        self.add_widget(city_image)
-        
-        # Set Gate Buttons
-        for g, gate in var.gates.items():
-            gate_button = Button(text='Board', **gate)
-            gate_button.bind(on_press=self.switch2board)
-            self.add_widget(gate_button)
+        self.img = Image(source=image_source, pos=(0,0), size_hint=(1,1))
+        self.img.allow_stretch = True
+        self.img.fit_mode = 'contain'
+        self.add_widget(self.img)
 
-        # Shack Rest if Birthcity
-        if city == self.P.birthcity:
-            shack_rest = Button(text='Rest (2)', **var.shack_rest)
-            shack_rest.bind(on_press=partial(self.P.recover, 2))
-            self.add_widget(shack_rest)
-    
+        self.pil_img = PILImage.open(f'images/cities/region/{city}.png') # eventually this will be replaced with city-specific regions
+        self.slct_img = None
+        self.slct_region = None
+        self.hover_label = None
+        self.filter_color = Color(0, 0, 0, 0)
+        self.filter_rect = None
+        self.draw_filter() # almost makes the two lines above redundant.
+        self.persons_active = {}
+        self.quest_buttons_active = []
+        self.persons_active_found = False
+
+        Window.bind(mouse_pos=self.on_mouse_pos)
+        self.bind(on_press=self.activate)
+
+    def draw_filter(self):
+        with self.img.canvas.after:
+            self.filter_color = Color(0, 0, 0, .1)  # Semi-transparent black filter
+            self.filter_rect = Rectangle(pos=self.img.pos, size=self.img.size)
+            # Initially, make the filter fully transparent
+            self.filter_color.rgba = (0, 0, 0, 0)
+
+    def update_filter_visibility(self, visible):
+        if visible:
+            self.filter_color.rgba = (0, 0, 0, .1)  # Make filter visible
+        else:
+            self.filter_color.rgba = (0, 0, 0, 0)  # Make filter invisible
+
+    def get_actionGrid(self):
+        actionGrid = game_app.game_page.get_actionGrid()
+        actionGrid[game_app.game_page.recover_button.text] = lclPlayer().recover
+        return actionGrid
+
     def switch2board(self, instance):
         game_app.game_page.main_screen.current = 'Board'
-        
+
+    def enable_quest(self, stage, mission):
+        person = var.inverse_quest_mapper[(stage, mission)]
+        if person in self.persons_active:
+            self.persons_active[person]['quests'].add((stage, mission))
+        else:
+            self.persons_active[person] = {'quests': {(stage, mission)}, 'img': None}
+            # add explanation point hover over person
+            mnx, mxx, mny, mxy = pqp.person_pos[person]
+            xoffset = float(((mnx - mxx) * 0.25) / pqp.x_len)
+            pos_hint = {'x': float(mnx / pqp.x_len) + xoffset, 'y': float((mxy + 5) / pqp.y_len)}
+            size_hint = (1.5 * float((mxx - mnx) / pqp.x_len), 1.5 * float((mxx - mnx) / pqp.y_len))
+            logging.debug(f'{person}, {pos_hint}, {size_hint}')
+            exp_img = Image(source='images/assets/quest_alert.png', pos_hint=pos_hint, size_hint=size_hint)
+            self.persons_active[person]['img'] = exp_img
+            self.add_widget(exp_img)
+
+    def find_active_quests(self, force=False):
+        if (not self.persons_active_found) or force:
+            self.persons_active_found = True
+            for stage, mission in var.inverse_quest_mapper:
+                quest = getQuest(stage, mission)
+                if not quest.disabled:
+                    self.enable_quest(stage, mission)
+
+    def disable_active_quest(self, stage, mission):
+        person = var.inverse_quest_mapper[(stage, mission)]
+        if (person in self.persons_active):
+            try:
+                self.persons_active[person]['quests'].remove((stage, mission))
+            except KeyError:
+                return
+            if len(self.persons_active[person]['quests']) == 0:
+                # at this point delete the explanation point hovering over person
+                self.remove_widget(self.persons_active[person]['img'])
+                self.persons_active.pop(person)
+
+    def add_hover_label(self, region, pos):
+        if pos is not None:
+            txt = var.action_mapper[region] if region in var.action_mapper else ' '.join([l.capitalize() for l in region.split('_')])
+            self.hover_label = HoveringLabel(text=txt, color=(1, 1, 1, 1), markup=True, pos=pos,
+                                             size_hint=(0.0075 * len(txt), 0.03))
+            # self.hover_label = Button(text=txt, color=(1,1,1,1), markup=True, pos=pos, size_hint=(None, None), background_color=(0.3, 0.3, 0.3, 0.7)) # deprecate b/c the button was getting in the way of clicking the image
+            self.add_widget(self.hover_label)
+
+    def remove_hover_label(self):
+        if self.hover_label is not None:
+            self.remove_widget(self.hover_label)
+            self.hover_label = None
+    def select(self, region, pos=None):
+        if self.slct_img is not None:
+            self.remove_widget(self.slct_img)
+            self.slct_img = None
+            self.slct_region = None
+            self.remove_hover_label()
+        self.slct_region = region
+        if region is not None:
+            image_source = f'images\\cities\\selection\\{region}.png'
+            self.slct_img = Image(source=image_source, pos=(0, 0), size_hint=(1, 1))
+            self.slct_img.allow_stretch = True
+            self.slct_img.fit_mode = 'contain'
+            self.add_widget(self.slct_img)
+            self.add_hover_label(region, pos)
+
+    def _gates(self):
+        self.switch2board(None)
+    def remove_multi_options(self):
+        outside = all(not button.collide_point(*Window.mouse_pos) for button in self.quest_buttons_active)
+        if outside:
+            while len(self.quest_buttons_active) > 0:
+                button = self.quest_buttons_active.pop()
+                self.remove_widget(button)
+            self.update_filter_visibility(False)
+    def add_multi_options(self, texts, functions):
+        pos = Window.mouse_pos
+        size_hint = var.multi_button_size
+        l = len(texts)
+        for i, (text, func) in zip(texts, functions):
+            b_pos = (pos[0] - (size_hint[0] * l) / 2 + (size_hint[0] * i), pos[1] + size_hint[1])
+            H = Button(text=text, pos=b_pos, size_hint=size_hint)
+            H.bind(on_press=func)
+            self.quest_buttons_active.append(H)
+            self.add_widget(H)
+        self.update_filter_visibility(True)
+    def activate(self, instance):
+        logging.debug(f'clicking region {self.slct_region}')
+        if game_app.game_page.main_screen.current != 'City':
+            return False
+
+        if len(self.quest_buttons_active) > 0:
+            self.remove_multi_options()
+
+        elif self.slct_region is not None:
+            if hasattr(self, f'_{self.slct_region}'):
+                getattr(self, f'_{self.slct_region}')()
+            elif self.slct_region in var.action_mapper:
+                actionGrid = self.get_actionGrid()
+                action = var.action_mapper[self.slct_region]
+                if action in actionGrid:
+                    actionGrid[action]()
+                elif self.slct_region == 'shack':
+                    output('You no longer live in the shack! You can rest at home.', 'yellow')
+                else:
+                    output('This option is not available to you!', 'yellow')
+            elif self.slct_region in var.region_quest_mapper:
+                if len(var.region_quest_mapper[self.slct_region]) == 1:
+                    stage, mission = var.region_quest_mapper[self.slct_region][0]
+                    B = getQuest(stage, mission) # quest button
+                    lclPlayer().PlayerTrack.Quest.activate(B)
+                else:
+                    texts, functions = [], []
+                    for stage, mission in var.region_quest_mapper[self.slct_region]:
+                        B = getQuest(stage, mission)
+                        functions.append(partial(lclPlayer().PlayerTrack.Quest.activate, B))
+                        texts.append(B.text)
+                    self.add_multi_options(texts, functions)
+
+    def on_mouse_pos(self, window, pos):
+        # Ensure that the current main_page is the CityPage
+        if game_app.game_page.main_screen.current != 'City':
+            return False
+
+        # Check if the mouse is over the widget - perhaps redundant to the above check.
+        if not self.img.collide_point(*pos):
+            return
+
+        # if quest buttons are active then don't update these select widgets.
+        if len(self.quest_buttons_active) > 0:
+            return
+
+        # Get the position and size of the widget
+        wx, wy = self.img.pos
+        w_width, w_height = self.img.size
+
+        # Calculate the scale factor and offset based on 'contain' mode
+        img_ratio = self.pil_img.width / self.pil_img.height
+        widget_ratio = w_width / w_height
+        if img_ratio > widget_ratio:
+            # Image is wider than the widget
+            scale = w_width / self.pil_img.width
+            offset_x = 0
+            offset_y = (w_height - (self.pil_img.height * scale)) / 2
+        else:
+            # Image is taller than the widget
+            scale = w_height / self.pil_img.height
+            offset_x = (w_width - (self.pil_img.width * scale)) / 2
+            offset_y = 0
+
+        # Adjust mouse coordinates to image coordinates
+        mx, my = pos[0] - wx - offset_x, pos[1] - wy - offset_y
+        nx, ny = int(mx / scale), int(my / scale)
+
+        # Adjust for the y coordinate being inverted in PIL
+        ny = self.pil_img.height - ny - 1
+
+        if (0 <= nx < self.pil_img.width) and (0 <= ny < self.pil_img.height):
+            # Get the color of the pixel
+            pixel = self.pil_img.getpixel((nx, ny))
+            hex_value = '%02x%02x%02x' % pixel[:3]
+            region = var.region_colors[hex_value]
+
+            unlock_region = False
+            if region in var.region_quest_mapper:
+                for stage, mission in var.region_quest_mapper[region]:
+                    quest = getQuest(stage, mission)
+                    if not quest.disabled:
+                        unlock_region = True # if even one quest is unlocked, allow the highlight
+            else:
+                unlock_region = True
+
+            if unlock_region and (region != self.slct_region):
+                self.select(region, pos)
+
+        self.find_active_quests()
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
     def __init__(self, tile, x, y, **kwargs):
@@ -6329,7 +6549,7 @@ class BoardPage(FloatLayout):
         self.localPlayer.update_mainStatPage()
         # Check if paralyzed
         paralyzed = check_paralysis()
-        if not paralyzed: 
+        if not paralyzed:
             logging.debug("Player not paralyzed.")
             self.localPlayer.started_round = True
             if (self.localPlayer.PlayerTrack.Quest.quests[3, 6].status=='started') and (self.localPlayer.PlayerTrack.Quest.quests[3, 6].action % 2):
@@ -6361,12 +6581,15 @@ class BoardPage(FloatLayout):
             # So that the start round will appear above the player
             self.startLabel = Label(text='',bold=True,color=(0.5, 0, 1, 0.7),pos_hint={'x':0,'y':0},size_hint=(1,1),font_size=50,markup=True)
             self.add_widget(self.startLabel)
+            #self.game_page.recover_button.set_action_func(self.localPlayer.recover)
             self.game_page.recover_button.bind(on_press=self.localPlayer.recover)
+            self.game_page.recover_func = self.localPlayer.recover
+            self.game_page.actionFuncs['|REST|'] = self.localPlayer.recover
             #self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
             self.localPlayer.add_mainStatPage()
             self.localPlayer.add_PlayerTrack()
             self.localPlayer.PlayerTrack.craftingTable.update_lbls()
-            
+
             # Fix city trainers (done at this stage for purposes of Attack/Technique matching with user)
             for city, T in self.citytiles.items():
                 adept, master = set(), set()
@@ -6387,14 +6610,14 @@ class BoardPage(FloatLayout):
                         adept = adept.union(ability)
                 T.adept_trainers = adept
                 T.master_trainers = master
-            
+
             # Check to see if we are loading the player
             if os.path.exists(f'saves\\{username}\\{load_file}.pickle'):
                 self.localPlayer.loadPlayer()
-            
+
             # Begin city action loop
             self.localPlayer.go2action()
-            
+
             # Adjust the screen size
             #width, height = GetSystemMetrics(0), GetSystemMetrics(1)
             # Assumption: Width if greater than height.
@@ -6409,7 +6632,7 @@ class BoardPage(FloatLayout):
                 self.game_width = wwidth/(1+self.game_page.right_line_x)
                 self.game_height = wheight
                 resize_images(self.game_width, self.game_height)
-                
+
             # Add icon labels to city
             self.setIcons()
     def sendFaceMessage(self, msg=None, clr=None, scheduleTime=2, outputOnMsgBoard=True):
@@ -6427,7 +6650,7 @@ class BoardPage(FloatLayout):
         self.startLblTimes = list(np.delete(self.startLblTimes, dlt_i))
         self.startLblLast = list(np.delete(self.startLblLast, dlt_i))
         self.startLabel.text = '\n'.join(self.startLblMsgs)
-        if msg is not None: 
+        if msg is not None:
             if msg == f'Start Round {self.localPlayer.round_num}!': msg = '\n'+msg
             if outputOnMsgBoard: output(msg, clr)
         def clear_lbl(_):
@@ -6483,6 +6706,18 @@ class ScrollLabel(Label, HoverBehavior):
                 self.msg_index = min([len(self.messages), self.msg_index + 1])
             self.display()
 
+class ActionButton(Button):
+    inside_group = False
+    icon = None
+    def __init__(self, action_func, **kwargs):
+        super().__init__(**kwargs)
+        self.action_func = None
+        if action_func is not None:
+            self.set_action_func(action_func)
+    def set_action_func(self, action_func):
+        self.action_func = action_func
+        self.bind(on_press = action_func)
+
 class GamePage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -6531,11 +6766,13 @@ class GamePage(GridLayout):
         self.inspectView = Table(header = ['Excavate For', 'Base\nProbability', 'Your Max\nProbability'], data=[], header_color=(50, 50, 50), header_as_buttons=True, color_odd_rows=True, pos_hint={'x':0,'y':(input_y+label_y+stat_y+action_y)},size_hint=(1,output_y))
         screen.add_widget(self.inspectView)
         self.outputscreen.add_widget(screen)
-        
+
         self.secondscreen = ScreenManager()
         screen = Screen(name='Action Grid')
         self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
+        self.actionFuncs = {'|REST|': None}
         self.recover_button = Button(text='Rest (2)')
+        self.recover_func = None
         self.occupied = False
         # Button is bound after local player is detected
         self.actionButtons = [self.recover_button]
@@ -6582,10 +6819,17 @@ class GamePage(GridLayout):
     def make_actionGrid(self, funcDict, save_rest=False, occupied=True):
         self.clear_actionGrid(save_rest, occupied)
         for txt, func in funcDict.items():
-            B = Button(text=txt, markup=True)
+            if txt[0] == '*':
+                clr, txt = txt.split('|')
+                B = Button(text=txt, markup=True, color=var.action_color_map[clr]['text'], background_normal='', background_color=var.action_color_map[clr]['background'])
+            else:
+                B = Button(text=txt, markup=True)
             B.bind(on_press=func)
+            self.actionFuncs[txt] = func
             self.actionButtons.append(B)
             self.actionGrid.add_widget(B)
+    def get_actionGrid(self):
+        return self.actionFuncs
     def check_players(self):
         if (not self.occupied) and (self.board_page.localPlayer is not None):
             Bs = []
@@ -6596,18 +6840,22 @@ class GamePage(GridLayout):
                     def view_player(user, _=None):
                         actionGrid({'Trade/Train': partial(player_ask_trade, user),
                                     'Back': exitActionLoop(amt=0)}, False, False)
+                    func = partial(view_player, user)
                     B = Button(text=user)
-                    B.bind(on_press=partial(view_player, user))
+                    B.bind(on_press=func)
+                    self.actionFuncs[user] = func
                     Bs.append(B)
             self.actionButtons += Bs
             for B in Bs:
                 self.actionGrid.add_widget(B)
     def clear_actionGrid(self, save_rest=False, occupied=True):
+        self.actionFuncs = {}
         for B in self.actionButtons:
             self.actionGrid.remove_widget(B)
         self.occupied = True if (not save_rest) and occupied else False
         if save_rest:
-            self.actionButtons = [self.recover_button] 
+            self.actionButtons = [self.recover_button]
+            self.actionFuncs = {'|REST|': self.recover_func}
             self.actionGrid.add_widget(self.recover_button)
             self.check_players()
         else:
