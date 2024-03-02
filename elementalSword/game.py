@@ -2840,8 +2840,11 @@ class Player(Image):
         while (self.xps[skill] >= (3 + self.skills[skill])):
             self.xps[skill] -= (3 + self.skills[skill])
             # When gaining xp, you can't level up beyond level 8
+            previous_level = self.skills[skill]
             self.updateSkill(skill, 1, 8)
-            output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
+            if self.skills[skill] != previous_level:
+                # This check ensures that if a player receives a huge xp boost, they don't get a message beyond lvl 8
+                output(f"Leveled up {skill} to {self.skills[skill]}!",'green')
     def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
         if rbtwn(1,self.max_fatigue) <= self.fatigue:
@@ -5883,7 +5886,7 @@ def city_actions(city, _=None):
             output("Insufficient coin", 'yellow')
             return
         P.coins -= 1
-        P.recover(2)
+        P.recover(3)
     logging.debug(f"Generating city actions for {city}.")
     T = game_app.game_page.board_page.citytiles[city]
     actions = {}
@@ -5899,7 +5902,7 @@ def city_actions(city, _=None):
     elif (P is not None) and (P.birthcity == city): 
         actions['Sparring'] = Sparring
     if (P is not None) and (P.birthcity != city) and (not P.homes[city]):
-        actions['Inn (2): 1 coin'] = Inn
+        actions['Inn (3): 1 coin'] = Inn
     if P.currenttile.tile == P.birthcity:
         # If player is in their birth city then allow more actions depending on active quests
         actions = P.PlayerTrack.Quest.add_active_city_actions(actions)
