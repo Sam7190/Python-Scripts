@@ -4,7 +4,7 @@ Created on Sun Feb  4 18:45:09 2024
 
 @author: samir
 """
-import numpy
+import numpy as np
 
 def get_hexcolor(rgb):
     return '%02x%02x%02x' % rgb

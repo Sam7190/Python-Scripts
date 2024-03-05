@@ -5953,7 +5953,7 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
         logging.debug(f'clicking region {self.slct_region}')
         if game_app.game_page.main_screen.current != 'City':
             return False
-
+        
         if lclPlayer().paused:
             output("You cannot perform any more actions this round.", 'yellow')
             return
