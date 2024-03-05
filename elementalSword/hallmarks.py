@@ -5,26 +5,27 @@ Created on Fri Mar  1 20:12:39 2024
 @author: samir
 """
 
-from hallmark_variables import hallmarks as hvb
+from gameVariables import hallmarks as hvb
 
 import numpy as np
 from time import time
 from kivy.app import App
-from kivy.uix.dropdown import DropDown
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
+#from kivy.uix.dropdown import DropDown
 from kivy.uix.label import Label
-from kivy.uix.relativelayout import RelativeLayout
-from kivy.uix.stacklayout import StackLayout
-from kivy.uix.gridlayout import GridLayout
+#from kivy.uix.relativelayout import RelativeLayout
+#from kivy.uix.stacklayout import StackLayout
+#from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.textinput import TextInput
+#from kivy.uix.textinput import TextInput
 # to use buttons:
-from kivy.uix.widget import Widget
+#from kivy.uix.widget import Widget
 from kivy.uix.button import Button
-from kivy.uix.image import Image
-from kivy.graphics import Color,Rectangle,Ellipse,InstructionGroup
-from kivy.uix.behaviors import ButtonBehavior
-from kivymd.uix.behaviors import HoverBehavior
-from kivy.uix.screenmanager import ScreenManager, Screen
+#from kivy.uix.image import Image
+#from kivy.graphics import Color,Rectangle,Ellipse,InstructionGroup
+#from kivy.uix.behaviors import ButtonBehavior
+#from kivymd.uix.behaviors import HoverBehavior
+#from kivy.uix.screenmanager import ScreenManager, Screen
 
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},
@@ -43,6 +44,7 @@ cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavatin
 
 class Test_Player():
     def __init__(self):
+        self.birthcity='benfriege'
         
         # Player Victory Points
         self.Combat = 3
@@ -166,12 +168,73 @@ class Test_Player():
             self.titles[key]['maxRecord'] = {'value': -float('inf') if key=='decisive' else 0, 'holder': None, 'title': key}
         self.titleOrder = [T[0] for T in sorted(self.titles.items(), key=lambda kv: kv[1]['titleVP'])]
         self.titleIndex = {T: i for i, T in enumerate(self.titleOrder)}
-
-
-class benfriege(FloatLayout):
-    def __init__(self, player, **kwargs):
-        super().__init__(**kwargs)
-        self.player = player
-        self.hallmark = hvb['benfriege']['hallmark']
-        self.description = hvb['benfriege']['description']
         
+class benfriege:
+    def __init__(self, player):
+        self.player = player
+        #self.main_grid = GridLayout()
+        
+class HallmarkPanels(TabbedPanel):
+    def __init__(self, city, player, **kwargs):
+        super().__init__(**kwargs)
+        self.do_default_tab = True
+        
+        # Create Tab 1
+        tab1 = TabbedPanelItem(text='Statistics')
+        tab1_content = Label(text='Content of Tab 2')
+        tab1.add_widget(tab1_content)
+        
+        # Create Tab 2
+        tab2 = TabbedPanelItem(text='Description')
+        self.description = Button(text=hvb[city]['description'],
+                                  disabled=True,
+                                  background_normal='',
+                                  font_size=12,
+                                  halign='left',
+                                  valign='top')
+        tab2.add_widget(self.description)
+        
+        # Add tabs to the TabbedPanel
+        self.add_widget(tab1)
+        self.add_widget(tab2)
+        self.default_tab = tab1
+
+class Hallmark(FloatLayout):
+    def __init__(self, city, player, **kwargs):
+        super().__init__(**kwargs)
+        self.city = city
+        self.hallmark = hvb[city]['hallmark']
+        self.player = player
+        self.hallmark_widgets = eval(city)(player)
+        
+        self.title = Label(text=self.hallmark,
+                           font_size=36,
+                           bold=True,
+                           font_name='fonts\\Cinzel-Bold.ttf',
+                           pos_hint={'x': 0.02, 'top': 0.925},
+                           size_hint=(0.35, 0.08),
+                           halign='left',
+                           valign='bottom')
+        self.add_widget(self.title)
+        
+        # self.description = Button(text=hvb[city]['description'], 
+        #                           disabled=True,
+        #                           background_normal='',
+        #                          font_size=12,
+        #                          pos_hint={'x': 0.02, 'top': 0.85}, 
+        #                          size_hint=(0.96, 0.35), 
+        #                          halign='left',
+        #                          valign='top')
+        #self.add_widget(self.description)
+        
+        self.panels = HallmarkPanels(city, player,
+                                     pos_hint={'x': 0.02, 'top': 0.85},
+                                     size_hint=(0.96, 0.5))
+        self.add_widget(self.panels)
+    
+class MyApp(App):
+    def build(self):
+        return Hallmark('benfriege', Test_Player())
+
+if __name__ == '__main__':
+    MyApp().run()

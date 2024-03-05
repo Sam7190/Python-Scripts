@@ -19,6 +19,7 @@ import gameVariables as var
 import fightingSystem as fightsys
 import essentialfuncs as essf
 import person_quest_positions as pqp
+from common_widgets import LockIcon, SkirmishIcon, HoverButton, Table
 
 # Import standard modules
 import numpy as np
@@ -2247,38 +2248,6 @@ def get_inverse_city_info():
     return adept, master
 adept_loc, master_loc = get_inverse_city_info()
 
-#%% Icons
-
-class LockIcon(Image):
-    def __init__(self, tile, reputation_required, **kwargs):
-        super().__init__(**kwargs)
-        self.source = f'images\\icons\\locked\\{reputation_required}.png'
-        self.tile = tile
-        self.pos_hint = tile.pos_hint
-        self.size_hint = tile.size_hint
-        self.locked = True
-    def delete(self):
-        self.source = ''
-        self.opacity = 0
-        self.locked = False
-
-class SkirmishIcon(Image):
-    def __init__(self, tile, stage, **kwargs):
-        super().__init__(**kwargs)
-        self.set_stage(stage)
-        self.tile = tile
-        self.pos_hint = tile.pos_hint
-        self.size_hint = tile.size_hint
-    def set_stage(self, stage):
-        self.stage = stage
-        if (stage <= 0) or (self.tile.lockIcon.locked):
-            self.source = ''
-            self.opacity = 0
-        else:
-            self.source = f'images\\icons\\skirmish\\{stage}.png'
-            self.opacity = 0.65
-
-
 #%% Player
 class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
@@ -3120,115 +3089,6 @@ class Player(Image):
         self.update_mainStatPage()
 
 #%% Player Track: Armory + Crafting
-class HoverButton(Button, HoverBehavior):
-    def __init__(self, display, message, **kwargs):
-        super().__init__(**kwargs)
-        self.display=display
-        self.message=message
-    def on_enter(self, *args):
-        self.display.text = self.message
-
-class Table(GridLayout):
-    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, header_as_buttons=False, color_odd_rows=False, header_bkg_color=(1,1,1,0), **kwargs):
-        super().__init__(**kwargs)
-        self.cols = len(header)
-        self.wrap_text = wrap_text
-        self.header = header
-        self.header_color = header_color
-        self.color_odd_rows = (0.3, 1, 1, 0.5) if color_odd_rows and (type(color_odd_rows) is bool) else color_odd_rows
-        if bkg_color is not None:
-            with self.canvas.before:
-                Color(bkg_color[0],bkg_color[1],bkg_color[2],bkg_color[3],mode='rgba')
-                self.bkg = Rectangle(pos=self.pos, size=self.size)
-            self.bind(pos=self.update_bkgSize,size=self.update_bkgSize)
-        if super_header is not None:
-            super_kwargs = {}
-            if text_color is not None: super_kwargs['color'] = text_color
-            if header_height_hint is not None:
-                super_kwargs['height'] = Window.size[1]*header_height_hint
-                super_kwargs['size_hint_y'] = None
-            self.super_header = Label(text=super_header, markup=True, valign='bottom', halign='left', bold=True, **super_kwargs)
-            self.add_widget(self.super_header)
-            for i in range(len(header)-1):
-                # Take up some random space to make sure the super header is on left and header starts as normal
-                space_kwargs = {} if header_height_hint is None else {'height': Window.size[1]*header_height_hint, 'size_hint_y':None}
-                self.add_widget(Widget(**space_kwargs))
-        self.cells, self.header_widgets = {}, {}
-        for h in header:
-            self.cells[h] = []
-            clr = ['[b]','[/b]'] if header_color is None else [f'[color={get_hexcolor(header_color)}][b]','[/b][/color]']
-            hkwargs = {} if text_color is None else {'color':text_color}
-            if header_as_buttons:
-                L = Button(text=clr[0]+h+clr[1],markup=True,background_color=header_bkg_color,underline=True,**hkwargs)
-            else:
-                L = Label(text=clr[0]+h+clr[1],markup=True,valign='bottom',halign='center',**hkwargs)
-                #L.text_size = L.size
-                if wrap_text: L.text_size = L.size
-            self.header_widgets[h] = L
-            self.add_widget(L)
-        # In the case that data is one-dimensional, then make it a matrix of one row.
-        self.input_text_color = text_color
-        self.wrap_text = wrap_text
-        self.update_data_cells(data)
-    def clear_data_cells(self):
-        for h in self.cells:
-            for L in self.cells[h]:
-                L.text = ''
-                self.remove_widget(L)
-    def update_data_cells(self, data, clear=True):
-        if clear: self.clear_data_cells()
-        data = np.reshape(data,(1,-1)) if len(np.shape(data))==1 else data
-        i = 0
-        for row in data:
-            j = 0
-            for item in row:
-                cell = self.header[j]
-                j += 1
-                if not clear:
-                    if type(item) is dict:
-                        self.cells[cell][i].text=item['text']
-                        if 'color' in item:
-                            self.cells[cell][i].color = item['color']
-                    else:
-                        self.cells[cell][i].text=str(item)
-                    continue
-                if type(item) is dict:
-                    if (i % 2) and self.color_odd_rows:
-                        old_bkg = item['background_color'] if 'background_color' in item else (1, 1, 1, 1)
-                        item['background_color'] = [old_bkg[clri]*self.color_odd_rows[clri] for clri in range(len(old_bkg))]
-                        if item['background_color'][-1] == 0: item['background_color'][-1] = self.color_odd_rows[-1]
-                        item['background_color'] = tuple(item['background_color'])
-                    func = None
-                    if 'func' in item:
-                        func = item['func']
-                        item.pop('func')
-                    if 'hover' in item:
-                        display, message = item['hover']
-                        item.pop('hover')
-                        L = HoverButton(display, message, **item)
-                    else:
-                        L = Button(**item)
-                    if func is not None:
-                        L.bind(on_press=func)
-                elif (type(item) is str) or (type(item) is int) or (type(item) is float):
-                    L = Label(text=str(item)) if self.input_text_color is None else Label(text=str(item),color=self.input_text_color)
-                    if self.wrap_text: L.text_size = L.size
-                else:
-                    # Assume it is a widget
-                    L = item
-                self.add_widget(L)
-                self.cells[cell].append(L)
-            i += 1
-    def update_header(self, header_name, new_value):
-        clr = ['[b]','[/b]'] if self.header_color is None else [f'[color={get_hexcolor(self.header_color)}][b]','[/b][/color]']
-        self.header_widgets[header_name].text = clr[0] + new_value + clr[1]
-    def update_bkgSize(self, instance, value):
-        self.bkg.size = self.size
-        self.bkg.pos = self.pos
-        if self.wrap_text:
-            for L in self.children:
-                L.text_size = L.size
-
 class ArmoryTable(GridLayout):
     def __init__(self, relative_height=0.2, fsize=12, **kwargs):
         super().__init__(**kwargs)
@@ -4966,7 +4826,7 @@ class PlayerTrack(GridLayout):
         super().__init__(**kwargs)
         self.player = player
         self.cols=1
-        self.hclr = get_hexcolor((255, 85, 0))
+        self.hclr = essf.get_hexcolor((255, 85, 0))
         self.track_screen = ScreenManager()
         # Combat Screen
         combatGrid = GridLayout(cols=1)
@@ -5780,9 +5640,6 @@ def get_relpos(x, y):
     px, py = get_pos(x, y)
     return float(px / xsize), float(py / ysize)
 
-def get_hexcolor(rgb):
-    return '%02x%02x%02x' % rgb
-
 def city_trainer(abilities, mastery, _=None):
     actions = {ability:partial(Train, ability, mastery, False) for ability in abilities}
     actions["Back"] = exitActionLoop(amt=0)
@@ -6096,6 +5953,10 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
         logging.debug(f'clicking region {self.slct_region}')
         if game_app.game_page.main_screen.current != 'City':
             return False
+
+        if lclPlayer().paused:
+            output("You cannot perform any more actions this round.", 'yellow')
+            return
 
         if len(self.quest_buttons_active) > 0:
             self.remove_multi_options()
@@ -6411,7 +6272,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             elif (self.tile in cities) and (self == self.parentBoard.localPlayer.currenttile):
                 self.parentBoard.game_page.main_screen.current = 'City'
 
-trns_clr = {'red':get_hexcolor((255,0,0)),'green':get_hexcolor((0,255,0)),'yellow':get_hexcolor((147,136,21)),'blue':get_hexcolor((0,0,255)),'cyan':get_hexcolor((0, 255, 255))}
+trns_clr = {'red':essf.get_hexcolor((255,0,0)),'green':essf.get_hexcolor((0,255,0)),'yellow':essf.get_hexcolor((147,136,21)),'blue':essf.get_hexcolor((0,0,255)),'cyan':essf.get_hexcolor((0, 255, 255))}
 class BoardPage(FloatLayout):
     def __init__(self, game_page, **kwargs):
         super().__init__(**kwargs)
@@ -6753,7 +6614,7 @@ class GamePage(GridLayout):
         input_y, label_y, stat_y, action_y, output_y, toggle_y = 0.05, 0.25, 0.1, 0.2, 0.35, 0.05
         self.stat_ypos, self.stat_ysize = input_y+label_y, stat_y
         self.right_line = RelativeLayout(size_hint_x=self.right_line_x)
-        self.hclr = get_hexcolor((255, 85, 0))
+        self.hclr = essf.get_hexcolor((255, 85, 0))
         self.vpView = Button(text=f'[color={self.hclr}]3[/color] VP',pos_hint={'x':0, 'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.2,toggle_y),markup=True,background_color=(0.945, 0.835, 0.475, 1))
         self.vpView.bind(on_press=self.toggleVPHidden)
         self.toggleView = Button(text="Player Track",pos_hint={'x':0.2,'y':(input_y+label_y+stat_y+action_y+output_y)},size_hint=(0.7,toggle_y),background_color=(0, 0.4, 0.4, 1))
@@ -6885,11 +6746,11 @@ class GamePage(GridLayout):
         elif (type(color) is str) and (len(color) == 6):
             message = f'[color={color.lower()}]{message}[/color]'
         else:
-            hx = get_hexcolor(color)
+            hx = essf.get_hexcolor(color)
             message = '[color='+hx+']'+message+'[/color]'
         self.output.add_msg(message)
     def update_display(self, username, message):
-        clr = get_hexcolor((131,215,190)) if username == self.board_page.localuser else get_hexcolor((211, 131, 131))
+        clr = essf.get_hexcolor((131,215,190)) if username == self.board_page.localuser else essf.get_hexcolor((211, 131, 131))
         #self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
         self.display_page.add_msg(f'|[color={clr}]{username}[/color]| ' + message)
     def on_key_down(self, instance, keyboard, keycode, text, modifiers):
