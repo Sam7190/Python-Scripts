@@ -6,6 +6,7 @@ Created on Fri Mar  1 20:12:39 2024
 """
 
 from gameVariables import hallmarks as hvb
+from common_widgets import Table
 
 import numpy as np
 from time import time

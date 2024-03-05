@@ -19,7 +19,7 @@ import gameVariables as var
 import fightingSystem as fightsys
 import essentialfuncs as essf
 import person_quest_positions as pqp
-from common_widgets import LockIcon, SkirmishIcon, HoverButton, Table
+from common_widgets import LockIcon, SkirmishIcon, HoverButton, Table, HoveringLabel, ScrollLabel, ActionButton
 
 # Import standard modules
 import numpy as np
@@ -5798,25 +5798,6 @@ def city_actions(city, _=None):
         actions["Approach Stealth Master"] = AskMasterStealthForMayor
     actionGrid(actions, True)
 
-class HoveringLabel(Label):
-    background_color = ListProperty([0.3, 0.3, 0.3, 0.7])  # Default background color
-
-    def __init__(self, **kwargs):
-        super(HoveringLabel, self).__init__(**kwargs)
-        # Ensure size and position updates redraw the background
-        self.bind(pos=self.update_background, size=self.update_background)
-        # Initial draw of the background
-        self.draw_background()
-
-    def draw_background(self):
-        with self.canvas.before:
-            self.bg_color = Color(*self.background_color)
-            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
-
-    def update_background(self, *args):
-        self.bg_rect.pos = self.pos
-        self.bg_rect.size = self.size
-
 class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
     def __init__(self, city, player=None, **kwargs):
         super(CityPage, self).__init__(**kwargs)
@@ -6551,42 +6532,6 @@ class BoardPage(FloatLayout):
         self.inspectButton.text = 'Take Action' if self.inspect_mode else 'Inspect'
         self.game_page.outputscreen.current = 'Inspect' if self.inspect_mode else 'Actions'
         self.game_page.secondscreen.current = 'Consequence' if self.inspect_mode else 'Action Grid'
-
-class ScrollLabel(Label, HoverBehavior):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.msg_index = 0
-        self.messages = []
-        self.hovering = False
-    def add_msg(self, msg):
-        self.msg_index += 1
-        self.messages.append(msg)
-        self.display()
-    def display(self):
-        self.text = '\n'.join(self.messages[:self.msg_index])
-    def on_enter(self):
-        self.hovering = True
-    def on_leave(self):
-        self.hovering = False
-    def on_touch_down(self, touch):
-        if self.hovering and touch.is_mouse_scrolling:
-            if touch.button == 'scrolldown':
-                self.msg_index = max([0, self.msg_index - 1])
-            elif touch.button == 'scrollup':
-                self.msg_index = min([len(self.messages), self.msg_index + 1])
-            self.display()
-
-class ActionButton(Button):
-    inside_group = False
-    icon = None
-    def __init__(self, action_func, **kwargs):
-        super().__init__(**kwargs)
-        self.action_func = None
-        if action_func is not None:
-            self.set_action_func(action_func)
-    def set_action_func(self, action_func):
-        self.action_func = action_func
-        self.bind(on_press = action_func)
 
 class GamePage(GridLayout):
     def __init__(self, **kwargs):
