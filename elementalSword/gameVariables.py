@@ -46,6 +46,8 @@ city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':
              'tutalu':{'Hit Points':8, 'Trooper':12, 'Def-Physical':8, 'Smithing':8, 'Excavating':8, 'entry':8, 'sell':{'raw meat', 'cooked meat', 'string', 'beads', 'hide', 'leather', 'copper', 'kevlium', 'diamond', 'excavating book'}},
              'zinzibar':{'Agility':12, 'Physical':8, 'Def-Wizard':8, 'Persuasion':8, 'Smithing':8, 'Stealth':12, 'entry':3, 'sell':{'raw meat', 'cooked meat', 'string', 'hide', 'lead', 'tin', 'tantalum', 'aluminum'}}}
 
+skills = ['Critical Thinking', 'Bartering', 'Persuasion', 'Crafting', 'Heating', 'Smithing', 'Stealth', 'Survival', 'Gathering', 'Excavating']
+
 village_invest = {'village1':'Food', 'village2':'Crafting', 'village3':'Cloth', 'village4':'Food', 'village5':'Crafting'}
 
 connectivity = np.array([[ 0, 7, 3, 5, 7, 3, 5, 7, 5, 2, 2, 4, 6, 4],
@@ -82,12 +84,20 @@ city_villages = {city: [] for city in cities} # Updated once the neighbors are d
 sellPrice = {1:0, 2:1, 3:2, 4:2, 5:3, 6:3, 7:4, 8:5, 9:6}
 mrktPrice = {1:1, 2:3, 3:5, 4:6, 5:8, 6:9, 7:10, 8:12, 9:20}
 price2smithlvl = {1:1, 3:2, 6:3, 9:4}
+
+library_books = [f'{level} {skill}'.lower() for level in ['Beginner', 'Intermediate', 'Advanced'] for skill in skills]
+lib_book_dict = {lb: None for lb in library_books}
+lib_book_dict['learned library book'] = None
+
 gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish':1,'cooked fish':2,'well cooked fish':3,'fruit':2},
              'Crafting':{'string':1,'beads':1,'hide':1,'sand':1,'clay':2,'scales':2,'leather':2,'bark':2,'ceramic':3,'glass':5,'rubber':6,'gems':8},
              'Smithing':{'lead':1,'tin':1,'copper':1,'iron':1,'tantalum':3,'aluminum':3,'kevlium':3,'nickel':3,'tungsten':6,'titanium':6,'diamond':6,'chromium':6,'shinopsis':9,'ebony':9,'astatine':9,'promethium':9},
              'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'crafting book':4, 'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
              'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':3},
-             'Quests':{'cooling cubes':2}}
+             'Quests':{'cooling cubes':2},
+             # Hallmark Groups
+             'GrandLibrary': lib_book_dict
+             }
 clothSpecials = {'benfriege cloth':{'zinzibar','glaser','enfeir','starfex'},
                  'enfeir cloth':{'benfriege','tutalu','pafiz'},
                  'glaser cloth':{'pafiz','fodker','benfriege','tutalu','scetcher'},
@@ -223,6 +233,21 @@ action_mapper = {'shack': 'Rest (2)',
                  'sparring': 'Sparring',
                  'jobs': 'Job Posting'}
 
+hallmark_mapper = {'castle_of_conjurors': 'anafola',
+                   'grand_library': 'benfriege',
+                   'grand_bank': 'demetry',
+                   'reaquisition_guild': 'enfeir',
+                   'defenders_guild': 'fodker',
+                   'peace_embassy': 'glaser',
+                   'ancestrial_order': 'kubani',
+                   'meditation_chamber': 'pafiz',
+                   'colosseum': 'scetcher',
+                   'ancient_magic_museum': 'starfex',
+                   'smithing_guild': 'tamarania',
+                   'wizards_tower': 'tamariza',
+                   'hunters_guild': 'tutalu',
+                   'hidden_lair': 'zinzibar'}
+
 inverse_region_colors = {value: key for key, value in region_colors.items()}
 
 region_quest_mapper = {'mayor': [(5,1), (5,2), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8)],
@@ -266,19 +291,23 @@ action_color_map = {'*b': {'text': (0, 0, 0, 1), 'background': (0.192, 0.737, 1.
 hallmarks = {
     'benfriege': 
         {'hallmark': 'Grand Library',
+         'attribute': 'grand_library',
          'description': 
-"""At this library you can read books or check them out from a choice of three random per round, incurring a minor action.
+"""At this library you can read books or check them out from a choice of six random per round, incurring a minor action.
 
   - Read Books: Gain fatigue equal to your reading fatigue. Clear this fatigue by not reading for two major actions (including knowledge books).
         > Reading fatigue increases by one
-        > Skill Lvl 0-3: 1xp gauranteed
-        > Skill Lvl 4-5: 1xp @ 80% probability
-        > Skill Lvl 6-7: 1xp @ 50% probability
+        > Beginner (lvl 0-3): 1xp - Success between Critical Thinking 0-4
+        > Intermediate (lvl 4-5): 1xp - Success between Critical Thinking 1-8
+        > Advanced (lvl 6-7): 1xp - Success between Critical Thinking 2-12
                    
   - Checkout Books: A trainer must teach you the book. Following checkout go to an adept or master trainer of that skill to learn.
-        > 3xp gauranteed
-        > Skill Lvl 0-3: trainer charges 1 coin
-        > Skill Lvl 4-5: trainer charges 2 coins
-        > Skill Lvl 6-7: trainer charges 3 coins"""
+        > Beginner (lvl 0-3): 3xp for 2 coin
+        > Intermediate (lvl 4-5): 4xp for 3 coins
+        > Advanced (lvl 6-7): 4xp for 4 coins"""
+        }
 }
-    }
+
+library_level_map = {'Beginner': {'skill': [0, 3], 'min_prob': 0.8, 'min_ct': 0, 'max_ct': 4, 'cost': 2, 'xp': 3}, 
+                     'Intermediate': {'skill': [4, 5], 'min_prob': 0.5, 'min_ct': 1, 'max_ct': 8, 'cost': 3, 'xp': 4},
+                     'Advanced': {'skill': [6, 7], 'min_prob': 0.2, 'min_ct': 2, 'max_ct': 12, 'cost': 4, 'xp': 4}}

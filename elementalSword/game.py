@@ -14,9 +14,10 @@ pip install kivymd==0.104.1
 
 # Import helper modules
 import buildAI as AI
-import skillGames
+#import skillGames
+import hallmarks as hmrk
 import gameVariables as var
-import fightingSystem as fightsys
+#import fightingSystem as fightsys
 import essentialfuncs as essf
 import person_quest_positions as pqp
 from common_widgets import LockIcon, SkirmishIcon, HoverButton, Table, HoveringLabel, ScrollLabel, ActionButton
@@ -1148,8 +1149,8 @@ def player_declare_fight(username, _=None):
 def output(message, color=None):
     game_app.game_page.update_output(message, color)
     logging.info(message)
-def actionGrid(funcDict, save_rest, occupied=True):
-    game_app.game_page.make_actionGrid(funcDict, save_rest, occupied)
+def actionGrid(funcDict, save_rest, occupied=True, add_back=False):
+    game_app.game_page.make_actionGrid(funcDict, save_rest, occupied, add_back=add_back)
 def check_paralysis():
     P = lclPlayer()
     paralyzed = False
@@ -1463,7 +1464,49 @@ def readbook(book, _=None):
         P.addXP(skill, P.standard_read_xp)
     else:
         output("You failed to understand. You can try again.", 'red')
+    P.fellowships['benfriege'].update_field('read_action_counter', 3)
     exitActionLoop('minor')()
+
+#%% Hallmark Functions
+    
+def confirm_learn_book(level, skill, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    cost = var.library_level_map[level]['cost']
+    xp = var.library_level_map[level]['xp']
+    book = f'{level} {skill}'.lower()
+    P.addItem(book, -1, skip_update=True)
+    P.grand_library['borrowed'][book] -= 1
+    if P.grand_library['borrowed'][book] <= 0:
+        P.grand_library['borrowed'].pop(book)
+    P.addItem('learned library book', 1, skip_update=True)
+    if 'learned library book' in P.grand_library['borrowed']:
+        P.grand_library['borrowed']['learned library book'] += 1
+    else:
+        P.grand_library['borrowed']['learned library book'] = 1
+    P.coins -= cost
+    P.addXP(skill, xp)
+    exitActionLoop('minor')()
+
+def learn_book(level, skill, _=None):
+    P = lclPlayer()
+    if P.paused:
+        return
+    cost = var.library_level_map[level]['cost']
+    xp = var.library_level_map[level]['xp']
+    if P.coins < cost:
+        output(f"You do not have enough coin! It costs {cost} to learn.", 'yellow')
+        return
+    elif P.skills[skill] < var.library_level_map[level]['skill'][0]:
+        output(f'Your {skill} level is too low to learn from this {level} book!', 'yellow')
+        return
+    elif P.skills[skill] > var.library_level_map[level]['skill'][1]:
+        output(f'Your {skill} level is too high to learn from this {level} book!', 'yellow')
+        return
+    output(f"Do you wish to gain {xp} in {skill} at the cost of {cost} coins?", 'blue')
+    actionGrid({'Yes': partial(confirm_learn_book, level, skill)}, False, add_back=True)
+    
 
 #%% Training
 def Train(abilities, master, confirmed, _=None):
@@ -2253,11 +2296,16 @@ class Player(Image):
     def __init__(self, board, username, birthcity, **kwargs):
         super().__init__(**kwargs)
         self.source = f'images\\characters\\{birthcity}.png'
+        
+        # Game Properties
         self.parentBoard = board
         self.username = username
         self.birthcity = birthcity
         self.is_trading = False
         self.imgSize = pilImage.open(self.source).size
+        self.rbtwn = rbtwn
+        self.output = output
+        self.exitActionLoop = exitActionLoop
 
         # Player Victory Points
         self.Combat = 3
@@ -2354,14 +2402,22 @@ class Player(Image):
         self.entry_allowed = {city: False for city in cities}
         self.entry_allowed[self.birthcity] = True
         # Fellowships
+        self.castle_of_conjurors = {'delay': 0, 'lvl': 0, 'rounds': 0, 'bond': 0, 'combat_limit': 1, 'combats': 0}  # anafola castle of conjurors
+        self.grand_library = {'read_fatigue': 0, 'borrowed': {}, 'total_borrowed': 0, 'conseq_read_counter': 0, 'read_action_counter': 0, 'books_learned': 0}
         self.grand_bank = {'credit': 0, 'borrow_rounds': None, 'strikes': 0} # demetry grand central bank
-        self.ninja_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
-        self.meditation = {'class': 1, 'score': 0, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # pafiz meditation chamber
-        self.creature = {'delay': 0, 'lvl': 0, 'rounds': 0, 'bond': 0, 'combat_limit': 1, 'combats': 0}  # anafola castle of conjurors
-        self.reaquisition = {'class': 1, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # enfeir requisition guild
-        self.wizard_membership = None # Tamariza wizard tower
+        self.reaquisition_guild = {'class': 1, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # enfeir requisition guild
+        self.defenders_guild = {}
+        self.peace_embassy = {}
         self.ancestrial_order = {'loot': 0, 'food': 0, 'fatigue': 0, 'minor': False, 'horse': False, 'major': False} # kubani ancestrial order
-        self.gifted_museum = 0 # starfex ancient magic museum
+        self.meditation_chamber = {'class': 1, 'score': 0, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # pafiz meditation chamber
+        self.colosseum = {}
+        self.ancient_magic_museum = {'gifted_museum': 0} # starfex ancient magic museum
+        self.smithing_guild = {}
+        self.wizards_tower = {'membership': None} # Tamariza wizard tower
+        self.hunters_guild = {}
+        self.hidden_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
+        self.fellowships = {city: getattr(hmrk, city)(self) for city in var.cities}
+            
         # Titles
         self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
                       'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'category': 'General', 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
@@ -2370,7 +2426,7 @@ class Player(Image):
                       'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'category': 'Fellowship', 'description': 'Highest credit score from the Demetry Grand Bank'},
                       'traveler': {'titleVP': 3, 'minTitleReq': 30, 'value':0, 'category': 'General', 'description': 'Most road tile movement.'},
                       'apprentice': {'titleVP': 4, 'minTitleReq': 60, 'value':0, 'category': 'Knowledge', 'description': 'Most cumulative levels gained from trainers.'},
-                      'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'category': 'Fellowship', 'description': 'Most books checked out from the Benefriege public library, and learned from.'},
+                      'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'category': 'Fellowship', 'description': 'Most books checked out from the Benefriege public library, learned from, and returned.'},
                       'laborer': {'titleVP': 3, 'minTitleReq': 10, 'value':0, 'category': 'Capital', 'description': 'Most jobs worked.'},
                       'valuable': {'titleVP': 2, 'minTitleReq': 20, 'value':0, 'category': 'Capital', 'description': 'Most money earned from jobs worked.'},
                       'entrepreneur': {'titleVP': 3, 'minTitleReq': 50, 'value':0, 'category': 'Capital', 'description': 'Most money received from owned markets.'},
@@ -2428,7 +2484,7 @@ class Player(Image):
         self.PlayerTrack.Quest.saveTable()
         self.PlayerTrack.craftingTable.saveTable()
         self.PlayerTrack.armoryTable.saveTable()
-        exclusions = {'_coreimage','_loops','_context','_disabled_value','_disabled_count','canvas','_proxy_ref','_loop','parentBoard','currenttile', 'mtable', 'PlayerTrack'}
+        exclusions = {'_coreimage','_loops','_context','_disabled_value','_disabled_count','canvas','_proxy_ref','_loop','parentBoard','currenttile', 'mtable', 'PlayerTrack', 'fellowships', 'output', 'exitActionLoop', 'rbtwn'}
         myVars = {field: self.__dict__[field] for field in set(self.__dict__).difference(exclusions)}
         myVars['output messages'] = self.parentBoard.game_page.output.messages[1:]
         myVars['seed'] = seed
@@ -2456,6 +2512,7 @@ class Player(Image):
         self.PlayerTrack.Quest.loadTable()
         self.PlayerTrack.craftingTable.loadTable()
         self.PlayerTrack.armoryTable.loadTable()
+        self.fellowships = {city: getattr(hmrk, city)(self) for city in var.cities}
         self.moveto(self.currentcoord, False, True)
         socket_client.send('[MOVE]', self.currentcoord) # So that everyone else can see the move.
         self.parentBoard.startRound()
@@ -2742,11 +2799,18 @@ class Player(Image):
         self.ate = 0 # Refresh how much one can eat
         self.road_moves = self.max_road_moves # If action is taken, then the road moves should be refreshed.
         self.already_asset_bartered = False # If an action is taken, you can try to barter for the asset again.
+        # Quest Adjustments
         if self.PlayerTrack.Quest.quests[3, 6].status == 'started':
             self.PlayerTrack.Quest.quests[3, 6].action += 1
             if self.PlayerTrack.Quest.quests[3, 6].action >= 6:
                 self.PlayerTrack.Quest.update_quest_status((3, 6), 'complete')
                 self.coins += 15
+        # Hallmark Adjustments
+        if self.grand_library['read_action_counter'] > 0:
+            self.fellowships['benfriege'].update_field('read_action_counter', '-1')
+            if self.grand_library['read_action_counter'] == 0:
+                self.grand_library['conseq_read_counter'] = 0
+                self.fellowships['benfriege'].update_field('read_fatigue', 0)
         self.update_mainStatPage()
         if self.actions <= 0:
             self.end_round()
@@ -3054,7 +3118,7 @@ class Player(Image):
                     rounds = 12 - capital_info[city]['invest']
                     self.villages[city][v][1] = max([1, round(rounds + (6 - rounds)/1.9) - capital_info[city]['efficiency']])
                     self.villages[city][v][2] = 1 # Have one waiting after the round count is over
-    def addItem(self, item, amt, store=False):
+    def addItem(self, item, amt, store=False, skip_update=False):
         if amt > 0:
             if self.item_count >= self.max_capacity:
                 if store:
@@ -3074,7 +3138,7 @@ class Player(Image):
                     output("Could not add all the items!",'yellow')
         else:
             if item not in self.items:
-                output(f"{item} doesn't exit in the inventory!", 'yellow')
+                output(f"{item} doesn't exist in the inventory!", 'yellow')
                 return
             elif (item == 'fruit') and ((self.items[item] - amt) <= 0) and (self.PlayerTrack.Quest.quests[1, 8].status == 'started') and hasattr(self.PlayerTrack.Quest.quests[1, 8], 'has_mammoth') and self.PlayerTrack.Quest.quests[1, 8].has_mammoth:
                 output("You lost your fruit! The baby mammoth stops following you! You will need to find it again.", 'red')
@@ -3084,9 +3148,10 @@ class Player(Image):
             self.items[item] += amt
         else:
             self.items[item] = amt
-        if self.items[item]==0:
+        if self.items[item]<=0:
             self.items.pop(item)
-        self.update_mainStatPage()
+        if not skip_update:
+            self.update_mainStatPage()
 
 #%% Player Track: Armory + Crafting
 class ArmoryTable(GridLayout):
@@ -5106,12 +5171,16 @@ class PlayerTrack(GridLayout):
                     sellprice = 0
                 else:
                     sellprice = price*(2 if self.player.currenttile.tile in clothSpecials[item] else 1) + self.player.bartering_mode
+            elif price is None:
+                sellprice = None
             else:
                 sellprice = sellPrice[price] + self.player.bartering_mode
             clr = 'ffff75' if self.player.bartering_mode == 0 else '00ff75'
             cityset = self.player.currenttile.neighbortiles.intersection(set(cities))
             # Sell/Invest button:
-            if ((self.player.currenttile.trader_rounds>0) or (self.player.currenttile.tile in cities)) and (item not in wares):
+            if sellprice is None:
+                sellbutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
+            elif ((self.player.currenttile.trader_rounds>0) or (self.player.currenttile.tile in cities)) and (item not in wares):
                 # Sell if the player is on a (city or trader) and the item is not in the wares
                 sellbutton = {'text':f'Sell: [color={clr}]{sellprice}[/color]', 'markup':True, 'func':partial(sellItem, item, True if self.player.currenttile.trader_rounds>0 else False, None)}
             elif len(cityset) > 0:
@@ -5150,6 +5219,13 @@ class PlayerTrack(GridLayout):
                 usebutton = {'text':'Craft', 'func':partial(self.player.PlayerTrack.craftingTable.add_craft, item, None)}
             elif (categ == 'Smithing') and (self.player.currenttile.tile in cities):
                 usebutton = {'text':'Smith', 'func':partial(self.player.PlayerTrack.armoryTable.add_slot, item, None, None, None)}
+            elif (categ == 'GrandLibrary') and (self.player.currenttile.tile in cities):
+                book_split = ' '.split(item)
+                level, skill = book_split[0].title(), (' '.join(book_split[1:])).title()
+                if (skill in var.city_info[self.player.currenttile.tile]) and (var.city_info[self.player.currenttile.tile][skill]>=8):
+                    usebutton = {'text': 'Learn', 'func': partial(learn_book, level, skill)}
+                else:
+                    usebutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
             else:
                 usebutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
             data.append([{'text':item, 'background_color':(1,1,1,0), 'disabled':True,'color':(0,0,0,1)},
@@ -5966,6 +6042,8 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
                         functions.append(partial(lclPlayer().PlayerTrack.Quest.activate, B))
                         texts.append(B.text)
                     self.add_multi_options(texts, functions)
+            elif self.slct_region in var.hallmark_mapper:
+                self.P.fellowships[var.hallmark_mapper[self.slct_region]].begin_action_loop()
 
     def on_mouse_pos(self, window, pos):
         # Ensure that the current main_page is the CityPage
@@ -6424,6 +6502,7 @@ class BoardPage(FloatLayout):
                     s.add(skill)
             self.citytiles[city].city_jobs = s
     def add_player(self, username, birthcity):
+        logging.debug(f"Adding {username} to {birthcity}")
         self.Players[username] = Player(self, username, birthcity)
         self.add_widget(self.Players[username])
         if username == self.localuser:
@@ -6437,7 +6516,9 @@ class BoardPage(FloatLayout):
             self.game_page.recover_func = self.localPlayer.recover
             self.game_page.actionFuncs['|REST|'] = self.localPlayer.recover
             #self.game_page.eat_button.bind(on_press=self.localPlayer.eat())
+            logging.debug("Adding MainStatPage")
             self.localPlayer.add_mainStatPage()
+            logging.debug("Adding PlayerTrack")
             self.localPlayer.add_PlayerTrack()
             self.localPlayer.PlayerTrack.craftingTable.update_lbls()
 
@@ -6464,9 +6545,12 @@ class BoardPage(FloatLayout):
 
             # Check to see if we are loading the player
             if os.path.exists(f'saves\\{username}\\{load_file}.pickle'):
+                logging.debug("Attempting to Load Player")
                 self.localPlayer.loadPlayer()
+                logging.debug("Load Player Complete")
 
             # Begin city action loop
+            logging.debug("Begin City Action Loop")
             self.localPlayer.go2action()
 
             # Adjust the screen size
@@ -6536,6 +6620,7 @@ class BoardPage(FloatLayout):
 class GamePage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        logging.debug("Creating GamePage")
         self.cols = 2
         self.button_num = 1
         # Determine how wide the right_line widgets can be:
@@ -6549,7 +6634,9 @@ class GamePage(GridLayout):
         #self.right_line_x = 0.25
         # Add the Main Screen
         self.main_screen = ScreenManager()
+        logging.debug("Creating BoardPage")
         self.board_page = BoardPage(self)
+        logging.debug("BoardPage Created Successfully")
         self.city_page = None
         screen = Screen(name='Board')
         screen.add_widget(self.board_page)
@@ -6584,14 +6671,18 @@ class GamePage(GridLayout):
 
         self.secondscreen = ScreenManager()
         screen = Screen(name='Action Grid')
+        logging.debug("Creating actionGrid")
         self.actionGrid = GridLayout(pos_hint={'x':0,'y':(input_y+label_y+stat_y)},size_hint_y=action_y,cols=2)
         self.actionFuncs = {'|REST|': None}
+        self.maxHistory = 150 # currently non-adjustable, but allows the capacity to be changed in the future.
+        self.actionHistory = []
         self.recover_button = Button(text='Rest (2)')
         self.recover_func = None
         self.occupied = False
         # Button is bound after local player is detected
         self.actionButtons = [self.recover_button]
         screen.add_widget(self.actionGrid)
+        logging.debug("Adding actionGrid widget")
         self.secondscreen.add_widget(screen)
         screen = Screen(name='Consequence')
         self.consequenceDisplay = Button(text='', disabled=True, background_disabled_normal='', color=(0,0,0,1), pos_hint={'x':0,'y':(input_y+label_y+stat_y)}, size_hint_y=action_y)
@@ -6631,18 +6722,27 @@ class GamePage(GridLayout):
         if self.main_screen.current not in {'Battle', 'Trade'}:
             self.main_screen.current = self.toggleView.text
             self.toggleView.text = "Board" if self.toggleView.text=="Player Track" else "Player Track"
-    def make_actionGrid(self, funcDict, save_rest=False, occupied=True):
-        self.clear_actionGrid(save_rest, occupied)
+    def make_actionGrid(self, funcDict, save_rest=False, occupied=True, append=False, add_back=False):
+        if add_back:
+            funcDict['Back'] = self.revert_actionGrid
+        self.clear_actionGrid(save_rest, occupied, append)
         for txt, func in funcDict.items():
+            orig_txt = deepcopy(txt)
             if txt[0] == '*':
                 clr, txt = txt.split('|')
                 B = Button(text=txt, markup=True, color=var.action_color_map[clr]['text'], background_normal='', background_color=var.action_color_map[clr]['background'])
             else:
                 B = Button(text=txt, markup=True)
             B.bind(on_press=func)
-            self.actionFuncs[txt] = func
+            self.actionFuncs[orig_txt] = func
             self.actionButtons.append(B)
             self.actionGrid.add_widget(B)
+    def revert_actionGrid(self, _=None):
+        if len(self.actionHistory) > 0:
+            previous_grid = self.actionHistory.pop()
+            self.make_actionGrid(previous_grid, append=False)
+        else:
+            output('Something went wrong, there is no action history to go back too!', 'yellow')
     def get_actionGrid(self):
         return self.actionFuncs
     def check_players(self):
@@ -6663,7 +6763,11 @@ class GamePage(GridLayout):
             self.actionButtons += Bs
             for B in Bs:
                 self.actionGrid.add_widget(B)
-    def clear_actionGrid(self, save_rest=False, occupied=True):
+    def clear_actionGrid(self, save_rest=False, occupied=True, append=True):
+        if append:
+            self.actionHistory.append(deepcopy(self.actionFuncs))
+            if len(self.actionHistory) > self.maxHistory:
+                self.actionHistory.pop(0)
         self.actionFuncs = {}
         for B in self.actionButtons:
             self.actionGrid.remove_widget(B)

@@ -56,10 +56,13 @@ class HoverButton(Button, HoverBehavior):
         self.display.text = self.message
 
 class Table(GridLayout):
-    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, header_as_buttons=False, color_odd_rows=False, header_bkg_color=(1,1,1,0), **kwargs):
+    def __init__(self, header, data, wrap_text=True, bkg_color=None, header_color=None, text_color=None, super_header=None, header_height_hint=None, header_as_buttons=False, color_odd_rows=False, header_bkg_color=(1,1,1,0), key_field=None, **kwargs):
         super().__init__(**kwargs)
         self.cols = len(header)
+        self.row_count = 0
         self.wrap_text = wrap_text
+        self.key_field = key_field if type(key_field) is list else (None if not key_field else [key_field])
+        self.key_fields = {}
         self.header = header
         self.header_color = header_color
         self.color_odd_rows = (0.3, 1, 1, 0.5) if color_odd_rows and (type(color_odd_rows) is bool) else color_odd_rows
@@ -97,16 +100,29 @@ class Table(GridLayout):
         self.input_text_color = text_color
         self.wrap_text = wrap_text
         self.update_data_cells(data)
+    
+    def update_cell(self, header, row_num_or_key_field, value):
+        if type(value) is not dict:
+            # We assume that the new value only updates the text
+            value = {'text': str(value)}
+        # row_num is extracted by the key fields if string, otherwise they must have input the row_num
+        row_num = self.key_fields[row_num_or_key_field] if type(row_num_or_key_field) is str else row_num_or_key_field
+        for attribute, v in value.items():
+            setattr(self.cells[header][row_num], attribute, v)
+        
     def clear_data_cells(self):
         for h in self.cells:
             for L in self.cells[h]:
                 L.text = ''
                 self.remove_widget(L)
+            
     def update_data_cells(self, data, clear=True):
         if clear: self.clear_data_cells()
         data = np.reshape(data,(1,-1)) if len(np.shape(data))==1 else data
         i = 0
+        self.row_count = 0
         for row in data:
+            self.row_count += 1
             j = 0
             for item in row:
                 cell = self.header[j]
@@ -146,9 +162,18 @@ class Table(GridLayout):
                 self.add_widget(L)
                 self.cells[cell].append(L)
             i += 1
+        if self.key_field is not None:
+            self.key_fields = {}
+            for row_num in range(self.row_count):
+                l = tuple([self.cells[key_field][row_num].text for key_field in self.key_field])
+                self.key_fields[l] = row_num
+                if len(l) == 1:
+                    self.key_fields[l[0]] = row_num
+            
     def update_header(self, header_name, new_value):
         clr = ['[b]','[/b]'] if self.header_color is None else [f'[color={essf.get_hexcolor(self.header_color)}][b]','[/b][/color]']
         self.header_widgets[header_name].text = clr[0] + new_value + clr[1]
+    
     def update_bkgSize(self, instance, value):
         self.bkg.size = self.size
         self.bkg.pos = self.pos
