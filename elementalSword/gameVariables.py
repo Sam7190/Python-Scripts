@@ -30,6 +30,7 @@ capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'retu
                 'tamariza':{'home':42,'home_cap':5,'capacity':4,'market':21,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
                 'tutalu':{'home':23,'home_cap':4,'capacity':4,'market':10,'return':3,'market_cap':1,'invest':4,'efficiency':0,'discount':0,'trader allowed':False},
                 'zinzibar':{'home':8,'home_cap':2,'capacity':4,'market':2,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False}}
+home_price_order = sorted(capital_info, key=lambda x: capital_info[x]['home'])
 
 city_info = {'anafola':{'Hit Points':8, 'Stability':8, 'Wizard':8, 'Persuasion':8, 'Excavating':12, 'Smithing':4, 'entry':12, 'sell':{'raw fish', 'cooked fish', 'string', 'beads', 'sand', 'scales', 'bark', 'lead', 'tin', 'copper',' iron', 'persuasion book'}},
              'benfriege':{'Hit Points':8, 'Stability':8, 'Cunning':8, 'Elemental':8, 'Def-Trooper':8, 'Critical Thinking':8, 'Persuasion':8, 'Crafting':12, 'Survival':8, 'Smithing':4, 'entry':4, 'sell':{'raw fish', 'cooked fish', 'well cooked fish', 'string', 'beads', 'scales', 'bark', 'critical thinking book', 'crafting book', 'survival book', 'gathering book'}},
@@ -295,7 +296,8 @@ hallmarks = {
          'description': 
 """At this library you can read books or check them out from a choice of six random per round, incurring a minor action.
 
-  - Read Books: Gain fatigue equal to your reading fatigue. Clear this fatigue by not reading for two major actions (including knowledge books).
+  - Read Books: Gain fatigue equal to your reading fatigue. You can clear this fatigue by not reading for 
+                two consecutive major actions, including knowledge books.
         > Reading fatigue increases by one
         > Beginner (lvl 0-3): 1xp - Success between Critical Thinking 0-4
         > Intermediate (lvl 4-5): 1xp - Success between Critical Thinking 1-8
@@ -305,7 +307,33 @@ hallmarks = {
         > Beginner (lvl 0-3): 3xp for 2 coin
         > Intermediate (lvl 4-5): 4xp for 3 coins
         > Advanced (lvl 6-7): 4xp for 4 coins"""
-        }
+        },
+    'demetry':
+        {'hallmark': 'Grand Bank',
+         'attribute': 'grand_bank',
+         'description':
+"""This bank provides no interest loans.
+
+  - Maximum amount of Loan: Credit Score + (Reputation / 2) + 1
+  
+  - Length of Loan: 10 rounds + persuasion skill.
+  
+  - If the money is returned between 5 rounds and the original length of the loan:
+        > Credit Score increases by the loan amount.
+  
+  - You must be present at Demetry to return the loan.
+  
+  - It is possible to extend the loan by 5 rounds after the end of term:
+        > If your credit score is zero then you are given no redemption period (skip strikes below).
+        > 1st Strike: (persuasion / 12) chance of no impact on credit score, otherwise 25% cut.
+        > 2nd Strike: (persuasion / 18) chance of no impact on credit score, otherwise 75% cut.
+  
+  - Consequence for failing to repay the bank after all chances given:
+        > You can no longer bank at the Grand Bank and credit score goes to -1.
+        > Your coins are automatically deducted to match the loan amount.
+        > If you do not have enough coins, your homes are sold to the bank from least expensive to most until nothing is owed.
+        > If you still owe the bank money, then the rest of the owed amount is forgiven."""
+        },
 }
 
 library_level_map = {'Beginner': {'skill': [0, 3], 'min_prob': 0.8, 'min_ct': 0, 'max_ct': 4, 'cost': 2, 'xp': 3}, 

@@ -11,6 +11,7 @@ import pickle
 import datetime
 from threading import Thread
 import numpy as np
+import pandas as pd
 
 HEADER_LENGTH = 50
 PORT = 1234
@@ -156,6 +157,29 @@ city_labor = {'anafola':{'Persuasion':5, 'Excavating':5},
              'tutalu':{'Smtihing':5, 'Excavating':5},
              'zinzibar':{'Persuasion':5, 'Smithing':5, 'Survival':8}}
 skills = ['Persuasion', 'Critical Thinking', 'Heating', 'Survival', 'Smithing', 'Crafting', 'Excavating', 'Stealth', 'Gathering', 'Bartering']
+titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
+          'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
+          'valiant': {'titleVP': 3, 'minTitleReq': 6, 'value':0, 'holder': None, 'record': None, 'category': 'Combat', 'description': 'Maximum difference between an opponent stronger than you, that you defeated, and your total combat at the start of battle.'},
+          'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'holder': None, 'record': None, 'category': 'Fellowship', 'description': 'Longest continuous Tamariza Wizard Tower premium holder.'},
+          'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'holder': None, 'record': None, 'category': 'Fellowship', 'description': 'Highest credit score from the Demetry Grand Bank.'},
+          'traveler': {'titleVP': 3, 'minTitleReq': 30, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'description': 'Most road tile movement.'},
+          'apprentice': {'titleVP': 4, 'minTitleReq': 60, 'value':0, 'holder': None, 'record': None, 'category': 'Knowledge', 'description': 'Most cumulative levels gained from trainers.'},
+          'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'holder': None, 'record': None, 'category': 'Fellowship', 'description': 'Most books checked out from the Benefriege public library, learned from, and returned.'},
+          'laborer': {'titleVP': 3, 'minTitleReq': 10, 'value':0, 'holder': None, 'record': None, 'category': 'Capital', 'description': 'Most jobs worked.'},
+          'valuable': {'titleVP': 2, 'minTitleReq': 20, 'value':0, 'holder': None, 'record': None, 'category': 'Capital', 'description': 'Most money earned from jobs worked.'},
+          'entrepreneur': {'titleVP': 3, 'minTitleReq': 50, 'value':0, 'holder': None, 'record': None, 'category': 'Capital', 'description': 'Most money received from owned markets.'},
+          'trader': {'titleVP': 4, 'minTitleReq': 5, 'value':0, 'holder': None, 'record': None, 'category': 'Capital', 'unique_traders': set(), 'description': 'Most trading (buy or sell) with unique traders.'},
+          'negotiator': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'holder': None, 'record': None, 'category': 'Knowledge', 'description': 'Most successful persuasions.'},
+          'steady': {'titleVP': 4, 'minTitleReq': 15, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'description': 'Most rounds started with zero fatigue.'},
+          'grinder': {'titleVP': 3, 'minTitleReq': 120, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'description': 'Most fatigue taken.'},
+          'merchant': {'titleVP': 2, 'minTitleReq': 40, 'value':0, 'holder': None, 'record': None, 'category': 'Capital', 'description': 'Most coin made from selling items to merchants or traders.'},
+          'brave': {'titleVP': 5, 'minTitleReq': 80, 'value':0, 'holder': None, 'record': None, 'category': 'Combat', 'currentStreak': 0, 'description': 'Sum total level of continuous enemies defeated without restoring HP.'},
+          'decisive': {'titleVP': 1, 'minTitleReq': -float('inf'), 'holder': None, 'record': None, 'category': 'General', 'value':-float('inf'), 'sum': 0, 'round': 0, 'description': 'Shortest average round time.'},
+          'champion': {'titleVP': 7, 'minTitleReq': 1, 'value':0, 'holder': None, 'record': None, 'category': 'Fellowship', 'description': 'Most class V Scetcher Tournament titles won.'},
+          'resurrector': {'titleVP': 10, 'minTitleReq': 1, 'value':0, 'holder': None, 'record': None, 'category': 'End Game', 'description': 'Strongest magic sword revived with its ability unlocked.'}}
+
+records = {}
+
 
 def conn2set():
     P = [np.concatenate((connectivity.T[:i, i], connectivity.T[i, i:])) for i in range(len(connectivity))]
@@ -200,7 +224,7 @@ def getTodaysJobs():
             
 
 def updateServer(username, category, msg):
-    global Skirmishes
+    global Skirmishes, records
     if category == '[LAUNCH]':
         if msg == 'Listening':
             if len(client_gameStatus) == 1:
@@ -234,6 +258,11 @@ def updateServer(username, category, msg):
                     break
             if all_ready:
                 game_launched[0] = True
+                # initiate records
+                for title in titles:
+                    record_data = [[username, titles[title]['value']] for username in client_gameStatus.keys()]
+                    rd = pd.DataFrame(record_data, columns=['username', 'value']).set_index('username')
+                    records[title] = rd
         elif msg == 'Not Ready':
             client_gameStatus[username]['ready'] = False
     elif category == '[CLAIM]':
@@ -267,6 +296,25 @@ def updateServer(username, category, msg):
                 sendMessage('[SERVER]', username, '[SKIRMISH]', Skirmishes[1])
                 # Give the same random market seed to each player to generate jobs and markets
                 sendMessage('[SERVER]', username, '[MARKET]', market_seed)
+    elif category == '[TITLE VALUE]':
+        title = msg['title']
+        # assume the msg is a dict with keys {'title', 'username', 'value'}
+        records[title].loc[msg['username'], 'value'] = msg['value']
+        # Now see who the max record holder is
+        mx = records[msg['title']].sort_values('value').iloc[-1]
+        new_record = {'value': mx.value, 'holder': mx.name, 'title': title}
+        if mx.value >= titles[title]['minTitleReq']:
+            # Check if new max is greater than previous holder
+            if (titles[title]['holder'] is not None) and (mx.name == titles[title]['holder']):
+                sendMessage('[SERVER]', username, '[TITLE CHANGE]', new_record)
+            elif (titles[title]['holder'] is not None) and (mx.value > records[title].loc[titles[title]['holder'], 'value']):
+                # This handles both cases when new player goes beyond previous holder and also when previous holder loses value to someone else who deserves it.
+                sendMessage('[SERVER]', username, '[TITLE CHANGE]', new_record)
+            elif titles[title]['holder'] is None:
+                sendMessage('[SERVER]', username, '[TITLE CHANGE]', new_record)
+        elif titles[title]['holder'] is not None:
+            # This means that whoever the holder was has lost value and now no one should be the record holder.
+            sendMessage('[SERVER]', username, '[TITLE CHANGE]', {'value': -float('inf'), 'holder': None, 'title': title})
     elif category == '[REDUCED TENSION]':
         Skirmishes[0][msg[0]] += msg[1]
     elif category == '[END STATS]':

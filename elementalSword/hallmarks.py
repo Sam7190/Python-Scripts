@@ -68,7 +68,8 @@ class benfriege:
                            key_field='Field')
         
     def actionGrid(self):
-        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs, add_back=True)
+        self.actionFuncs['Cancel'] = self.player.exitActionLoop(amt=0) # add_back does not work at the moment.
+        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs)
         
     def update_field(self, field, value):
         if type(value) is str:
@@ -89,6 +90,8 @@ class benfriege:
         self.actionGrid()
     
     def return_book(self, book, _=None):
+        if self.player.paused:
+            return
         self.player.addItem(book, -1, skip_update=True)
         self.player.grand_library['borrowed'][book] -= 1
         self.update_field('total_borrowed', '-1')
@@ -125,6 +128,8 @@ class benfriege:
             self.actionGrid()
     
     def read(self, book, _=None):
+        if self.player.paused:
+            return
         level, skill, warning = self.extract(book)
         # The assumption is that the warning has already been handled in self.choice
         ct = self.player.activateSkill("Critical Thinking")
@@ -146,6 +151,8 @@ class benfriege:
             self.player.go2action()
     
     def checkout(self, book, _=None):
+        if self.player.paused:
+            return
         # We assume the warning has already been handled in self.choice
         self.player.addItem(book, 1, skip_update=True)
         self.update_field('total_borrowed', '+1')
@@ -160,14 +167,161 @@ class demetry:
         self.player = player
         self.actionFuncs = {}
         
+        self.foi = ['credit_score', 'loan_amount', 'original_loan_length', 'loan_length_remaining', 'strikes', 'total_strikes']
+        data = [[k.replace('_', ' ').title(), str(self.get(k))] for k in self.foi]
+        
+        self.table = Table(header=['Field', 'Value'], 
+                           data=data,
+                           color_odd_rows=True,
+                           key_field='Field')
+        
     def actionGrid(self):
-        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs, add_back=True)
+        self.actionFuncs['Cancel'] = self.player.exitActionLoop(amt=0) # add back does not work at the moment.
+        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs)
+    
+    def get(self, field):
+        return self.player.grand_bank[field]
     
     def update_field(self, field, value):
-        pass
+        if type(value) is str:
+            self.player.grand_bank[field] += int(value)
+        else:
+            self.player.grand_bank[field] = value
+        if field in self.foi:
+            k = field.replace('_', ' ').title()
+            self.table.update_cell('Value', k, self.player.grand_bank[field])
+        if hasattr(self, field):
+            getattr(self, field)(self.player.grand_bank[field])
+    
+    def end_round(self):
+        if self.player.grand_bank['loan_length_remaining'] is not None:
+            self.update_field('loan_length_remaining', '-1')
+    
+    def failure(self):
+        self.player.output("Strike 3!! The bank is now automatically deducting your coins and refusing you future service.", 'red')
+        self.update_field('credit_score', -1)
+        if self.get('loan_amount') <= self.player.coins:
+            self.player.add_coins(-self.get('loan_amount'))
+            self.player.output(f"{self.get('loan_amount')} coins has been deducted.", 'yellow')
+        else:
+            still_owe = self.get('loan_amount') - self.player.coins
+            self.player.output(f"{self.player.coins} coins has been deducted, but you still owe {still_owe} coins!", 'red')
+            self.player.add_coins(-self.player.coins)
+            for city in var.home_price_order:
+                if self.player.homes[city]:
+                    homecost = var.capital_info[city]['home']
+                    # begin losing home.
+                    self.player.homes[city] = False
+                    self.player.max_capacity -= var.capital_info[city]['capacity']
+                    self.player.Capital -= var.capital_info[city]['home_cap']
+                    self.updateTotalVP(-var.capital_info[city]['home_cap'], False)
+                    if not self.player.markets[city]:
+                        self.player.market_allowed[city] = False
+                    self.player.output(f"You have lost your home in {city}!")
+                    if self.player.Reputation < (3 * var.city_info[city]['entry']):
+                        self.player.training_allowed[city] = False
+                        self.player.output(f"You can no longer use trainers in {city}.", 'red')
+                    if homecost > still_owe:
+                        var.capital_info[city]['home'] = (homecost - still_owe)
+                        self.player.output(f"Next time you purchase the home in {city} it will cost you {homecost-still_owe} coins.")
+                        return
+                    elif homecost == still_owe:
+                        return
+                    still_owe -= homecost
+            self.player.output(f"The {still_owe} coins you still owe the bank is forgiven.", 'blue')
+    
+    def loan_length_remaining(self, llr):
+        if llr == None:
+            return
+        elif llr == 0:
+            strikes = self.player.grand_bank['strikes']
+            if (self.player.grand_bank['credit_score'] <= 0) or (strikes >= 2):
+                self.failure()
+                return
+            self.update_field('strikes', '+1')
+            self.update_field('total_strikes', '+1')
+            pr = self.player.activateSkill('Persuasion')
+            r = self.player.rbtwn(0, 12 if strikes==1 else 18, None, pr, 'Persuasion')
+            strikemsg = f"Strike {strikes+1}! You failed to pay back your loan ontime"
+            if r <= pr:
+                self.player.output(strikemsg + ", but your Persuasion prevented you from losing credit score.", 'red')
+                self.player.useSkill('Persuasion')
+            else:
+                cutpct = 0.25 if strikes==1 else 0.75
+                cut = np.min([self.player.grand_bank['credit_score'], int(np.ceil(np.round(cutpct * self.player.grand_bank['credit_score'])))])
+                self.update_field('credit_score', f'-{cut}')
+                self.player.output(strikemsg + f" and you lost {cutpct*100}% of yoru credit score!", 'red')
+            self.update_field('loan_length_remaining', 5)
+            self.player.output("The bank gives you five more rounds to return the loan. Come to Demetry as soon as possible!", 'yellow')
+        elif llr <= 3:
+            self.player.output(f"Only {llr} rounds left on your loan!", 'yellow')
+    
+    def credit_score(self, cs):
+        self.player.updateTitleValue('superprime', None, cs)
+            
+    def get_loan_options(self, max_options=7):
+        if self.player.grand_bank['credit_score'] == -1:
+            self.player.output("You are not allowed to take loans anymore!", 'yellow')
+            return
+        max_loan = self.player.grand_bank['credit_score'] + (self.player.Reputation // 2) + 1
+        if max_loan <= 0:
+            self.player.output("You should try increasing your reputation to take out a loan!", 'yellow')
+            return
+        min_loan = np.max([1, max_loan // max_options])
+        loan_options = sorted(set(np.linspace(min_loan, max_loan, max_options).round().astype(int)))
+        return loan_options
+    
+    def get_loan_length(self):
+        return 10 + self.player.skills['Persuasion']
+    
+    def get_loan_confirmed(self, loan_amount, _=None):
+        loan_length = self.get_loan_length()
+        self.player.output(f"Receiving a loan of {loan_amount} coins for maximum duration of {loan_length}.", 'green')
+        self.update_field('loan_amount', loan_amount)
+        self.update_field('loan_length_remaining', loan_length)
+        self.update_field('original_loan_length', loan_length)
+        self.player.add_coins(loan_amount)
+        self.player.exitActionLoop('minor')()
+    
+    def get_loan(self, _=None):
+        if self.player.paused:
+            return
+        loan_options = self.get_loan_options()
+        loan_length = self.get_loan_length()
+        self.player.output(f'Here are your loan options for a period of {loan_length} rounds.', 'blue')
+        self.actionFuncs = {str(lo): partial(self.get_loan_confirmed, lo) for lo in loan_options}
+        self.actionGrid()
+        
+    def return_loan(self, _=None):
+        if self.player.paused:
+            return
+        # We assume that the check whether the player has a loan has been done prior to hitting this button
+        if self.player.coins < self.get('loan_amount'):
+            self.player.output(f"You must repay the entire balance - and you currently do not have {self.get('loan_amount')} coins to do so.", 'yellow')
+            return
+        self.player.output(f"You are returning {self.get('loan_amount')} to the bank.")
+        if self.get('strikes') <= 0:
+            rounds_passed = self.get('original_loan_length') - self.get('loan_length_remaining')
+            if rounds_passed >= 5:
+                self.update_field('credit_score', f"+{self.get('loan_amount')}")
+                self.player.output(f"You gained {self.get('loan_amount')} credit score!", 'green')
+            else:
+                self.player.output(f"You did not gain any credit score because you returned your loan early", 'yellow')
+        # Complete the return
+        self.player.add_coins(-self.get('loan_amount'))
+        self.update_field('loan_amount', None)
+        self.update_field('loan_length_remaining', None)
+        self.update_field('original_loan_length', None)
+        
+        self.player.exitActionLoop('minor')()
     
     def begin_action_loop(self, _=None):
-        pass
+        self.actionFuncs = {}
+        if self.get('loan_amount') is not None:
+            self.actionFuncs['Return'] = self.return_loan
+        else:
+            self.actionFuncs['Take Loan'] = self.get_loan
+        self.actionGrid()
     
 class enfeir:
     def __init__(self, player):

@@ -2404,7 +2404,7 @@ class Player(Image):
         # Fellowships
         self.castle_of_conjurors = {'delay': 0, 'lvl': 0, 'rounds': 0, 'bond': 0, 'combat_limit': 1, 'combats': 0}  # anafola castle of conjurors
         self.grand_library = {'read_fatigue': 0, 'borrowed': {}, 'total_borrowed': 0, 'conseq_read_counter': 0, 'read_action_counter': 0, 'books_learned': 0}
-        self.grand_bank = {'credit': 0, 'borrow_rounds': None, 'strikes': 0} # demetry grand central bank
+        self.grand_bank = {'credit_score': 0, 'loan_amount': None, 'original_loan_length': None, 'loan_length_remaining': None, 'strikes': 0, 'total_strikes': 0, } # demetry grand central bank
         self.reaquisition_guild = {'class': 1, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # enfeir requisition guild
         self.defenders_guild = {}
         self.peace_embassy = {}
@@ -2418,12 +2418,12 @@ class Player(Image):
         self.hidden_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
         self.fellowships = {city: getattr(hmrk, city)(self) for city in var.cities}
             
-        # Titles
+        # Titles - note that minTitleReq has been deprecated in this dict in favor of using the server.
         self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
                       'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'category': 'General', 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
                       'valiant': {'titleVP': 3, 'minTitleReq': 6, 'value':0, 'category': 'Combat', 'description': 'Maximum difference between an opponent stronger than you, that you defeated, and your total combat at the start of battle.'},
                       'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'category': 'Fellowship', 'description': 'Longest continuous Tamariza Wizard Tower premium holder.'},
-                      'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'category': 'Fellowship', 'description': 'Highest credit score from the Demetry Grand Bank'},
+                      'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'category': 'Fellowship', 'description': 'Highest credit score from the Demetry Grand Bank.'},
                       'traveler': {'titleVP': 3, 'minTitleReq': 30, 'value':0, 'category': 'General', 'description': 'Most road tile movement.'},
                       'apprentice': {'titleVP': 4, 'minTitleReq': 60, 'value':0, 'category': 'Knowledge', 'description': 'Most cumulative levels gained from trainers.'},
                       'scholar': {'titleVP': 5, 'minTitleReq': 5, 'value':0, 'category': 'Fellowship', 'description': 'Most books checked out from the Benefriege public library, learned from, and returned.'},
@@ -2449,7 +2449,22 @@ class Player(Image):
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
         self.moveto(self.currentcoord, False, True)
         self.size_hint = (self.imgSize[0]/xsize, self.imgSize[1]/ysize)
-    def updateTitleValue(self, title, value=1):
+    def updateTitleValue(self, title, value=1, set_value=None):
+        if title == 'decisive':
+            # value is ignored in this caupdse
+            endTime = time()
+            self.titles[title]['sum'] += (endTime - self.titles[title]['startTime'])
+            self.titles[title]['round'] += 1
+            self.titles[title]['value'] =  - (self.titles[title]['sum'] / self.titles[title]['round']) # Force negative for consistency in finding max holder
+        else:
+            if set_value is not None:
+                self.title[title]['value'] = set_value
+            else:
+                self.titles[title]['value'] += value
+        socket_client.send('[TITLE VALUE]', {'value': self.titles[title]['value'], 'username': self.username, 'title': title})
+        if hasattr(self, 'PlayerTrack'):
+            self.PlayerTrack.update_single_title(title)
+    def updateTitleValue_deprecated(self, title, value=1, set_value=None):
         if title == 'decisive':
             # value is ignored in this case
             endTime = time()
@@ -2457,7 +2472,10 @@ class Player(Image):
             self.titles[title]['round'] += 1
             self.titles[title]['value'] =  - (self.titles[title]['sum'] / self.titles[title]['round']) # Force negative for consistency in finding max holder
         else:
-            self.titles[title]['value'] += value
+            if set_value is not None:
+                self.title[title]['value'] = set_value
+            else:
+                self.titles[title]['value'] += value
         if (self.titles[title]['value'] >= self.titles[title]['minTitleReq']) and (self.titles[title]['value'] > self.titles[title]['maxRecord']['value']):
             output(f"You now hold The {title.capitalize()} title!", 'green')
             self.titles[title]['maxRecord'] = {'value': self.titles[title]['value'], 'holder': self.username, 'title': title}
@@ -2468,6 +2486,25 @@ class Player(Image):
             self.PlayerTrack.update_single_title(title)
             #self.PlayerTrack.updateTitles()
     def newMaxRecord(self, maxRecord):
+        title = maxRecord['title']
+        previousRecord = self.titles[title]['maxRecord']
+        if (previousRecord['holder'] == self.username) and (maxRecord['holder'] != self.username):
+            # If this user was the last holder, then remove Title VP
+            self.Titles -= self.titles[title]['titleVP']
+            self.updateTotalVP(-self.titles[title]['titleVP'], False)
+            output(f"You lost The {title.capitalize()} title to {maxRecord['holder']}", 'red')
+        elif (previousRecord['holder'] != self.username) and (maxRecord['holder'] == self.username):
+            # This means he is the new holder of the title!
+            output(f"You now hold The {title.capitalize()} title!", 'green')
+            self.titles[title]['maxRecord'] = {'value': self.titles[title]['value'], 'holder': self.username, 'title': title}
+            self.Titles += self.titles[title]['titleVP']
+            self.updateTotalVP(self.titles[title]['titleVP'], False)
+        elif (previousRecord['holder'] != self.username) and (maxRecord['holder'] != self.username) and (maxRecord['holder'] != previousRecord['holder']):
+            output(f"{maxRecord['holder']} now holds The {maxRecord['title'].capitalize()} title!", 'blue')
+        self.titles[maxRecord['title']]['maxRecord'] = maxRecord
+        if hasattr(self, 'PlayerTrack'):
+            self.PlayerTrack.update_single_title(title)
+    def newMaxRecord_deprecated(self, maxRecord):
         previousRecord = self.titles[maxRecord['title']]['maxRecord']
         if previousRecord['holder'] == self.username:
             # If this user was the last holder, then remove Title VP
@@ -2658,10 +2695,12 @@ class Player(Image):
         self.mtable = Table(['Fatigue','HP','Coins','Items','M|m|r|e'],[self.get_mainStatUpdate()],False,(1,1,1,0.5),text_color=(0,0,0,0.9),
                             pos_hint={'x':0,'y':game_app.game_page.stat_ypos}, size_hint_y=game_app.game_page.stat_ysize)
         game_app.game_page.right_line.add_widget(self.mtable)
-    def update_mainStatPage(self):
+    def update_frontStats(self):
         updated_data = self.get_mainStatUpdate()
         for i in range(len(updated_data)):
             self.mtable.cells[self.mtable.header[i]][0].text = updated_data[i]
+    def update_mainStatPage(self):
+        self.update_frontStats()
         self.PlayerTrack.updateAll()
         self.PlayerTrack.Quest.update_reqs()
     def recover(self, rest_rate=None, _=None):
@@ -2718,6 +2757,7 @@ class Player(Image):
         if self.titles['loyal']['in_birthcity']:
             self.updateTitleValue('loyal', 1)
         self.updateTitleValue('decisive')
+        self.fellowships['demetry'].end_round()
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
@@ -2931,7 +2971,7 @@ class Player(Image):
     def purchase(self, asset, city, barter=None, _=None):
         if self.paused:
             return
-        cost = capital_info[city][asset]
+        cost = var.capital_info[city][asset]
         def make_purchase(asset, city, cost, _=None):
             if self.paused:
                 return
@@ -3091,7 +3131,7 @@ class Player(Image):
         exitActionLoop(amt=1)()
     def add_coins(self, amt):
         self.coins += amt
-        self.update_mainStatPage()
+        self.update_frontStats()
     def storeInvestment(self, city, village, item, amt):
         for i in range(amt):
             if village in self.awaiting[city]:
@@ -5222,7 +5262,7 @@ class PlayerTrack(GridLayout):
             elif (categ == 'GrandLibrary') and (self.player.currenttile.tile in cities):
                 book_split = ' '.split(item)
                 level, skill = book_split[0].title(), (' '.join(book_split[1:])).title()
-                if (skill in var.city_info[self.player.currenttile.tile]) and (var.city_info[self.player.currenttile.tile][skill]>=8):
+                if (skill in var.city_info[self.player.currenttile.tile]) and (var.city_info[self.player.currenttile.tile][skill]>=8) and self.player.training_allowed[self.player.currenttile.tile]:
                     usebutton = {'text': 'Learn', 'func': partial(learn_book, level, skill)}
                 else:
                     usebutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
@@ -7306,7 +7346,12 @@ class LaunchPage(GridLayout):
             output(f"{username} increased {message[0]} home capacity by {message[1]}!", 'blue')
             IncreaseCapacity(message[0], message[1])
         Clocked(run, 0.1, 'CAPACITY run')
+    def TITLE_CHANGE(self, username, message):
+        def run(_):
+            lclPlayer().newMaxRecord(message)
+        Clocked(run, 0.1, 'TITLE_CHANGE run')
     def TITLE(self, username, message):
+        # deprecated
         def run(_):
             lclPlayer().newMaxRecord(message)
         Clocked(run, 0.1, 'TITLE run')
