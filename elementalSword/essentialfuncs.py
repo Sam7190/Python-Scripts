@@ -17,6 +17,19 @@ def isint(s):
         return int(s) == float(s)
     except ValueError:
         return False
+def axial_to_cube(coord):
+    x, y = coord
+    # Convert axial to cube coordinates
+    x_cube = x - (y - (y & 1)) // 2
+    z_cube = y
+    y_cube = -x_cube - z_cube
+    return x_cube, y_cube, z_cube
+def hex_distance(coord1, coord2):
+    # Convert both coordinates to cube coordinates
+    x1, y1, z1 = axial_to_cube(coord1)
+    x2, y2, z2 = axial_to_cube(coord2)
+    # Calculate the distance in cube coordinates
+    return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
     
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},

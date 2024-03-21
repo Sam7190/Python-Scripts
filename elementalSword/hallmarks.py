@@ -8,11 +8,12 @@ Created on Fri Mar  1 20:12:39 2024
 import gameVariables as var
 from gameVariables import hallmarks as hvb
 from common_widgets import Table
-from essentialfuncs import Test_Player
+from essentialfuncs import Test_Player, hex_distance
 
 import numpy as np
 from time import time
 from functools import partial
+from copy import deepcopy
 
 from kivy.app import App
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
@@ -44,7 +45,8 @@ class anafola:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
 
 def fibonacci(n):
     sqrt_5 = np.sqrt(5)
@@ -130,6 +132,9 @@ class benfriege:
     def read(self, book, _=None):
         if self.player.paused:
             return
+        if book not in self.current_books:
+            self.player.output(f"{book} book is not longer available!", 'yellow')
+            return
         level, skill, warning = self.extract(book)
         # The assumption is that the warning has already been handled in self.choice
         ct = self.player.activateSkill("Critical Thinking")
@@ -142,6 +147,7 @@ class benfriege:
         self.update_field('read_fatigue', fibonacci(self.player.grand_library['conseq_read_counter']))
         self.player.grand_library['conseq_read_counter'] += 1
         self.update_field('read_action_counter', 3)
+        self.current_books.remove(book)
         consequence = self.player.takeDamage(0, self.player.grand_library['read_fatigue'])
         
         if not consequence:
@@ -153,6 +159,9 @@ class benfriege:
     def checkout(self, book, _=None):
         if self.player.paused:
             return
+        if book not in self.current_books:
+            self.player.output(f"{book} book is not longer available!", 'yellow')
+            return
         # We assume the warning has already been handled in self.choice
         self.player.addItem(book, 1, skip_update=True)
         self.update_field('total_borrowed', '+1')
@@ -160,6 +169,7 @@ class benfriege:
             self.player.grand_library['borrowed'][book] += 1
         else:
             self.player.grand_library['borrowed'][book] = 1
+        self.current_books.remove(book)
         self.player.exitActionLoop('minor')()
 
 class demetry:
@@ -275,6 +285,8 @@ class demetry:
         return 10 + self.player.skills['Persuasion']
     
     def get_loan_confirmed(self, loan_amount, _=None):
+        if self.player.paused:
+            return
         loan_length = self.get_loan_length()
         self.player.output(f"Receiving a loan of {loan_amount} coins for maximum duration of {loan_length}.", 'green')
         self.update_field('loan_amount', loan_amount)
@@ -284,7 +296,7 @@ class demetry:
         self.player.exitActionLoop('minor')()
     
     def get_loan(self, _=None):
-        if self.player.paused:
+        if self.player.puased:
             return
         loan_options = self.get_loan_options()
         loan_length = self.get_loan_length()
@@ -306,7 +318,7 @@ class demetry:
                 self.update_field('credit_score', f"+{self.get('loan_amount')}")
                 self.player.output(f"You gained {self.get('loan_amount')} credit score!", 'green')
             else:
-                self.player.output(f"You did not gain any credit score because you returned your loan early", 'yellow')
+                self.player.output("You did not gain any credit score because you returned your loan early", 'yellow')
         # Complete the return
         self.player.add_coins(-self.get('loan_amount'))
         self.update_field('loan_amount', None)
@@ -335,7 +347,8 @@ class enfeir:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class fodker:
     def __init__(self, player):
@@ -349,7 +362,8 @@ class fodker:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
 
 class glaser:
     def __init__(self, player):
@@ -363,7 +377,8 @@ class glaser:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class kubani:
     def __init__(self, player):
@@ -377,7 +392,8 @@ class kubani:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class pafiz:
     def __init__(self, player):
@@ -391,7 +407,8 @@ class pafiz:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class scetcher:
     def __init__(self, player):
@@ -405,7 +422,8 @@ class scetcher:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class starfex:
     def __init__(self, player):
@@ -419,7 +437,8 @@ class starfex:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class tamarania:
     def __init__(self, player):
@@ -433,21 +452,285 @@ class tamarania:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
     
 class tamariza:
     def __init__(self, player):
         self.player = player
         self.actionFuncs = {}
         
-    def actionGrid(self):
-        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs, add_back=True)
+        self.foi = ['membership', 'membership_rounds_remaining', 'auto_renewal', 'renew_with_market_earnings', 'current_consecutive_platinum_renewals', 'best_consecutive_platinum_renewals']
+        data = [[k.replace('_', ' ').title(), str(self.get(k))] for k in self.foi]
+        
+        self.table = Table(header=['Field', 'Value'], 
+                           data=data,
+                           color_odd_rows=True,
+                           key_field='Field')
+        
+    def actionGrid(self, add_cancel=True):
+        if add_cancel:
+            self.actionFuncs['Cancel'] = self.player.exitActionLoop(amt=0) # add back does not work at the moment.
+        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs)
+    
+    def get(self, field):
+        return self.player.wizard_tower[field]
     
     def update_field(self, field, value):
-        pass
+        previous_value = self.player.wizard_tower[field]
+        if type(value) is str:
+            try:
+                self.player.wizard_tower[field] += int(value)
+            except ValueError:
+                # This means that we are not trying to add to the field, rather trying to set it.
+                self.player.wizard_tower[field] = value
+        else:
+            self.player.wizard_tower[field] = value
+        if field in self.foi:
+            k = field.replace('_', ' ').title()
+            self.table.update_cell('Value', k, self.player.wizard_tower[field])
+        if hasattr(self, field):
+            getattr(self, field)(previous_value, self.get(field))
+    
+    def end_round(self):
+        if self.get('membership_rounds_remaining') is not None:
+            self.update_field('membership_rounds_remaining', '-1')
+    
+    def membership(self, pm, m):
+        if m is None:
+            self.update_field('auto_renewal', 'off')
+            self.update_field('membership_rounds_remaining', None)
+        if m != 'Platinum':
+            self.update_field('current_consecutive_platinum_renewals', 0)
+        if (pm == 'Platinum') and (m == 'Platinum'):
+            self.update_field('current_consecutive_platinum_renewals', '+1')
+        color = 'green' if var.membership_order.index(m) >= var.membership_order.index(pm) else ('yellow' if pm is None else None)
+        msg = f"You successfully subsribed to {m} Wizard Tower membership!" if pm is None else "Your Wizard Tower membership has changed to {m}."
+        self.player.output(msg, color)
+        if (m is not None) and (self.get('auto_renewal') == 'off'):
+            self.actionFuncs = {'Turn Auto Renewal on': self.toggle_auto_renewal, 'Keep Auto Renewal off': self.player.exitActionLoop(amt=0)}
+            self.actionGrid(add_cancel=False)
+    
+    def current_consecutive_platinum_renewals(self, pccpr, ccpr):
+        if ccpr > self.get('best_consecutive_platinum_renewals'):
+            self.update_field('best_consecutive_platinum_renewals', ccpr)
+        
+    def best_consecutive_platinum_renewals(self, pbcpr, bcpr):
+        self.player.updateTitleValue('sorcerer', None, bcpr)
+            
+    def membership_rounds_remaining(self, pmrr, mrr):
+        if mrr == 0:
+            if self.get('auto_renewal') == 'off':
+                qm = self.get('queued_membership')
+                self.update_field('membership', qm)
+            elif self.get('auto_renewal') == 'on':
+                qm = self.get('queued_membership')
+                if qm is None:
+                    # Go to auto-renewal with using market coins first if turned on.
+                    cost = var.membership_price[self.get('membership')]
+                    if self.player.birthcity.lower() == 'tamariza':
+                        cost -= 1
+                    if self.get('renew_with_market_earnings') == 'off':
+                        if self.player.coins < cost:
+                            self.player.output(f"You do not have the {cost} coins with you to renew your membership!", 'red')
+                            self.update_field('membership', None)
+                        else:
+                            self.player.add_coins(-cost)
+                            self.update_field('membership_rounds_remaining', 5)
+                            self.player.output(f"The Wizard Tower auto-deducted {cost} coins from you to renew your membership.", 'green')
+                    else:
+                        if (self.player.bank['tamariza'] + self.player.coins) < cost:
+                            self.player.output("You do not have enough coins with you and at your Demetry market to renew your membership!", 'red')
+                            self.update_field('membership', None)
+                        else:
+                            withdraw = min([self.player.bank['tamariza'], cost])
+                            self.player.bank['tamariza'] -= withdraw
+                            self.player.output(f"Withdrew {withdraw} from you market earnings to pay for your Wizard Tower auto-renewal membership", 'green')
+                            if withdraw < cost:
+                                self.player.add_coins(-(cost-withdraw))
+                                self.player.output(f"The Wizard Tower also auto-deducted {cost-withdraw} coins to complete your {self.get('membership')} membership renewal", 'green')
+                            self.update_field('membership_rounds_remaining', 5)
+                else:
+                    # This means they must have purchased a greater membership already, so turn it on.
+                    self.update_field('membership', qm)
+                    self.update_field('membership_rounds_remainig', 5)
+    
+    def confirm_membership(self, membership, cost, _=None):
+        if self.player.paused:
+            return
+        if membership == None:
+            self.update_field('queued_membership', None)
+            self.update_field('auto_renewal', 'off')
+            self.player.player.output(f"Your membership will cancel in {self.get('membership_rounds_remaining')} rounds", 'green')
+        else:
+            self.player.add_coins(-cost)
+            if self.get('membership') is None:
+                self.update_field('membership', membership)
+                self.update_field('membership_rounds_remaining', 5)
+            else:
+                self.update_field('queued_membership', membership)
+        self.player.exitActionLoop('minor')()
+    
+    def cancel(self, _=None):
+        if self.player.paused:
+            return
+        self.actionFuncs = {}
+        self.player.output("When you cancel you keep your membership until the end and all renewals will be turned off. Proceed?", 'blue')
+        self.actionFuncs['*g|Confirm'] = partial(self.confirm_membership, None, 0)
+        self.actionGrid()
+        
+    def begin_membership(self, membership, _=None):
+        if self.player.paused:
+            return
+        cost = var.membership_price[membership]
+        if self.player.birthcity.lower() == 'tamariza':
+            cost -= 1
+        if self.player.coins < cost:
+            self.player.output(f"You do not have {cost} coins to purchase this membership!", 'yellow')
+            return
+        self.player.output(f'Confirm {membership} membership for {cost} coin{"s" if cost!=1 else ""}', 'blue')
+        if self.get('membership') is not None:
+            self.player.output("Note! Your new membership will not start until you complete your old one.", 'yellow')
+        self.actionFuncs = {'*g|Confirm': partial(self.confirm_membership, membership, cost)}
+        self.actionGrid()
+    
+    def change_membership(self, _=None):
+        if self.player.paused:
+            return
+        self.actionFuncs = {}
+        cm = var.membership_order.index(self.get('membership')) + 1
+        for m in var.membership_order[cm:]:
+            self.actionFuncs[m] = partial(self.begin_membership, m)
+        if self.get('membership') != None:
+            self.actionFuncs['Cancel Membership'] = self.cancel
+        self.actionGrid()
+    
+    def cancel_teleport(self, _=None):
+        if self.player.paused:
+            return
+        self.player.teleport_ready = False
+        self.player.parentBoard.game_page.main_screen.current = 'City'
+        self.player.output("Canceled teleport.")
+        self.player.exitActionLoop(amt=0)()
+        
+    def confirm_teleport(self, coord, fatigue, _=None):
+        if self.player.paused:
+            return
+        self.player.teleport_ready = False
+        self.player.takeDamage(0, fatigue)
+        self.player.moveto(coord, trigger_consequence=True)
+        self.player.exitActionLoop('minor')()
+    
+    def teleport_to(self, coord):
+        if self.player.paused:
+            return
+        if coord == self.player.currentcoord:
+            self.cancel_teleport()
+            
+        # Do fatigue calculation here
+        m = self.get('membership')
+        distance = hex_distance(self.player.currentcoord, coord)
+        if distance > var.max_teleport_distance[m]:
+            self.player.output(f"This is too far for you to teleport with your {m} membership!", 'yellow')
+            return
+        fatigue = int(np.ceil(distance / 3.5)) if m=='Platinum' else int(np.ceil(distance / 3))
+        if (self.player.fatigue + fatigue) >= self.player.max_fatigue:
+            self.player.output(f"You can't teleport here, it would cost you {fatigue} which is beyond your capacity at the moment", "yellow")
+            return
+        
+        self.player.output(f"Teleporting to {self.player.parentBoard.gridtiles[coord].tile.title()} will cost {fatigue} fatigue. Do wish to proceed?", 'blue')
+        self.actionFuncs = {}
+        self.actionFuncs['*g|Yes'] = partial(self.confirm_teleport, coord, fatigue)
+        self.actionFuncs['Choose Different Tile'] = self.teleport
+        self.actionFuncs['Cancel Teleport'] = self.cancel_teleport
+        self.actionGrid(add_cancel=False)
+    
+    def teleport(self, _=None):
+        if self.player.paused:
+            return
+        self.player.teleport_ready = True
+        self.player.parentBoard.game_page.main_screen.current = 'Board'
+        self.player.output("Click on a tile to teleport to!", 'blue')
+        self.actionFuncs = {'Cancel Teleport': self.cancel_teleport}
+        self.actionGrid(add_cancel=False)
+    
+    def confirm_convert(self, from_item, to_item, _=None):
+        if self.player.paused:
+            return
+        self.player.addItem(from_item, -1, skip_update=True)
+        self.player.addItem(to_item, 1, skip_update=True)
+        self.player.exitActionLoop('minor')()
+    
+    def convert_to(self, from_item, to_item, _=None):
+        if self.player.paused:
+            return
+        self.player.output(f"Convert {from_item} to {to_item}?", 'blue')
+        self.actionGrid = {"*g|Yes": partial(self.confirm_convert, from_item, to_item)}
+        self.actionGrid()
+        
+    def convert_item(self, item, _=None):
+        if self.player.puased:
+            return
+        g = var.matter_conversion_items[item]['group']
+        c = var.matter_conversion_items[item]['category']
+        t = var.matter_conversion_rules[self.get('membership')]['type']
+        item_set = var.matter_conversion_groupers[g][c] if t=='same' else var.matter_conversion_cross[g]
+        convert_to_options = item_set.difference({item})
+        self.actionFuncs = {}
+        for to_item in convert_to_options:
+            self.actionFuncs[to_item] = partial(self.convert_to, item, to_item)
+        self.actionGrid()
+    
+    def matter_conversion(self, _=None):
+        if self.player.paused:
+            return
+        m = self.get('membership')
+        gr = var.matter_conversion_rules[m]['gr']
+        self.actionFuncs = {}
+        for item in self.player.items:
+            if var.matter_conversion_items[item]['group'] in gr:
+                self.actionFuncs[item] = partial(self.convert_item, item)
+        self.actionGrid()
+    
+    def auto_renewal(self, par, ar):
+        if ar == 'off':
+            self.update_field('renew_with_market_earnings', 'off')
+    
+    def toggle_renew_with_market(self, _=None):
+        if self.player.paused:
+            return
+        toggle = 'on' if self.get('renew_with_market_earnings')=='off' else 'on'
+        clr = 'green' if toggle=='on' else None
+        self.update_field('renew_with_market_earnings', toggle)
+        self.player.output(f"Turned renew with market earnings {toggle}.", clr)
+        self.player.exitActionLoop(amt=0)()
+    
+    def toggle_auto_renewal(self, _=None):
+        if self.player.paused:
+            return
+        toggle = 'on' if self.get('auto_renewal') == 'off' else 'off'
+        clr = 'green' if toggle=='on' else None
+        self.update_field('auto_renewal', toggle)
+        self.player.output(f"Turned auto renewal {toggle}.", clr)
+        if toggle == 'on':
+            self.player.output("Would you also like to turn Renew with Market Earnings on?", 'blue')
+            self.actionFuncs = {'Turn Renew with Market Earnings on': self.toggle_renew_with_market, 'Keep Renew with Market Earnings off': self.player.exitActionLoop(amt=0)}
+            self.actionGrid(add_cancel=False)
+        else:
+            self.player.exitActionLoop(amt=0)()
     
     def begin_action_loop(self, _=None):
-        pass
+        self.actionFuncs = {}
+        self.actionFuncs['Change Membership'] = self.change_membership
+        if self.get('membership') is not None:
+            self.actionFuncs['Teleport'] = self.teleport
+            self.actionFuncs['Matter Conversion'] = self.matter_conversion
+            toggle = 'on' if self.get('auto_renewal') == 'off' else 'off'
+            self.actionFuncs[f'Turn Auto Renewal {toggle}'] = self.toggle_auto_renewal
+            mtoggle = 'on' if self.get('renew_with_market_earnings')=='off' else 'on'
+            if toggle == 'off':
+                self.actionFuncs[f'Turn Renew with Market Earnings {mtoggle}'] = self.toggle_renew_with_market
+        self.actionGrid()
 
 class tutalu:
     def __init__(self, player):
@@ -461,7 +744,8 @@ class tutalu:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
 
 class zinzibar:
     def __init__(self, player):
@@ -475,7 +759,8 @@ class zinzibar:
         pass
     
     def begin_action_loop(self, _=None):
-        pass
+        if self.player.paused:
+            return
         
 class HallmarkPanels(TabbedPanel):
     def __init__(self, city, player, **kwargs):

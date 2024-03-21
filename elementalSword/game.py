@@ -2413,16 +2413,19 @@ class Player(Image):
         self.colosseum = {}
         self.ancient_magic_museum = {'gifted_museum': 0} # starfex ancient magic museum
         self.smithing_guild = {}
-        self.wizards_tower = {'membership': None} # Tamariza wizard tower
+        self.wizard_tower = {'membership': None, 'membership_rounds_remaining': None, 'queued_membership': None, 'auto_renewal': 'off', 'renew_with_market_earnings': 'off', 'current_consecutive_platinum_renewals': 0, 'best_consecutive_platinum_renewals': 0} # Tamariza wizard tower
         self.hunters_guild = {}
         self.hidden_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
         self.fellowships = {city: getattr(hmrk, city)(self) for city in var.cities}
-            
+        
+        # Fellowship Statuses
+        self.teleport_ready = False
+        
         # Titles - note that minTitleReq has been deprecated in this dict in favor of using the server.
         self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
                       'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'category': 'General', 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},
                       'valiant': {'titleVP': 3, 'minTitleReq': 6, 'value':0, 'category': 'Combat', 'description': 'Maximum difference between an opponent stronger than you, that you defeated, and your total combat at the start of battle.'},
-                      'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'category': 'Fellowship', 'description': 'Longest continuous Tamariza Wizard Tower premium holder.'},
+                      'sorcerer': {'titleVP': 5, 'minTitleReq': 2, 'value':0, 'category': 'Fellowship', 'description': 'Most consecutive Tamariza Wizard Tower platinum membership renewals.'},
                       'superprime': {'titleVP': 5, 'minTitleReq': 40, 'value':0, 'category': 'Fellowship', 'description': 'Highest credit score from the Demetry Grand Bank.'},
                       'traveler': {'titleVP': 3, 'minTitleReq': 30, 'value':0, 'category': 'General', 'description': 'Most road tile movement.'},
                       'apprentice': {'titleVP': 4, 'minTitleReq': 60, 'value':0, 'category': 'Knowledge', 'description': 'Most cumulative levels gained from trainers.'},
@@ -2758,6 +2761,7 @@ class Player(Image):
             self.updateTitleValue('loyal', 1)
         self.updateTitleValue('decisive')
         self.fellowships['demetry'].end_round()
+        self.fellowships['tamariza'].end_round()
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
@@ -2928,13 +2932,25 @@ class Player(Image):
                 output(f'Cannot level {skill} beyond {previousLevel} by adding XP!', 'yellow')
     def activateSkill(self, skill, xp=1, max_lvl_xp=2):
         lvl = self.skills[skill]
+        add_lvl = 0
+        if (skill.lower() in {'persuasion', 'bartering'}) and (self.wizard_tower['membership'] is not None):
+            if (self.wizard_tower['membership'] == 'Basic') and (rbtwn(1, 3) == 1):
+                output(f"Your Basic Tamariza Tower Membership successfully activated 1 lvl higher {skill}.", 'green')
+                add_lvl = 1
+            elif (self.wizard_tower['membership'] == 'Gold') and (np.random.rand() <= 0.9):
+                output(f"Your Gold membership increases your {skill} lvl by 1!", 'green')
+                add_lvl = 1
+            else:
+                # Must have Platinum membership
+                add_lvl = rbtwn(1, 2)
+                output(f"Your Platinum membership increases your {skill} lvl by {add_lvl}!", 'green')
         if rbtwn(1,self.max_fatigue) <= self.fatigue:
             output(f"Fatigue impacted your {skill} skill.",'yellow')
             actv_lvl = np.max([0,lvl-self.fatigue])
         else:
             actv_lvl = lvl
             if lvl <= max_lvl_xp: self.addXP(skill, xp, 'Activation: ')
-        return actv_lvl
+        return actv_lvl + add_lvl
     def useSkill(self, skill, xp=1, max_lvl_xp=5):
         if skill == 'Persuasion':
             self.updateTitleValue('negotiator', 1)
@@ -6358,6 +6374,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
                 self.parentBoard.game_page.consequenceDisplay.text = 'Hooligan encounter chance: 1/3. Hooligan Lvl: 15-80. Reward: 1-8 coins. Hooligan Avoidance: (stealth+1)/13, if fails then (persuasion+1)/13.'
             else:
                 self.parentBoard.game_page.consequenceDisplay.text = ''
+        elif self.parentBoard.localPlayer.teleport_ready:
+            self.parentBoard.localPlayer.fellowships['tamariza'].teleport_to((self.gridx, self.gridy))
         else:
             if self.parentBoard.localPlayer.paused:
                 return
@@ -6769,7 +6787,8 @@ class GamePage(GridLayout):
         for txt, func in funcDict.items():
             orig_txt = deepcopy(txt)
             if txt[0] == '*':
-                clr, txt = txt.split('|')
+                split = txt.split('|')
+                clr, txt = split[0], '|'.join(split[1:])
                 B = Button(text=txt, markup=True, color=var.action_color_map[clr]['text'], background_normal='', background_color=var.action_color_map[clr]['background'])
             else:
                 B = Button(text=txt, markup=True)

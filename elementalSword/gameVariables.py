@@ -286,7 +286,8 @@ for person, quests in region_quest_mapper.items():
         inverse_quest_mapper[quest] = person
 
 #%% Mappers
-action_color_map = {'*b': {'text': (0, 0, 0, 1), 'background': (0.192, 0.737, 1.0, 1.0)}}
+action_color_map = {'*b': {'text': (0, 0, 0, 1), 'background': (0.192, 0.737, 1.0, 1.0)},
+                    '*g': {'text': (0, 0, 0, 1), 'background': (0.192, 0.929, 0.192, 1.0)}}
 
 #%% Hallmarks
 hallmarks = {
@@ -334,8 +335,57 @@ hallmarks = {
         > If you do not have enough coins, your homes are sold to the bank from least expensive to most until nothing is owed.
         > If you still owe the bank money, then the rest of the owed amount is forgiven."""
         },
+    'tamariza':
+        {'hallmark': 'Wizard Tower',
+         'attribute': 'wizard_tower',
+         'description': 
+"""You can subscribe to membership with the wizard tower for three mystical benefits. Membership period lasts 5 rounds and can be auto-renewed.
+
+    - Tamariza-born citizens get 1 coin discount!
+    * Basic Membership: 1 coin
+    * Gold Membership: 4 coins 
+    * Platinum Membership: 9 coins
+    
+    1) Teleportation (starting at the Wizard Tower; takes minor action):
+        * Basic: Teleport up to 3 tiles away | costs 1 fatigue.
+        * Gold: Teleport up to 7 tiles away | costs (tile distance)/3 fatigue, rounded up.
+        * Platinum: Teleport anywhere | costs (tile distance)/3.5 fatigue, rounded up.
+    2) Matter Conversion (only at the Wizard Tower; takes minor action):
+        > G1 (3 categories): [raw meat, raw fish] | [string, beads, hide, sand] | [lead, tin, copper, iron]
+        > G2 (2 categories): [cooked meat, cooked fish] | [clay, scales, leather, bark]
+        > G3 (3 categories): [well cooked meat, well cooked fish] | [tantalum, aluminum, kevlium, nickel] | [ceramic]
+        > G4 (2 categories): [tungsten, diamond, titanium, chromium] | [rubber]
+        * Basic: Can convert same category material only in G1.
+        * Gold: Can convert same category material in all groups.
+        * Platinum: Can convert same and cross-category material in all groups.
+    3) Tongue Enchantment (used anywhere):
+        > Bartering and Persuasion increase their chance of success.
+        * Basic: 1/3 chance of using 1 level higher.
+        * Gold: 90% chance for 1 level higher.
+        * Platinum: Either 1 or 2 levels higher with equal probability."""
+        },
 }
 
+# Benfriege
 library_level_map = {'Beginner': {'skill': [0, 3], 'min_prob': 0.8, 'min_ct': 0, 'max_ct': 4, 'cost': 2, 'xp': 3}, 
                      'Intermediate': {'skill': [4, 5], 'min_prob': 0.5, 'min_ct': 1, 'max_ct': 8, 'cost': 3, 'xp': 4},
                      'Advanced': {'skill': [6, 7], 'min_prob': 0.2, 'min_ct': 2, 'max_ct': 12, 'cost': 4, 'xp': 4}}
+# Tamariza
+membership_price = {None: 0, 'Basic': 1, 'Gold': 4, 'Platinum': 9}
+membership_order = [None, 'Basic', 'Gold', 'Platinum']
+matter_conversion_groupers = {1: [{'raw meat', 'raw fish'}, {'string', 'beads', 'hide', 'sand'}, {'lead', 'tin', 'copper', 'iron'}],
+                              2: [{'cooked meat', 'cooked fish', 'fruit'}, {'clay', 'scales', 'leather', 'bark'}],
+                              3: [{'well cooked meat', 'well cooked fish'}, {'tantalum', 'aluminum', 'kevlium', 'nickel'}, {'ceramic'}],
+                              4: [{'tungsten', 'diamond', 'titanium', 'chromium'}, {'rubber'}]}
+matter_conversion_items = {}
+matter_conversion_cross = {}
+for group, categories in matter_conversion_groupers.items():
+    matter_conversion_cross[group] = set()
+    for i, category in enumerate(categories):
+        for item in category:
+            matter_conversion_items[item] = {'group': group, 'category': i}
+        matter_conversion_cross[group] = matter_conversion_cross[group].union(category)
+matter_conversion_rules = {'Basic': {'gr': {1}, 'type': 'same'},
+                           'Gold': {'gr': {1, 2, 3, 4}, 'type': 'same'},
+                           'Platinum': {'gr': {1, 2, 3, 4}, 'type': 'cross'}}
+max_teleport_distance = {'Basic': 3, 'Gold': 7, 'Platinum': float('inf')}
