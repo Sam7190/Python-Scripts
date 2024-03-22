@@ -10,6 +10,15 @@ This was using python version 7.3.7 and pip version 21.0.1
 # Specific version installation:
 conda install kivy==1.11.1 -c conda-forge
 pip install kivymd==0.104.1
+
+# Package Versions Built On:
+Python == 7.3.7
+pip == '21.0.1'
+numpy == '1.20.3'
+pandas == '1.3.1'
+pillow == '8.3.1'
+matplotlib == '3.4.2'
+skimage == '0.18.1'
 """
 #%% Import Modules
 
