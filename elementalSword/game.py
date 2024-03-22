@@ -5,6 +5,7 @@ python game.py
 # Installations:
 conda install kivy -c conda-forge # Install kivy - make sure it is v1.11.1
 pip install kivymd # Install kivymd - make sure it is v0.104.1
+This was using python version 7.3.7 and pip version 21.0.1
 
 # Specific version installation:
 conda install kivy==1.11.1 -c conda-forge
