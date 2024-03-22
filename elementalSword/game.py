@@ -878,6 +878,7 @@ class FightPage(FloatLayout):
             # Get reward
             if not callable(self.reward):
                 for rwd, amt in self.reward.items():
+                    amt = self.P.get_bonus(amt)
                     if rwd == 'coins':
                         output(f"Rewarded {int(amt)} coin!", 'green')
                         self.P.coins += int(amt)
@@ -1203,6 +1204,13 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                         P.takeAction(amt)
                     else:
                         P.update_mainStatPage()
+                elif consume == 'purchase':
+                    if P.first_purchase_after_barter:
+                        # In other words, regardless of if the amt=1 or amt=0, they must take one minor action this round.
+                        P.first_purchase_after_barter = False
+                        exitActionLoop('minor', amt=1, empty_tile=empty_tile)()
+                    else:
+                        exitActionLoop('minor', amt=amt, empty_tile=empty_tile)()
                 elif amt>0:
                     if game_launched[0]: logging.info(f"Taking {amt} of fatigue!")
                     P.takeAction(amt)
@@ -1861,7 +1869,7 @@ def C_wilderness():
         if not fainted_or_paralyzed:
             if (P.PlayerTrack.Quest.quests[5, 3].status == 'started') and (not hasattr(P.PlayerTrack.Quest.quests[5, 3], 'killed')):
                 def reward(_=None):
-                    P.addItem('bark', 5)
+                    P.addItem('bark', P.get_bonus(5))
                     P.PlayerTrack.Quest.quests[5, 3].killed = True
                     output("Go claim your reward from the mayor!", 'blue')
                 def conseq(_=None):
@@ -2337,6 +2345,7 @@ class Player(Image):
         self.item_count = 0
         self.items = {}
         self.activated_bartering = False
+        self.first_purchase_after_barter = False
         self.bartering_mode = 0
         self.unsellable = set()
         self.fatigue = 0
@@ -2408,7 +2417,7 @@ class Player(Image):
         self.reaquisition_guild = {'class': 1, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # enfeir requisition guild
         self.defenders_guild = {}
         self.peace_embassy = {}
-        self.ancestrial_order = {'loot': 0, 'food': 0, 'fatigue': 0, 'minor': False, 'horse': False, 'major': False} # kubani ancestrial order
+        self.ancestrial_order = {'loot_class': 0, 'loot_class_progress': 0, 'food_class': 0, 'food_class_progress': 0, 'fatigue_class': 0, 'fatigue_class_progress': 0, 'minor_treading': False, 'minor_treading_progress': 0, 'horse_riding': False, 'horse_riding_progress': 0, 'major_treading': False, 'major_treading_progress': 0, 'first_class_1': None, 'first_class_2': None, 'first_class_3': None} # kubani ancestrial order
         self.meditation_chamber = {'class': 1, 'score': 0, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # pafiz meditation chamber
         self.colosseum = {}
         self.ancient_magic_museum = {'gifted_museum': 0} # starfex ancient magic museum
@@ -2420,6 +2429,9 @@ class Player(Image):
         
         # Fellowship Statuses
         self.teleport_ready = False
+        self.has_horse = False
+        self.loot_bonus = 0
+        self.food_bonus = 0
         
         # Titles - note that minTitleReq has been deprecated in this dict in favor of using the server.
         self.titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
@@ -2467,27 +2479,6 @@ class Player(Image):
         socket_client.send('[TITLE VALUE]', {'value': self.titles[title]['value'], 'username': self.username, 'title': title})
         if hasattr(self, 'PlayerTrack'):
             self.PlayerTrack.update_single_title(title)
-    def updateTitleValue_deprecated(self, title, value=1, set_value=None):
-        if title == 'decisive':
-            # value is ignored in this case
-            endTime = time()
-            self.titles[title]['sum'] += (endTime - self.titles[title]['startTime'])
-            self.titles[title]['round'] += 1
-            self.titles[title]['value'] =  - (self.titles[title]['sum'] / self.titles[title]['round']) # Force negative for consistency in finding max holder
-        else:
-            if set_value is not None:
-                self.title[title]['value'] = set_value
-            else:
-                self.titles[title]['value'] += value
-        if (self.titles[title]['value'] >= self.titles[title]['minTitleReq']) and (self.titles[title]['value'] > self.titles[title]['maxRecord']['value']):
-            output(f"You now hold The {title.capitalize()} title!", 'green')
-            self.titles[title]['maxRecord'] = {'value': self.titles[title]['value'], 'holder': self.username, 'title': title}
-            self.Titles += self.titles[title]['titleVP']
-            self.updateTotalVP(self.titles[title]['titleVP'], False)
-            socket_client.send('[TITLE]', self.titles[title]['maxRecord'])
-        if hasattr(self, 'PlayerTrack'):
-            self.PlayerTrack.update_single_title(title)
-            #self.PlayerTrack.updateTitles()
     def newMaxRecord(self, maxRecord):
         title = maxRecord['title']
         previousRecord = self.titles[title]['maxRecord']
@@ -2507,19 +2498,6 @@ class Player(Image):
         self.titles[maxRecord['title']]['maxRecord'] = maxRecord
         if hasattr(self, 'PlayerTrack'):
             self.PlayerTrack.update_single_title(title)
-    def newMaxRecord_deprecated(self, maxRecord):
-        previousRecord = self.titles[maxRecord['title']]['maxRecord']
-        if previousRecord['holder'] == self.username:
-            # If this user was the last holder, then remove Title VP
-            self.Titles -= self.titles[maxRecord['title']]['titleVP']
-            self.updateTotalVP(-self.titles[maxRecord['title']]['titleVP'], False)
-            output(f"You lost The {maxRecord['title'].capitalize()} title to {maxRecord['holder']}", 'red')
-        else:
-            output(f"{maxRecord['holder']} now holds The {maxRecord['title'].capitalize()} title!", 'blue')
-        self.titles[maxRecord['title']]['maxRecord'] = maxRecord
-        if hasattr(self, 'PlayerTrack'):
-            self.PlayerTrack.update_single_title(maxRecord['title'])
-            #self.PlayerTrack.updateTitles()
     def savePlayer(self):
         self.PlayerTrack.Quest.saveTable()
         self.PlayerTrack.craftingTable.saveTable()
@@ -2722,6 +2700,24 @@ class Player(Image):
                 self.titles['brave']['currentStreak'] = 0
             output(f'[ACTION {self.max_actions-self.actions+1}] You rested {rest_rate} fatigue/HP')
             self.takeAction(0, False, True)
+    def attempt_barter(self, following_function, _=None):
+        if self.paused:
+            return
+        if self.activated_bartering:
+            following_function()
+        self.activated_bartering = True
+        bartering = self.activateSkill('Bartering')
+        r = rbtwn(1, 12, None, bartering, 'Bartering ')
+        if r <= bartering:
+            self.useSkill('Bartering')
+            output("You successfully Barter", 'green')
+            self.bartering_mode = 2 if bartering > 8 else 1
+            self.first_purchase_after_barter = True
+            following_function()
+        else:
+            output("You fail to Barter", 'yellow')
+            self.bartering_mode = 0
+            following_function() # Not given the opportunity to barter again unless performs a different action first
     def eat(self, food, _=None):
         if self.paused:
             return
@@ -2730,6 +2726,11 @@ class Player(Image):
             return
         self.ate += 1
         ftg, hp = food_restore[food]
+        if self.player.food_bonus > 0:
+            if ftg > 0:
+                ftg += self.player.food_bonus
+            if hp > 0:
+                hp += self.player.food_bonus
         survival = self.skills["Survival"]
         r = rbtwn(1, 12, None, survival, 'Survival ')
         if r <= survival:
@@ -2778,6 +2779,11 @@ class Player(Image):
         fainted = False
         if self.current[hp_idx] == 0:
             self.parentBoard.sendFaceMessage('You Fainted!','red')
+            if self.has_horse and (self.currenttile.tile not in var.cities):
+                self.has_horse = False
+                self.max_road_moves -= 3
+                output("You lost your horse!", 'red')
+                self.update_frontStats()
             if (self.Combat > 2):
                 survival = self.activateSkill("Survival")
                 r = rbtwn(1, 12, None, survival, 'Survival ')
@@ -2826,6 +2832,7 @@ class Player(Image):
                 output("Take an extra fatigue for bartering this turn", 'yellow')
                 fatigue += 1
             self.activated_bartering = False
+            self.first_purchase_after_barter = False
             self.bartering_mode = 0
         if (fatigue > 0) and (self.paralyzed_rounds == 0):
             # Not activated, but can be used.
@@ -2868,8 +2875,12 @@ class Player(Image):
         self.TotalVP += add
         if game_app.game_page.vpView.text != 'VP Hidden':
             game_app.game_page.vpView.text = f'[color={game_app.game_page.hclr}]{self.TotalVP}[/color] VP'
-        if checkGameEnd:
+        if (add > 0) and checkGameEnd:
             self.checkGameEnd()
+    def updateFellowshipVP(self, add):
+        self.Fellowship += add
+        self.PlayerTrack.fellowshipTab.text = self.PlayerTrack.get_tab_text('Fellowship')
+        self.updateTotalVP(add)
     def GameEnd(self, player_stats):
         best_total, best_users = -1, []
         for username, stats in player_stats.items():
@@ -2904,6 +2915,16 @@ class Player(Image):
             output("You Triggered End Game!", 'blue')
             socket_client.send('[GAME END]', '')
             socket_client.send('[END STATS]', {'Combat':self.Combat, 'Reputation':self.Reputation, 'Capital':self.Capital, 'Knowledge':self.Knowledge, 'Fellowship':self.Fellowship, 'Titles':self.Titles})
+    def get_bonus(self, amt):
+        amt = amt + amt*self.loot_bonus
+        if int(amt) < amt:
+            remainder = amt - int(amt)
+            if np.random.rand() <= remainder:
+                amt = int(amt) + 1
+            else:
+                amt = int(amt)
+        amt = int(amt)
+        return amt
     def updateSkill(self, skill, val=1, max_lvl=12):
         lvl_gain = max([0, min([max_lvl - self.skills[skill], val])])
         if lvl_gain != val:
@@ -2940,7 +2961,7 @@ class Player(Image):
             elif (self.wizard_tower['membership'] == 'Gold') and (np.random.rand() <= 0.9):
                 output(f"Your Gold membership increases your {skill} lvl by 1!", 'green')
                 add_lvl = 1
-            else:
+            elif self.wizard_tower['membership'] == 'Platinum':
                 # Must have Platinum membership
                 add_lvl = rbtwn(1, 2)
                 output(f"Your Platinum membership increases your {skill} lvl by {add_lvl}!", 'green')
@@ -3818,10 +3839,11 @@ def GaurdHome(_=None):
     B = getQuest(1, 3)
 
     def Reward():
-        actions = {'Tin': getItem('tin', 1, action_amt=0),
-                   'Iron': getItem('iron', 1, action_amt=0),
-                   'Lead': getItem('lead', 1, action_amt=0),
-                   'Copper': getItem('copper', 1, action_amt=0)}
+        amt = P.get_bonus(1)
+        actions = {'Tin': getItem('tin', amt, action_amt=0),
+                   'Iron': getItem('iron', amt, action_amt=0),
+                   'Lead': getItem('lead', amt, action_amt=0),
+                   'Copper': getItem('copper', amt, action_amt=0)}
         P.PlayerTrack.Quest.update_quest_status((1, 3), 'complete')
         output("The owner wants to reward you for gaurding the house! Choose one of the following:", 'blue')
         actionGrid(actions, False)
@@ -5304,8 +5326,8 @@ class PlayerTrack(GridLayout):
         self.knowledgeTab.text=f'Knowledge: [color={self.hclr}]{self.player.Knowledge}[/color]'
         self.Capital.update_data_cells(self.get_Capital())
         self.capitalTab.text=f"Capital: [color={self.hclr}]{self.player.Capital}[/color]"
-        self.fellowshipTab.text=f"Fellowship: [color={self.hclr}]{self.player.Fellowship}[/color]"
-        #self.updateTitles()
+        self.fellowshipTab.text=self.get_tab_text('Fellowship')
+        #self.updateTitles() # This should update on its own, no need to turn on this line.
         self.Items.update_data_cells(self.get_Items())
         self.itemsTab.text=f'Items: {self.player.item_count}/{self.player.max_capacity}'
 

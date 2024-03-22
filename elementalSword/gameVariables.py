@@ -335,11 +335,53 @@ hallmarks = {
         > If you do not have enough coins, your homes are sold to the bank from least expensive to most until nothing is owed.
         > If you still owe the bank money, then the rest of the owed amount is forgiven."""
         },
+    'kubani':
+        {'hallmark': 'Ancestrial Order',
+         'attribute': 'ancestrial_order',
+         'description':
+"""An ancient order that studies and teaches the arts of interacting with your environment, and are devoted to pass down ancient traditions.
+
+There are three primary ancient knowledges: 1) Loot, 2) Food, and 3) Fatigue.
+  > Each have 3 classes to progress through, completing the final class gives 2 VP.
+There are also three exclusive ancient knowledges: 1) Minor Treading [Class 1], 2) Horse Riding [Class 2], and 3) Major Treading [Class 3].
+
+Learning Requirements:
+    - Kubani residents subtract 1 skill knowledge requirement or 5 total knowledge requirement.
+    
+    * [Loot] Class 1: Lvl 2 Gathering | Class 2: Lvl 6 Gathering | Class 3: Lvl 10 Gathering
+    * [Food] Class 1: Lvl 2 Heating | Class 2: Lvl 6 Heating | Class 3: Lvl 10 Heating 
+    * [Fatigue] Class 1: Lvl 2 Survival | Class 2: Lvl 6 Survival | Class 3: Lvl 10 Survival
+    * Minor Treading (class 1): 15 Total Knowledge | Horse Riding (class 2): 45 Total Knowledge | Major Treading (class 3): 80 Total Knowledge
+
+Session Required to Progress (Major Action):
+    * Class 1: 2 successful sessions; chance of success is Critical Thinking / 8
+    * Class 2: 4 successful sessions; chance of success is Critical Thinking / 12
+    * Class 3: 8 successful sessions; chance of success is Critical Thinking / 16
+
+Learning Costs Per Session:
+    - Kubani residents subtract 1 coin.
+    - Note: "first" refers to the first ancient knowledge that you begin studying in that class bracket.
+    - Note 2: The exclusive ancient knowledges have unique costs (they don't fall into the standard class cost).
+    - Note 3: Reminder, these are per session costs - not complete cost! Furthermore, you are only charged for successful sessions.
+    
+    * [Class 1] First: 1 coin, Remaining: 2 coins, Minor Treading: 3 coins.
+    * [Class 2] First: 2 coins, Remaining: 3 coins, Horse Riding: 4 coins (then optin to purchase horse for 20 coins after learning).
+    * [Class 3] First: 3 coins, Remaining: 4 coins, Major Treading: 5 coins.
+    
+Learning Benefits:
+    * Loot: +15% Better Drops per class (+2VP at class 3)
+    * Food: +1 Food Improvement per class (+2VP at class 3)
+    * Fatigue: +1 Maximum Fatigue per class (+2VP at class 3)
+    * Minor Treading: +2 Minor Actions + 1VP
+    * Horse Riding: +3 Road Movements with a Horse + 1VP
+    * Major Treading: +1 Major Action + 2VP
+"""
+        },
     'tamariza':
         {'hallmark': 'Wizard Tower',
          'attribute': 'wizard_tower',
          'description': 
-"""You can subscribe to membership with the wizard tower for three mystical benefits. Membership period lasts 5 rounds and can be auto-renewed.
+"""You can subscribe to membership with the Wizard Tower for three mystical benefits. Membership period lasts 5 rounds and can be auto-renewed.
 
     - Tamariza-born citizens get 1 coin discount!
     * Basic Membership: 1 coin
@@ -370,6 +412,26 @@ hallmarks = {
 library_level_map = {'Beginner': {'skill': [0, 3], 'min_prob': 0.8, 'min_ct': 0, 'max_ct': 4, 'cost': 2, 'xp': 3}, 
                      'Intermediate': {'skill': [4, 5], 'min_prob': 0.5, 'min_ct': 1, 'max_ct': 8, 'cost': 3, 'xp': 4},
                      'Advanced': {'skill': [6, 7], 'min_prob': 0.2, 'min_ct': 2, 'max_ct': 12, 'cost': 4, 'xp': 4}}
+
+# Kubani
+kubani_class_effect = {'loot_class': {0: 'None', 1: '15% Better Drops', 2: '30% Better Drops', 3: '45% Better Drops & 2VP'},
+                       'food_class': {0: 'None', 1: '+1 Food Benefit', 2: '+2 Food Benefit', 3: '+3 Food Benefit & 2VP'},
+                       'fatigue_class': {0: 'None', 1: '+1 Max Fatigue', 2: '+2 Max Fatigue', 3: '+3 Max Fatigue & 2VP'},
+                       'minor_treading': {False: 'None', True: '+2 Minor Actions & 1VP'},
+                       'horse_riding': {False: 'None', True: '+3 Road Moves with Horse & 1VP'},
+                       'major_treading': {False: 'None', True: '+1 Major Action & 2VP'}}
+kubani_req = {'loot_class': 'Gathering', 'food_class': 'Heating', 'fatigue_class': 'Survival'}
+kubani_req_lvl = {0: 2, 1: 6, 2: 10}
+kubani_exclusive_req = {'minor_treading': 15, 'horse_riding': 45, 'major_treading': 80}
+kubani_progress_required = {0: 2, 1: 4, 2: 8, 3: 'Complete'}
+kubani_exclusive_progress_required = {'minor_treading': 2, 'horse_riding': 4, 'major_treading': 8}
+kubani_cost = {0: 2, 1: 3, 2: 4}
+kubani_exclusive_cost = {'minor_treading': 3, 'horse_riding': 4, 'major_treading': 5}
+kubani_max_lvl = {'loot_class': 3, 'food_class': 3, 'fatigue_class': 3, 'minor_treading': True, 'major_treading': True, 'horse_riding': True}
+kubani_exclusive_class = {'minor_treading': 0, 'horse_riding': 1, 'major_treading': 2}
+kubani_ct_den = {0: 8, 1: 12, 2: 18}
+horse_cost = 20
+
 # Tamariza
 membership_price = {None: 0, 'Basic': 1, 'Gold': 4, 'Platinum': 9}
 membership_order = [None, 'Basic', 'Gold', 'Platinum']

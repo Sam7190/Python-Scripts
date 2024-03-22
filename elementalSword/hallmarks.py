@@ -385,15 +385,248 @@ class kubani:
         self.player = player
         self.actionFuncs = {}
         
-    def actionGrid(self):
-        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs, add_back=True)
+        self.foi = ['loot_class', 'food_class', 'fatigue_class', 'minor_treading', 'horse_riding', 'major_treading']
+        data = [[k.replace('_', ' ').title(), str(self.get(k)), var.kubani_class_effect[k][self.get(k)]] for k in self.foi]
+        
+        self.table = Table(header=['Field', 'Value', 'Benefit', 'Successful Sessions', 'Sessions Needed'], 
+                           data=data,
+                           color_odd_rows=True,
+                           key_field='Field')
+        
+    def actionGrid(self, add_cancel=True):
+        if add_cancel:
+            self.actionFuncs['Cancel'] = self.player.exitActionLoop(amt=0)
+        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs)
+    
+    def get(self, field):
+        return self.player.ancestrial_order[field]
     
     def update_field(self, field, value):
-        pass
+        previous_value = deepcopy(self.get(field))
+        if type(value) is str:
+            try:
+                self.player.ancestrial_order[field] += int(value)
+            except ValueError:
+                # This means that we are not trying to add to the field, rather trying to set it.
+                self.player.ancestrial_order[field] = value
+        else:
+            self.player.ancestrial_order[field] = value
+        next_value = self.get(field)
+        split = field.split('_')
+        if field in self.foi:
+            k = field.replace('_', ' ').title()
+            self.table.update_cell('Value', k, next_value)
+            self.table.update_cell('Benefit', var.kubani_class_effect[field][next_value])
+        elif split[-1] == 'progress':
+            foi = '_'.join(split[:-1])
+            self.table_update_cell('Successful Session', foi, next_value)
+            self.check_level_up(foi, next_value)
+        if hasattr(self, field):
+            getattr(self, field)(previous_value, next_value)
+            
+    def minor_treading(self, bmt, mt):
+        if mt:
+            self.player.max_minor_actions += 2
+            self.player.updateFellowshipVP(1)
+        elif bmt:
+            self.player.max_minor_action -= 2
+            self.player.updateFellowshipVP(-1)
+    
+    def major_treading(self, bmt, mt):
+        if mt:
+            self.player.max_major_actions += 1
+            self.player.updateFellowshipVP(2)
+        elif bmt:
+            self.player.max_major_actions -= 1
+            self.player.updateFellowshipVP(-2)
+    
+    def fatigue_class(self, bfc, fc):
+        if fc > bfc:
+            self.player.max_fatigue += 1
+        elif bfc > fc:
+            self.player.max_fatigue -= 1
+    
+    def loot_class(self, blc, lc):
+        if lc > blc:
+            self.player.loot_bonus += 0.15
+        elif blc > lc:
+            self.player.loot_bonus -= 0.15
+    
+    def food_class(self, bfc, fc):
+        if fc > bfc:
+            self.player.food_bonus += 1
+        elif bfc > fc:
+            self.player.food_bonus -= 1
+    
+    def check_level_up(self, field, progress):
+        if progress == 'Complete':
+            return
+        if field in var.kubani_exclusive_progress_required:
+            if progress >= var.kubani_exclusive_progress_required[field]:
+                self.player.output(f"You successfully completed {' '.join(field.split(' ')).title()} learning!", 'green')
+                self.update_field(field, True)
+                self.player.output(f"You now have {var.kubani_class_effect[field][True]}.", 'blue')
+                self.update_field(field+'_progress', 'Complete')
+                self.table_update_cell('Sessions Needed', field, 'Complete')
+        else:
+            lvl = self.get(field)
+            if progress >= var.kubani_progress_required[lvl]:
+                self.player.output(f"You progressed to {' '.join(field.split('_')).title()} {lvl+1}!", 'green')
+                self.update_field(field, '+1')
+                if (lvl+1) == var.kubani_max_lvl[field]:
+                    self.player.updateFellowshipVP(2)
+                self.player.output(f"You now have {var.kubani_class_effect[field][lvl+1]}.", 'blue')
+                value = var.kubani_progress_required[self.get(field)]
+                self.table_update_cell('Sessions Needed', field, value)
+                restart = 'Complete' if value == 'Complete' else 0
+                self.update_field(field+'_progress', restart)
+                
+    def confirm_horse_purchase(self, cost, _=None):
+        if self.player.paused:
+            return
+        if self.player.coins < cost:
+            self.insufficient_funds(cost)
+            return
+        self.player.add_coins(-cost)
+        self.player.has_horse = True
+        self.player.max_road_moves += 3
+        self.player.output("You now own a horse! You get +3 road movements.", 'green')
+        self.player.exitActionLoop('purchase', 1)()
+                
+    def purchase_horse(self, _=None):
+        if self.player.paused:
+            return
+        cost = var.horse_cost - self.player.bartering_mode
+        if self.player.coins < cost:
+            self.insufficient_funds(cost)
+            return
+        self.player.output(f"Purchasing a horse will cost you {cost}. Make the purchase?", 'blue')
+        self.actionFuncs = {'*g|Confirm Purchase': partial(self.confirm_horse_purchase, cost), 'Cancel': self.player.output('purchase', 0)}
+        self.actionGrid(add_cancel=False)
+        
+    def init_purchase_horse(self, _=None):
+        if self.player.paused:
+            return
+        if self.player.has_horse:
+            self.player.output("You already own a horse!", 'yellow')
+            return
+        if not self.player.activated_bartering:
+            self.player.output(f"Horses cost {var.horse_cost}. Attempt to Barter?", 'blue')
+            self.actionFuncs = {'Attempt to Barter': partial(self.player.attempt_barter, self.purchase_horse), "Don't Barter": self.purchase_horse}
+            self.actionGrid()
+        else:
+            self.purchase_horse()
+    
+    def get_study_cost(self, field):
+        if field in var.kubani_exclusive_cost:
+            max_cost = var.kubani_exclusive_cost[field]
+        else:
+            lvl = self.get(field)
+            first_class = self.get(f'first_class_{lvl+1}')
+            max_cost = var.kubani_cost[lvl]
+            if (first_class is None) or (first_class == field):
+                max_cost -= 1
+        if self.player.birthcity=='kubani':
+            max_cost -= 1
+        if max_cost >= 2:
+            max_cost -= min([1, self.player.bartering_mode])
+        else:
+            max_cost = max([0, max_cost])
+        return max_cost
+    
+    def get_study_req_met(self, field, display=True):
+        if field in var.kubani_exclusive_req:
+            lvl = self.player.Knowledge
+            req = var.kubani_exclusive_req[field]
+            if self.player.birthcity=='kubani':
+                req -= 5
+            t = 'Total Knowledge'
+        else:
+            t = var.kubani_req[field]
+            lvl = self.player.skills[t]
+            req = var.kubani_req_lvl[self.get(field)]
+            if self.player.birthcity=='kubani':
+                req -= 1
+        if lvl < req:
+            if display:
+                self.player.output(f"Your {t} Level is too low! You need at least {req}.", 'yellow')
+            met = False
+        else:
+            met = True
+        return met
+    
+    def insufficient_funds(self, cost):
+        self.player.output(f"You do not have {cost} coins!", 'yellow')
+        self.player.exitActionLoop('purchase', 0)()
+    
+    def attempt_study(self, field, cost, _=None):
+        if self.player.paused:
+            return
+        if self.player.coins < cost:
+            self.insufficient_funds(cost)
+            return
+        c = var.kubani_exclusive_class[field] if field in var.kubani_exclusive_class else self.get(field)
+        ct_den = var.kubani_ct_den[c]
+        ct = self.player.activateSkill('Critical Thinking')
+        r = self.player.rbtwn(1, ct_den, None, ct, 'Critical Thinking ')
+        if r <= ct:
+            self.player.useSkill("Critical Thinking")
+            self.player.output("You successfully understood the session!", 'green')
+            self.update_field(field+'_progress', '+1')
+            self.player.add_coins(-cost)
+        else:
+            self.player.output("You failed to understand the session.", 'yellow')
+        self.player.exitActionLoop(amt=1)()
+    
+    def study(self, field, _=None):
+        if self.player.paused:
+            return
+        cost = self.get_study_cost(field)
+        if self.player.coins < cost:
+            self.insufficient_funds(cost)
+            return
+        self.player.output(f"One successful study session for {self.get_study_name(field)} will cost {cost}. Attempt to Study?", 'blue')
+        self.actionFuncs = {'*g|Attempt Study': partial(self.attempt_study, field, cost), 'Cancel': self.player.exitActionLoop('purchase', 0)}
+        self.actionGrid(add_cancel=False)
+    
+    def init_study(self, field, _=None):
+        if self.player.paused:
+            return
+        if not self.get_study_req_met(field):
+            return
+        if self.player.skills['Critical Thinking'] < 1:
+            self.player.output("You need at least Level 1 Critical Thinking to learn!", 'yellow')
+            return
+        if not self.player.activated_bartering:
+            cost = self.get_study_cost(field)
+            self.player.output(f"Studying {self.get_study_name(field)} will cost {cost}. Attempt to Barter?", 'blue')
+            self.actionFuncs = {'Attempt to Barter': partial(self.player.attempt_barter, partial(self.study, field)),
+                                "Don't Barter": partial(self.study, field)}
+            self.actionGrid(add_cancel=False)
+        else:
+            self.study(field)
+    
+    def get_study_name(self, field):
+        split = field.split('_')
+        if split[-1] == 'class':
+            split.pop()
+        study = f"Study {' '.join(split).title()}"
+        return study
     
     def begin_action_loop(self, _=None):
         if self.player.paused:
             return
+        self.actionFuncs = {}
+        for field in self.foi:
+            if self.get(field) >= var.kubani_max_lvl[field]:
+                continue
+            if not self.get_study_req_met(field, False):
+                continue
+            study = self.get_study_name(field)
+            self.actionFuncs[study] = partial(self.init_study, field)
+        if self.get('horse_riding') and (not self.player.has_horse):
+            self.actionFuncs['Purchase Horse'] = self.init_purchase_horse
+        self.actionGrid()
     
 class pafiz:
     def __init__(self, player):
