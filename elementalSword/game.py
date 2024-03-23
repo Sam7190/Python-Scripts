@@ -10,15 +10,6 @@ This was using python version 7.3.7 and pip version 21.0.1
 # Specific version installation:
 conda install kivy==1.11.1 -c conda-forge
 pip install kivymd==0.104.1
-
-# Package Versions Built On:
-Python == 7.3.7
-pip == '21.0.1'
-numpy == '1.20.3'
-pandas == '1.3.1'
-pillow == '8.3.1'
-matplotlib == '3.4.2'
-skimage == '0.18.1'
 """
 #%% Import Modules
 
@@ -2434,7 +2425,7 @@ class Player(Image):
         self.smithing_guild = {}
         self.wizard_tower = {'membership': None, 'membership_rounds_remaining': None, 'queued_membership': None, 'auto_renewal': 'off', 'renew_with_market_earnings': 'off', 'current_consecutive_platinum_renewals': 0, 'best_consecutive_platinum_renewals': 0} # Tamariza wizard tower
         self.hunters_guild = {}
-        self.hidden_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'speed': 0, 'vision': 0} # zinzibar ninja lair
+        self.hidden_lair = {'sharpness': 0, 'invincibility': 0, 'vanish': 0, 'shadow': 0, 'vision': 0, 'sharpness_progress': 0, 'invincibility_progress': 0, 'vanish_progress': 0, 'shadow_progress': 0, 'vision_progress': 0} # zinzibar ninja lair
         self.fellowships = {city: getattr(hmrk, city)(self) for city in var.cities}
         
         # Fellowship Statuses

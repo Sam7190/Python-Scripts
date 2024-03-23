@@ -451,3 +451,20 @@ matter_conversion_rules = {'Basic': {'gr': {1}, 'type': 'same'},
                            'Gold': {'gr': {1, 2, 3, 4}, 'type': 'same'},
                            'Platinum': {'gr': {1, 2, 3, 4}, 'type': 'cross'}}
 max_teleport_distance = {'Basic': 3, 'Gold': 7, 'Platinum': float('inf')}
+
+# Zinzibar
+zinzibar_class_benefit = {'sharpness': '+1 Attack per round', 
+                          'invincibility': 'Survive for another attack if HP goes to 0',
+                          'vanish': "Skip opponent's attack round",
+                          'shadow': 'Convert a block to dodge',
+                          'vision': 'Ignore all fake attack per round'}
+zinzibar_class_effect = {'sharpness': {0: 'None', 1: '5%', 2: '10%', 3: '20%'},
+                         'invincibility': {0: 'None', 1: '10%', 2: '20%', 3: '40%'},
+                         'vanish': {0: 'None', 1: '2%', 2: '4%', 3: '8%'},
+                         'shadow': {0: 'None', 1: '3%', 2: '6%', 3: '12%'},
+                         'vision': {0: 'None', 1: '4%', 2: '8%', 3: '16%'}}
+zinzibar_req = {'sharpness': 'Technique', 'invincibility': 'Hit Points', 'vanish': 'Agility', 'shadow': 'Stability', 'vision': 'Cunning'}
+zinzibar_req_lvl = {0: 2, 1: 6, 2: 10}
+zinzibar_progress_required = {0: 2, 1: 4, 2: 8, 3: 'Complete'}
+zinzibar_max_lvl = 3
+zinzibar_ct_den = {0: 8, 1: 12, 2: 18}

@@ -386,7 +386,8 @@ class kubani:
         self.actionFuncs = {}
         
         self.foi = ['loot_class', 'food_class', 'fatigue_class', 'minor_treading', 'horse_riding', 'major_treading']
-        data = [[k.replace('_', ' ').title(), str(self.get(k)), var.kubani_class_effect[k][self.get(k)]] for k in self.foi]
+        data = [[k.replace('_', ' ').title(), str(self.get(k)), var.kubani_class_effect[k][self.get(k)], 0,
+                 var.kubani_exclusive_progress_required[k] if k in var.kubani_exclusive_progress_required else var.kubani_progress_required[0]] for k in self.foi]
         
         self.table = Table(header=['Field', 'Value', 'Benefit', 'Successful Sessions', 'Sessions Needed'], 
                            data=data,
@@ -416,7 +417,7 @@ class kubani:
         if field in self.foi:
             k = field.replace('_', ' ').title()
             self.table.update_cell('Value', k, next_value)
-            self.table.update_cell('Benefit', var.kubani_class_effect[field][next_value])
+            self.table.update_cell('Benefit', k, var.kubani_class_effect[field][next_value])
         elif split[-1] == 'progress':
             foi = '_'.join(split[:-1])
             self.table_update_cell('Successful Session', foi, next_value)
@@ -467,7 +468,7 @@ class kubani:
                 self.update_field(field, True)
                 self.player.output(f"You now have {var.kubani_class_effect[field][True]}.", 'blue')
                 self.update_field(field+'_progress', 'Complete')
-                self.table_update_cell('Sessions Needed', field, 'Complete')
+                self.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), 'Complete')
         else:
             lvl = self.get(field)
             if progress >= var.kubani_progress_required[lvl]:
@@ -477,7 +478,7 @@ class kubani:
                     self.player.updateFellowshipVP(2)
                 self.player.output(f"You now have {var.kubani_class_effect[field][lvl+1]}.", 'blue')
                 value = var.kubani_progress_required[self.get(field)]
-                self.table_update_cell('Sessions Needed', field, value)
+                self.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), value)
                 restart = 'Complete' if value == 'Complete' else 0
                 self.update_field(field+'_progress', restart)
                 
@@ -985,11 +986,59 @@ class zinzibar:
         self.player = player
         self.actionFuncs = {}
         
-    def actionGrid(self):
-        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs, add_back=True)
+        self.foi = ['sharpness', 'invincibility', 'vanish', 'shadow', 'vision']
+        data = [[k.replace('_', ' ').title(), str(self.get(k)), var.zinzibar_class_benefit[k], var.zinzibar_class_effect[k][self.get(k)], 0, var.zinzibar_progress_required[0]] for k in self.foi]
+        
+        self.table = Table(header=['Field', 'Class', 'Effect', 'Chance', 'Successful Sessions', 'Sessions Needed'], 
+                           data=data,
+                           color_odd_rows=True,
+                           key_field='Field')
+        
+    def actionGrid(self, add_cancel=True):
+        if add_cancel:
+            self.actionFuncs['Cancel'] = self.player.exitActionLoop(amt=0)
+        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs)
+    
+    def get(self, field):
+        return self.player.hidden_lair[field]
     
     def update_field(self, field, value):
-        pass
+        previous_value = deepcopy(self.get(field))
+        if type(value) is str:
+            try:
+                self.player.hidden_lair[field] += int(value)
+            except ValueError:
+                # This means that we are not trying to add to the field, rather trying to set it.
+                self.player.hidden_lair[field] = value
+        else:
+            self.player.hidden_lair[field] = value
+        next_value = self.get(field)
+        split = field.split('_')
+        if field in self.foi:
+            k = field.replace('_', ' ').title()
+            self.table.update_cell('Class', k, next_value)
+            self.table.update_cell('Chance', k, var.zinzibar_class_effect[field][next_value])
+        elif split[-1] == 'progress':
+            foi = split[0]
+            self.table_update_cell('Successful Session', foi, next_value)
+            self.check_level_up(foi, next_value)
+        if hasattr(self, field):
+            getattr(self, field)(previous_value, next_value)
+    
+    def check_level_up(self, field, progress):
+        if progress == 'Complete':
+            return
+        lvl = self.get(field)
+        if progress >= var.zinzibar_progress_required[lvl]:
+            self.player.output(f"You progressed to {field.title()} Class {lvl+1}!", 'green')
+            self.update_field(field, '+1')
+            if (lvl+1) == var.zinzibar_max_lvl:
+                self.player.updateFellowshipVP(2)
+            self.player.output(f"You now have {var.zinzibar_class_effect[field][lvl+1]} for {var.zinzibar_class_benefit[field]}.", 'blue')
+            value = var.zinzibar_progress_required[self.get(field)]
+            self.table_update_cell('Sessions Needed', field.title(), value)
+            restart = 'Complete' if value == 'Complete' else 0
+            self.update_field(field+'_progress', restart)
     
     def begin_action_loop(self, _=None):
         if self.player.paused:
