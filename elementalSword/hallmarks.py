@@ -428,18 +428,18 @@ class kubani:
     def minor_treading(self, bmt, mt):
         if mt:
             self.player.max_minor_actions += 2
-            self.player.updateFellowshipVP(1)
+            self.player.updateFellowshipVP(1, 'kubani')
         elif bmt:
             self.player.max_minor_action -= 2
-            self.player.updateFellowshipVP(-1)
+            self.player.updateFellowshipVP(-1, 'kubani')
     
     def major_treading(self, bmt, mt):
         if mt:
             self.player.max_major_actions += 1
-            self.player.updateFellowshipVP(2)
+            self.player.updateFellowshipVP(2, 'kubani')
         elif bmt:
             self.player.max_major_actions -= 1
-            self.player.updateFellowshipVP(-2)
+            self.player.updateFellowshipVP(-2, 'kubani')
     
     def fatigue_class(self, bfc, fc):
         if fc > bfc:
@@ -475,7 +475,7 @@ class kubani:
                 self.player.output(f"You progressed to {' '.join(field.split('_')).title()} {lvl+1}!", 'green')
                 self.update_field(field, '+1')
                 if (lvl+1) == var.kubani_max_lvl[field]:
-                    self.player.updateFellowshipVP(2)
+                    self.player.updateFellowshipVP(2, 'kubani')
                 self.player.output(f"You now have {var.kubani_class_effect[field][lvl+1]}.", 'blue')
                 value = var.kubani_progress_required[self.get(field)]
                 self.table.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), value)
@@ -1035,7 +1035,7 @@ class zinzibar:
             self.player.output(f"You progressed to {field.title()} Class {lvl+1}!", 'green')
             self.update_field(field, '+1')
             if (lvl+1) == var.zinzibar_max_lvl:
-                self.player.updateFellowshipVP(2)
+                self.player.updateFellowshipVP(2, 'zinzibar')
             self.player.output(f"You now have {var.zinzibar_class_effect[field][lvl+1]} for {var.zinzibar_class_benefit[field]}.", 'blue')
             value = var.zinzibar_progress_required[self.get(field)]
             self.table.table_update_cell('Sessions Needed', field.title(), value)
@@ -1045,6 +1045,21 @@ class zinzibar:
     def end_round(self):
         self.attempted_to_find = False
         self.found = False
+    
+    def get_probability(self, field):
+        c = self.get(field)
+        s = var.zinzibar_class_effect[field][c]
+        if s == 'None':
+            return 0
+        return float(s[:-1]) / 100
+    
+    def check_activate(self, field):
+        p = self.get_probability(field)
+        r = np.random.rand()
+        if r <= p:
+            self.player.output(f"{field.title()} successfully activated!", 'green')
+            return True
+        return False
     
     def get_req_met(self, field, display=False):
         req_lvl = var.zinzibar_req_lvl[self.get(field)]
@@ -1080,6 +1095,9 @@ class zinzibar:
     def discover_location(self):
         if self.player.paused:
             return
+        if not self.found:
+            self.player.output("Not sure how you activated this command- you havent found the Hidden Lair yet!", 'red')
+            return
         self.actionFuncs = {}
         for field in self.foi:
             req_met = self.get_req_met(field)
@@ -1108,6 +1126,7 @@ class zinzibar:
                 self.player.output("You found the Hidden Lair for this round!", 'green')
                 self.player.minor_actions -= 1
                 self.player.update_frontStats()
+                self.player.output("You took a minor action")
                 self.found = True
                 self.discover_location()
             else:

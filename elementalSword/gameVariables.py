@@ -346,7 +346,7 @@ There are three primary ancient knowledges: 1) Loot, 2) Food, and 3) Fatigue.
 There are also three exclusive ancient knowledges: 1) Minor Treading [Class 1], 2) Horse Riding [Class 2], and 3) Major Treading [Class 3].
 
 Learning Requirements:
-    - Kubani residents subtract 1 skill knowledge requirement or 5 total knowledge requirement.
+    - Kubani-born residents subtract 1 skill knowledge requirement or 5 total knowledge requirement.
     
     * [Loot] Class 1: Lvl 2 Gathering | Class 2: Lvl 6 Gathering | Class 3: Lvl 10 Gathering
     * [Food] Class 1: Lvl 2 Heating | Class 2: Lvl 6 Heating | Class 3: Lvl 10 Heating 
@@ -359,7 +359,7 @@ Session Required to Progress (Major Action):
     * Class 3: 8 successful sessions; chance of success is Critical Thinking / 16
 
 Learning Costs Per Session:
-    - Kubani residents subtract 1 coin.
+    - Kubani-born residents subtract 1 coin.
     - Note: "first" refers to the first ancient knowledge that you begin studying in that class bracket.
     - Note 2: The exclusive ancient knowledges have unique costs (they don't fall into the standard class cost).
     - Note 3: Reminder, these are per session costs - not complete cost! Furthermore, you are only charged for successful sessions.
@@ -374,8 +374,7 @@ Learning Benefits:
     * Fatigue: +1 Maximum Fatigue per class (+2VP at class 3)
     * Minor Treading: +2 Minor Actions + 1VP
     * Horse Riding: +3 Road Movements with a Horse + 1VP
-    * Major Treading: +1 Major Action + 2VP
-"""
+    * Major Treading: +1 Major Action + 2VP"""
         },
     'tamariza':
         {'hallmark': 'Wizard Tower',
@@ -406,6 +405,43 @@ Learning Benefits:
         * Gold: 90% chance for 1 level higher.
         * Platinum: Either 1 or 2 levels higher with equal probability."""
         },
+    'zinzibar':
+        {'hallmark': 'Hidden Ninja Lair',
+         'attribute': 'hidden_lair',
+         'description':
+"""Here you can study the secret arts of combat, provided you can find the location.
+    
+There are five secret combat arts: 1) Sharpness, 2) Invincibility, 3) Vanish, 4) Shadow, and 5) Vision
+    - Each has three classes and completing the final one gives you +2VP.
+  
+Learning Combat Requirements:
+    - Zinzibar-born citizens subtract one level requirement.
+    - [Class 1] - Lvl 2, [Class 2] - Lvl 6, [Class 3] - Lvl 10
+    
+    * Sharpness: Technique
+    * Invincibility: Hit Points
+    * Vanish: Agility
+    * Shadow: Stability
+    * Vision: Cunning
+
+Session Required to Progress (Major Action):
+    * Class 1: 2 successful sessions; chance of success is Critical Thinking / 8
+    * Class 2: 4 successful sessions; chance of success is Critical Thinking / 12
+    * Class 3: 8 successful sessions; chance of success is Critical Thinking / 16
+    
+Combat Benefits (+2VP at class 3):
+    * Sharpness: +1 critical hit upon landing an attack.
+    * Invincibility: Recover one HP if HP goes to zero.
+    * Vanish: Skip opponent's entire attack round.
+    * Shadow: Convert a block to a dodge.
+    * Vision: Ignore all fake attacks in a volley.
+    
+Benefit Application Chance:
+    * Sharpness + Vanish | Class 1: 2% | Class 2: 4% | Class 3: 8%
+    * Shadow | Class 1: 3% | Class 2: 6% | Class 3: 12%
+    * Vision | Class 1: 5% | Class 2: 10% | Class 3: 20%
+    * Invincibility | Class 1: 9% | Class 2: 18% | Class 3: 36%"""
+    },
 }
 
 # Benfriege
@@ -453,16 +489,16 @@ matter_conversion_rules = {'Basic': {'gr': {1}, 'type': 'same'},
 max_teleport_distance = {'Basic': 3, 'Gold': 7, 'Platinum': float('inf')}
 
 # Zinzibar
-zinzibar_class_benefit = {'sharpness': '+1 Attack per round', 
-                          'invincibility': 'Survive for another attack if HP goes to 0',
+zinzibar_class_benefit = {'sharpness': '+1 critical hit upon landing an attack', 
+                          'invincibility': 'Recover one HP if HP goes to zero',
                           'vanish': "Skip opponent's attack round",
                           'shadow': 'Convert a block to dodge',
-                          'vision': 'Ignore all fake attack per round'}
-zinzibar_class_effect = {'sharpness': {0: 'None', 1: '5%', 2: '10%', 3: '20%'},
-                         'invincibility': {0: 'None', 1: '10%', 2: '20%', 3: '40%'},
+                          'vision': 'Ignore all fake attacks in a volley'}
+zinzibar_class_effect = {'sharpness': {0: 'None', 1: '2%', 2: '4%', 3: '8%'},
+                         'invincibility': {0: 'None', 1: '9%', 2: '18%', 3: '36%'},
                          'vanish': {0: 'None', 1: '2%', 2: '4%', 3: '8%'},
                          'shadow': {0: 'None', 1: '3%', 2: '6%', 3: '12%'},
-                         'vision': {0: 'None', 1: '4%', 2: '8%', 3: '16%'}}
+                         'vision': {0: 'None', 1: '5%', 2: '10%', 3: '20%'}}
 zinzibar_req = {'sharpness': 'Technique', 'invincibility': 'Hit Points', 'vanish': 'Agility', 'shadow': 'Stability', 'vision': 'Cunning'}
 zinzibar_req_lvl = {0: 2, 1: 6, 2: 10}
 zinzibar_progress_required = {0: 2, 1: 4, 2: 8, 3: 'Complete'}

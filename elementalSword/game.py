@@ -415,7 +415,11 @@ class DefBox(Button):
         volleys = []
         self.positions = np.zeros((len(positions), 4))
         self.posids = np.arange(len(positions))
+        skip_fakes = self.fellowships['zinzibar'].check_activate('vision')
         for i in range(len(positions)):
+            if skip_fakes and fakes[i]:
+                # [INCOMPLETE] Haven't really tested this yet.
+                continue
             volleys.append([positions[i], sizes[i], fakes[i], i, len(self.volleys)])
             if not fakes[i]:
                 self.volley_group[len(self.volleys)] = [v[3] for v in volleys]
@@ -519,7 +523,10 @@ class DefBox(Button):
             blockStates = []
             for i in idsTouched:
                 if self.live_rects[i]['state'] == 'block':
-                    blockStates.append(i)
+                    if self.fellowships['zinzibar'].check_activate('shadow'):
+                        self.dodgeBox(i)
+                    else:
+                        blockStates.append(i)
                 elif self.live_rects[i]['state'] == 'dodge':
                     self.dodgeBox(i)
             if (len(blockStates) > 0):
@@ -769,7 +776,11 @@ class FightPage(FloatLayout):
         if self.fightorder[self.order_idx] == self.P.username:
             self.playerAttacks()
         else:
-            self.playerDefends()
+            if self.fellowships['zinzibar'].check_activate('vanish'):
+                # [INCOMPLETE] How does fighting a player fit into zinzibar's vanish? Most likely take 1-2 seconds to listen if vanish is happening
+                self.nextAttack()
+            else:
+                self.playerDefends()
     def playerAttacks(self):
         logging.debug("Player is attacking")
         self.set_runFTG(self.foecateg)
@@ -923,6 +934,7 @@ class FightPage(FloatLayout):
                 self.endFight()
         logging.info(f"Foe is taking damage. Prior HP - {self.foestats[self.P.attributes['Hit Points']]}")
         if (self.foestats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
+            amt += self.P.fellowships['zinzibar'].check_activate('sharpness') # Check for critical chance
             self.foestats[self.P.attributes['Hit Points']] = max([0, self.foestats[self.P.attributes['Hit Points']]-amt])
             cell = self.statTable.cells[self.foename][self.P.attributes['Hit Points']]
             cell.text = str(self.foestats[self.P.attributes['Hit Points']])
@@ -963,6 +975,8 @@ class FightPage(FloatLayout):
         logging.info(f"Player is taking damage. Prior HP - {self.pstats[self.P.attributes['Hit Points']]}")
         if (self.pstats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
             self.pstats[self.P.attributes['Hit Points']] = max([0, self.pstats[self.P.attributes['Hit Points']]-amt])
+            if (self.pstats[self.P.attributes['Hit Points']] == 0) and self.P.fellowships['zinzibar'].check_activate('invincibility'):
+                self.pstats[self.P.attributes['Hit Points']] = 1
             cell = self.statTable.cells[self.P.username][self.P.attributes['Hit Points']]
             cell.text = str(self.pstats[self.P.attributes['Hit Points']])
             cell.background_color = (1, 1, 0.2, 0.6)
@@ -1200,6 +1214,7 @@ def exitActionLoop(consume=None, amt=1, empty_tile=False):
                         P.update_mainStatPage()
                 elif consume == 'minor':
                     P.minor_actions -= amt
+                    output("You took a minor action")
                     if P.minor_actions == 0:
                         # If the player makes his max transactions, then it is the same as if he bartered. Otherwise, bartering is handled in the takeAction method.
                         P.takeAction(amt)
@@ -2879,7 +2894,7 @@ class Player(Image):
             game_app.game_page.vpView.text = f'[color={game_app.game_page.hclr}]{self.TotalVP}[/color] VP'
         if (add > 0) and checkGameEnd:
             self.checkGameEnd()
-    def updateFellowshipVP(self, add):
+    def updateFellowshipVP(self, add, city):
         self.Fellowship += add
         self.PlayerTrack.fellowshipTab.text = self.PlayerTrack.get_tab_text('Fellowship')
         self.updateTotalVP(add)
