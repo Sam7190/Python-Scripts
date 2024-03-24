@@ -468,7 +468,7 @@ class kubani:
                 self.update_field(field, True)
                 self.player.output(f"You now have {var.kubani_class_effect[field][True]}.", 'blue')
                 self.update_field(field+'_progress', 'Complete')
-                self.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), 'Complete')
+                self.table.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), 'Complete')
         else:
             lvl = self.get(field)
             if progress >= var.kubani_progress_required[lvl]:
@@ -478,7 +478,7 @@ class kubani:
                     self.player.updateFellowshipVP(2)
                 self.player.output(f"You now have {var.kubani_class_effect[field][lvl+1]}.", 'blue')
                 value = var.kubani_progress_required[self.get(field)]
-                self.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), value)
+                self.table.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), value)
                 restart = 'Complete' if value == 'Complete' else 0
                 self.update_field(field+'_progress', restart)
                 
@@ -985,6 +985,8 @@ class zinzibar:
     def __init__(self, player):
         self.player = player
         self.actionFuncs = {}
+        self.attempted_to_find = False
+        self.found = False
         
         self.foi = ['sharpness', 'invincibility', 'vanish', 'shadow', 'vision']
         data = [[k.replace('_', ' ').title(), str(self.get(k)), var.zinzibar_class_benefit[k], var.zinzibar_class_effect[k][self.get(k)], 0, var.zinzibar_progress_required[0]] for k in self.foi]
@@ -1020,7 +1022,7 @@ class zinzibar:
             self.table.update_cell('Chance', k, var.zinzibar_class_effect[field][next_value])
         elif split[-1] == 'progress':
             foi = split[0]
-            self.table_update_cell('Successful Session', foi, next_value)
+            self.table.table_update_cell('Successful Session', foi.title(), next_value)
             self.check_level_up(foi, next_value)
         if hasattr(self, field):
             getattr(self, field)(previous_value, next_value)
@@ -1036,13 +1038,95 @@ class zinzibar:
                 self.player.updateFellowshipVP(2)
             self.player.output(f"You now have {var.zinzibar_class_effect[field][lvl+1]} for {var.zinzibar_class_benefit[field]}.", 'blue')
             value = var.zinzibar_progress_required[self.get(field)]
-            self.table_update_cell('Sessions Needed', field.title(), value)
+            self.table.table_update_cell('Sessions Needed', field.title(), value)
             restart = 'Complete' if value == 'Complete' else 0
             self.update_field(field+'_progress', restart)
+    
+    def end_round(self):
+        self.attempted_to_find = False
+        self.found = False
+    
+    def get_req_met(self, field, display=False):
+        req_lvl = var.zinzibar_req_lvl[self.get(field)]
+        if self.player.birthcity == 'zinzibar':
+            req_lvl -= 1
+        if self.player.get_level(var.zinzibar_req[field]) < req_lvl:
+            if display:
+                self.player.output(f"Training {field.title()} requires at least level {req_lvl} {var.zinzibar_req[field]}", 'yellow')
+            return False
+        return True
+    
+    def study(self, field, _=None):
+        if self.player.paused:
+            return
+        if not self.found:
+            self.player.output("Could not find the session.", 'yellow')
+            return
+        c = self.get(field)
+        req_met = self.get_req_met(field, True)
+        if not req_met:
+            return
+        ct_den = var.zinzibar_ct_den[c]
+        ct = self.player.activateSkill('Critical Thinking')
+        r = self.player.rbtwn(1, ct_den, None, ct, 'Critical Thinking ')
+        if r <= ct:
+            self.player.useSkill("Critical Thinking")
+            self.player.output("You successfully understood the session!", 'green')
+            self.update_field(field+'_progress', '+1')
+        else:
+            self.player.output("You failed to understand the session.", 'yellow')
+        self.player.exitActionLoop(amt=1)()
+    
+    def discover_location(self):
+        if self.player.paused:
+            return
+        self.actionFuncs = {}
+        for field in self.foi:
+            req_met = self.get_req_met(field)
+            if not req_met:
+                continue
+            self.actionFuncs[f'Study {field.title()}'] = partial(self.study, field)
+        self.actionGrid()
+    
+    def attempt_location(self, _=None):
+        if self.player.paused:
+            return
+        if self.player.minor_actions <= 1:
+            self.player.output("You are too tired to look this action, try again next action.", 'yellow')
+            self.player.exitActionLoop(amt=0)()
+            return
+        if self.found:
+            self.discover_location()
+        elif self.attempted_to_find:
+            self.player.output("You already failed to find the Hidden Lair this round.", 'yellow')
+        else:
+            self.attempted_to_find = True
+            stealth = self.player.activateSkill("Stealth")
+            r = self.player.rbtwn(1, 12, None, stealth, 'Stealth ')
+            if r <= stealth:
+                self.player.useSkill("Stealth")
+                self.player.output("You found the Hidden Lair for this round!", 'green')
+                self.player.minor_actions -= 1
+                self.player.update_frontStats()
+                self.found = True
+                self.discover_location()
+            else:
+                self.found = False
+                self.player.output("You failed to find the Hidden Lair this round.", 'yellow')
+                self.player.exitActionLoop('minor')()
     
     def begin_action_loop(self, _=None):
         if self.player.paused:
             return
+        if self.found:
+            self.discover_location()
+        elif self.attempted_to_find:
+            self.player.output("You already failed to find the Hidden Lair this round.", 'yellow')
+        else:
+            self.player.output("Attempt to find the Hidden Lair?", 'blue')
+            self.actionFuncs = {'*g|Yes': self.attempt_location}
+            self.actionGrid()  
+        
         
 class HallmarkPanels(TabbedPanel):
     def __init__(self, city, player, **kwargs):

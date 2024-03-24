@@ -2379,7 +2379,7 @@ class Player(Image):
         for atr, val in cities[self.birthcity]['Combat Boosts']:
             self.boosts[self.attributes[atr]] += val
             self.perm_boosts[self.attributes[atr]] += val
-        self.current = self.combat + self.boosts
+        self.current = self.combat + self.boosts + self.perm_boosts
         #Knowledge
         self.skills = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
         self.xps = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
@@ -2764,6 +2764,7 @@ class Player(Image):
         self.updateTitleValue('decisive')
         self.fellowships['demetry'].end_round()
         self.fellowships['tamariza'].end_round()
+        self.fellowships['zinzibar'].end_round()
         if len(self.parentBoard.Players) != len(game_app.launch_page.usernames):
             # If not all players have been created then do not end the round yet
             return
@@ -2973,7 +2974,7 @@ class Player(Image):
             actv_lvl = lvl
             if lvl <= max_lvl_xp: self.addXP(skill, xp, 'Activation: ')
         return actv_lvl + add_lvl
-    def useSkill(self, skill, xp=1, max_lvl_xp=5):
+    def useSkill(self, skill, xp=1, max_lvl_xp=4):
         if skill == 'Persuasion':
             self.updateTitleValue('negotiator', 1)
         if self.trained_abilities[skill]:
