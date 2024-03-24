@@ -415,9 +415,8 @@ class DefBox(Button):
         volleys = []
         self.positions = np.zeros((len(positions), 4))
         self.posids = np.arange(len(positions))
-        skip_fakes = self.fellowships['zinzibar'].check_activate('vision')
         for i in range(len(positions)):
-            if skip_fakes and fakes[i]:
+            if fakes[i] and self.fpage.P.fellowships['zinzibar'].check_activate('vision'):
                 # [INCOMPLETE] Haven't really tested this yet.
                 continue
             volleys.append([positions[i], sizes[i], fakes[i], i, len(self.volleys)])
@@ -523,7 +522,7 @@ class DefBox(Button):
             blockStates = []
             for i in idsTouched:
                 if self.live_rects[i]['state'] == 'block':
-                    if self.fellowships['zinzibar'].check_activate('shadow'):
+                    if self.fpage.P.fellowships['zinzibar'].check_activate('shadow'):
                         self.dodgeBox(i)
                     else:
                         blockStates.append(i)
@@ -776,7 +775,7 @@ class FightPage(FloatLayout):
         if self.fightorder[self.order_idx] == self.P.username:
             self.playerAttacks()
         else:
-            if self.fellowships['zinzibar'].check_activate('vanish'):
+            if self.P.fellowships['zinzibar'].check_activate('vanish'):
                 # [INCOMPLETE] How does fighting a player fit into zinzibar's vanish? Most likely take 1-2 seconds to listen if vanish is happening
                 self.nextAttack()
             else:
@@ -930,7 +929,7 @@ class FightPage(FloatLayout):
                             self.P.updateTitleValue('apprentice', self.P.get_level(random_atr))
                     self.endFight()
             else:
-                output(f"You don't level up, level up remainder: {round(self.P.combatxp,2)}", 'yellow')
+                output(f"You don't level up, current level up xp: {round(self.P.combatxp,2)}", 'yellow')
                 self.endFight()
         logging.info(f"Foe is taking damage. Prior HP - {self.foestats[self.P.attributes['Hit Points']]}")
         if (self.foestats[self.P.attributes['Hit Points']] > 0) and (self.fighting):
@@ -2394,7 +2393,7 @@ class Player(Image):
         for atr, val in cities[self.birthcity]['Combat Boosts']:
             self.boosts[self.attributes[atr]] += val
             self.perm_boosts[self.attributes[atr]] += val
-        self.current = self.combat + self.boosts + self.perm_boosts
+        self.current = self.combat + self.boosts
         #Knowledge
         self.skills = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}
         self.xps = {'Critical Thinking':0, 'Bartering':0, 'Persuasion':0, 'Crafting':0, 'Heating':0, 'Smithing':0, 'Stealth':0, 'Survival':0, 'Gathering':0, 'Excavating':0}

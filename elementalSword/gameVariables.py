@@ -434,12 +434,12 @@ Combat Benefits (+2VP at class 3):
     * Invincibility: Recover one HP if HP goes to zero.
     * Vanish: Skip opponent's entire attack round.
     * Shadow: Convert a block to a dodge.
-    * Vision: Ignore all fake attacks in a volley.
+    * Vision: Ignore a fake attack.
     
 Benefit Application Chance:
     * Sharpness + Vanish | Class 1: 2% | Class 2: 4% | Class 3: 8%
     * Shadow | Class 1: 3% | Class 2: 6% | Class 3: 12%
-    * Vision | Class 1: 5% | Class 2: 10% | Class 3: 20%
+    * Vision | Class 1: 4% | Class 2: 8% | Class 3: 16%
     * Invincibility | Class 1: 9% | Class 2: 18% | Class 3: 36%"""
     },
 }
@@ -493,12 +493,12 @@ zinzibar_class_benefit = {'sharpness': '+1 critical hit upon landing an attack',
                           'invincibility': 'Recover one HP if HP goes to zero',
                           'vanish': "Skip opponent's attack round",
                           'shadow': 'Convert a block to dodge',
-                          'vision': 'Ignore all fake attacks in a volley'}
+                          'vision': 'Ignore a fake attack'}
 zinzibar_class_effect = {'sharpness': {0: 'None', 1: '2%', 2: '4%', 3: '8%'},
                          'invincibility': {0: 'None', 1: '9%', 2: '18%', 3: '36%'},
                          'vanish': {0: 'None', 1: '2%', 2: '4%', 3: '8%'},
                          'shadow': {0: 'None', 1: '3%', 2: '6%', 3: '12%'},
-                         'vision': {0: 'None', 1: '5%', 2: '10%', 3: '20%'}}
+                         'vision': {0: 'None', 1: '4%', 2: '8%', 3: '16%'}}
 zinzibar_req = {'sharpness': 'Technique', 'invincibility': 'Hit Points', 'vanish': 'Agility', 'shadow': 'Stability', 'vision': 'Cunning'}
 zinzibar_req_lvl = {0: 2, 1: 6, 2: 10}
 zinzibar_progress_required = {0: 2, 1: 4, 2: 8, 3: 'Complete'}
