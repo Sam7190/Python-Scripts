@@ -1274,6 +1274,15 @@ def sellItem(item, to_trader, barter=None, _=None):
             output("The market won't buy that item here!", 'yellow')
             return
         sellprice = price
+    elif categ == 'Fragment':
+        quantity = P.ancient_magic_museum[item]
+        if quantity in var.fragment_reward[item]:
+            output("[Game Hint] You could potentially get victory points and greater reward for donating to the Ancient Magic Museum in Starfex!", 'blue')
+            price = var.fragment_reward[item][quantity]
+        if price is None:
+            output("The market is not willing to take this item. Try the Ancient Magic Museum in Starfex for some credit.", 'yellow')
+            return
+        sellprice = sellPrice[price]
     else:
         sellprice = sellPrice[price]
     if (barter is None) and (not P.activated_bartering):
@@ -1305,7 +1314,8 @@ def sellItem(item, to_trader, barter=None, _=None):
                         P.titles['trader']['unique_traders'].add(P.currenttile.trader_id)
                         P.updateTitleValue('trader', 1)
             # Its basically inverted getItem
-            output(f"Sold {item} for {sellprice}.")
+            output(f"Sold {item} for {sellprice} coins.")
+            P.fellowships['starfex'].check_donate(item)
             getItem(item, -1, 'minor', False, 1)()
         else:
             output("You failed to barter, sell anyway?", 'yellow')
@@ -1319,6 +1329,7 @@ def sellItem(item, to_trader, barter=None, _=None):
             if P.currenttile.trader_id not in P.titles['trader']['unique_traders']:
                 P.titles['trader']['unique_traders'].add(P.currenttile.trader_id)
                 P.updateTitleValue('trader', 1)
+        P.fellowships['starfex'].check_donate(item)
         getItem(item, -1, 'minor', False)()
 
 def buyItem(item, cost, from_trader, amt=1, consume='minor'):
@@ -1478,7 +1489,7 @@ def readbook(book, _=None):
         output("You cannot level beyond lvl 8 with books. Go seek a trainer.", 'yellow')
         exitActionLoop(amt=0)()
         return
-    critthink = P.activateSkill("Critical Thinking")
+    critthink = P.activateSkill("Critical Thinking", 1, 1)
     r = rbtwn(0, 8, None, critthink, 'Critical Thinking ')
     if r <= critthink:
         P.useSkill("Critical Thinking")
@@ -1994,7 +2005,19 @@ def Excavate(result, max_result):
         if len(actions) == 0:
             output("Failed to find anything",'red')
             exitActionLoop(None,1,True)()
-        elif len(actions) == 1:
+            return
+        # First check to see if you would get a magic fragment instead
+        if P.currenttile.tile in var.fragment_loc:
+            frag_prob = var.fragment_tier_prob[P.tiered]
+            fragment = var.fragment_loc[P.currenttile.tile]
+            if (P.birthcity=='starfex') and (P.ancient_magic_museum[fragment] not in var.fragment_reward[fragment]):
+                frag_prob += var.starfex_frag_finding_boost
+            if np.random.rand() <= frag_prob:
+                output(f"You found a {fragment}!", 'green')
+                getItem(fragment)
+                exitActionLoop(None, 1, True)()
+                return
+        if len(actions) == 1:
             for item, func in actions.items():
                 output(f"Excavation found {item}")
                 func()
@@ -2435,7 +2458,7 @@ class Player(Image):
         self.ancestrial_order = {'loot_class': 0, 'loot_class_progress': 0, 'food_class': 0, 'food_class_progress': 0, 'fatigue_class': 0, 'fatigue_class_progress': 0, 'minor_treading': False, 'minor_treading_progress': 0, 'horse_riding': False, 'horse_riding_progress': 0, 'major_treading': False, 'major_treading_progress': 0, 'first_class_1': None, 'first_class_2': None, 'first_class_3': None} # kubani ancestrial order
         self.meditation_chamber = {'class': 1, 'score': 0, 'success': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}} # pafiz meditation chamber
         self.colosseum = {}
-        self.ancient_magic_museum = {'gifted_museum': 0} # starfex ancient magic museum
+        self.ancient_magic_museum = {'water fragment': 0, 'air fragment': 0, 'earth fragment': 0, 'fire fragment': 0, 'ice fragment': 0, 'light fragment': 0, 'blood fragment': 0, 'total_donations': 0, 'total_vp': 0, 'water_donated': 0, 'air_donated': 0, 'earth_donated': 0, 'fire_donated': 0, 'ice_donated': 0, 'light_donated': 0, 'blood_donated': 0, 'water_vp': 0, 'air_vp': 0, 'earth_vp': 0, 'fire_vp': 0, 'ice_vp': 0, 'light_vp': 0, 'blood_vp': 0} # starfex ancient magic museum
         self.smithing_guild = {}
         self.wizard_tower = {'membership': None, 'membership_rounds_remaining': None, 'queued_membership': None, 'auto_renewal': 'off', 'renew_with_market_earnings': 'off', 'current_consecutive_platinum_renewals': 0, 'best_consecutive_platinum_renewals': 0} # Tamariza wizard tower
         self.hunters_guild = {}
@@ -2931,6 +2954,8 @@ class Player(Image):
             output("You Triggered End Game!", 'blue')
             socket_client.send('[GAME END]', '')
             socket_client.send('[END STATS]', {'Combat':self.Combat, 'Reputation':self.Reputation, 'Capital':self.Capital, 'Knowledge':self.Knowledge, 'Fellowship':self.Fellowship, 'Titles':self.Titles})
+    def send_message_to_server(self, category, message):
+        socket_client.send(category, message)
     def get_bonus(self, amt):
         amt = amt + amt*self.loot_bonus
         if int(amt) < amt:
@@ -4885,7 +4910,17 @@ class Quest:
     def req_met(self, quest):
         init_req = eval(quest_req[quest]) if quest in quest_req else True
         inCity = self.playerTrack.player.currenttile.tile == self.playerTrack.player.birthcity
-        return init_req * inCity if (quest[0] == 1) else init_req * (self.stage_completion[quest[0]-1] >= 4) * inCity
+        if quest[0] == 1:
+            return init_req * inCity
+        scr = var.previous_stage_completion_required # Should be 4 required by default.
+        unlock_reducers = var.starfex_unlock_reducers if self.playerTrack.player.birthcity=='starfex' else var.stage_unlock_reducers
+        for donations in unlock_reducers[quest[0]]:
+            donated = self.playerTrack.player.ancient_magic_museum[donations]
+            scr -= donated
+            if scr <= 1:
+                scr = 1
+                break
+        return init_req * (self.stage_completion[quest[0]-1] >= scr) * inCity
 
     def update_citypage(self, quest):
         if self.playerTrack.player.parentBoard.game_page.city_page is not None:
@@ -5265,6 +5300,14 @@ class PlayerTrack(GridLayout):
                     sellprice = 0
                 else:
                     sellprice = price*(2 if self.player.currenttile.tile in clothSpecials[item] else 1) + self.player.bartering_mode
+            elif categ == 'Fragment':
+                quantity = self.player.ancient_magic_museum[item]
+                if quantity in var.fragment_reward[item]:
+                    price = var.fragment_reward[item][quantity]
+                if price is None:
+                    sellprice = None
+                else:
+                    sellprice = sellPrice[price] + self.player.bartering_mode
             elif price is None:
                 sellprice = None
             else:
@@ -5320,6 +5363,8 @@ class PlayerTrack(GridLayout):
                     usebutton = {'text': 'Learn', 'func': partial(learn_book, level, skill)}
                 else:
                     usebutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
+            elif (categ == 'Fragments') and (self.player.currenttile.tile == 'starfex'):
+                usebutton = {'text':'Donate', 'func':partial(self.player.fellowships['starfex'].donate, item, True)}
             else:
                 usebutton = {'text':'','background_color':(1,1,1,0),'disabled':True}
             data.append([{'text':item, 'background_color':(1,1,1,0), 'disabled':True,'color':(0,0,0,1)},
@@ -6899,14 +6944,19 @@ class GamePage(GridLayout):
         clr = essf.get_hexcolor((131,215,190)) if username == self.board_page.localuser else essf.get_hexcolor((211, 131, 131))
         #self.display_page.text += f'\n|[color={clr}]{username}[/color]| ' + message
         self.display_page.add_msg(f'|[color={clr}]{username}[/color]| ' + message)
+    def clear_chat_box(self, _=None):
+        self.new_message.text = ''
     def on_key_down(self, instance, keyboard, keycode, text, modifiers):
         # We want to take an action only when Enter key is being pressed, and send a message
         if keycode == 40:
             # Send Message
             message = self.new_message.text.replace('\n','')
-            self.new_message.text = ''
+            self.clear_chat_box()
+            Clocked(self.clear_chat_box, 0.1, 'Clearing chat box')
+            if len(message) <= 0:
+                return
             if (message[0] == '/') and (game_app.launch_page.cheat_on):
-                cheat_command = message.split(' ')
+                cheat_command = essf.parse_command(message)
                 cheat_success, cheat_failure = "007200", "b53000"
                 P = lclPlayer()
                 if cheat_command[0] == '/help':
@@ -6914,6 +6964,7 @@ class GamePage(GridLayout):
                     output("Valid Commands:", "blue")
                     for command in valid_commands:
                         output(command, '545454')
+                    output("Wrapping terms in <> is optional - helps with natural spaces", '545454')
                 elif cheat_command[0] == '/skill':
                     skill = cheat_command[1].title()
                     level_gain = int(cheat_command[2])
@@ -7412,6 +7463,11 @@ class LaunchPage(GridLayout):
         def run(_):
             lclPlayer().newMaxRecord(message)
         Clocked(run, 0.1, 'TITLE run')
+    def DONATED(self, username, message):
+        def run(_):
+            output(f"{username} donated a {message} to the Ancient Magic Museum!", 'blue')
+            lclPlayer().fellowships['starfex'].donate(message, False)
+        Clocked(run, 0.1, 'DONATED run')
     def FIGHT(self, username, message):
         def run(_):
             P = lclPlayer()

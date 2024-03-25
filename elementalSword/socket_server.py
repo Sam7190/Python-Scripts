@@ -156,6 +156,7 @@ city_labor = {'anafola':{'Persuasion':5, 'Excavating':5},
              'tamariza':{'Critical Thinking':5, 'Persuasion':5, 'Heating':5},
              'tutalu':{'Smtihing':5, 'Excavating':5},
              'zinzibar':{'Persuasion':5, 'Smithing':5, 'Survival':8}}
+#fragments_remaining = {'water fragment': 6, 'air fragment': 6, 'earth fragment': 6, 'fire fragment': 6, 'ice fragment': 6, 'light fragment': 6, 'blood fragment': 6} # Let's not restrict how many fragments you can find.
 skills = ['Persuasion', 'Critical Thinking', 'Heating', 'Survival', 'Smithing', 'Crafting', 'Excavating', 'Stealth', 'Gathering', 'Bartering']
 titles = {'explorer': {'titleVP': 5, 'minTitleReq': 20, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'description': 'Most unique tiles traveled upon.'},
           'loyal': {'titleVP': 2, 'minTitleReq': 25, 'value':0, 'holder': None, 'record': None, 'category': 'General', 'in_birthcity':True, 'description': 'Most rounds spent in their birth city (all actions per round).'},

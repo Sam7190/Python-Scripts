@@ -7,6 +7,8 @@ Created on Sun Feb  4 16:43:33 2024
 import numpy as np
 
 #%% Game Properties
+previous_stage_completion_required = 4
+
 food_restore = {'raw meat':(1,0),'cooked meat':(2,0),'well cooked meat':(3,0),
                 'raw fish':(0,1),'cooked fish':(0,2),'well cooked fish':(0,3),
                 'fruit':(1,1)}
@@ -15,6 +17,35 @@ ore_properties = {'lead':('Elemental',1),'tin':('Physical',1),'copper':('Trooper
                   'tantalum':('Elemental',2),'aluminum':('Physical',2),'kevlium':('Trooper',2),'nickel':('Wizard',2),
                   'tungsten':('Elemental',3),'titanium':('Physical',3),'diamond':('Trooper',3),'chromium':('Wizard',3),
                   'shinopsis':('Elemental',4),'ebony':('Physical',4),'astatine':('Trooper',4),'promethium':('Wizard',4)}
+
+fragment_reward = {'water fragment': {0: 2, 1: 2, 2: 1, 3: 1, 4: None, 5: None},
+                   'air fragment': {0: 3, 1: 3, 2: 2, 3: 2, 4: 1, 5: 1},
+                   'earth fragment': {0: 4, 1: 4, 2: 3, 3: 3, 4: 2, 5: 2},
+                   'fire fragment': {0: 5, 1: 5, 2: 4, 3: 4, 4: 3, 5: 3},
+                   'ice fragment': {0: 6, 1: 6, 2: 5, 3: 5, 4: 4, 5: 4},
+                   'light fragment': {0: 7, 1: 7, 2: 6, 3: 6, 4: 5, 5: 5},
+                   'blood fragment': {0: 8, 1: 8, 2: 7, 3: 7, 4: 6, 5: 6}}
+
+fragment_kb = {'water fragment': {0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+               'air fragment': {0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+               'earth fragment': {0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+               'fire fragment': {0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+               'ice fragment': {0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+               'light fragment': {0: 2, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0},
+               'blood fragment': {0: 2, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0}}
+
+fragment_loc = {'pond': 'water fragment',
+                'plains': 'air fragment',
+                'cave': 'earth fragment',
+                'outpost': 'fire fragment',
+                'mountain': 'ice fragment',
+                'ruins': 'light fragment',
+                'battle1': 'blood fragment',
+                'battle2': 'blood fragment'}
+inv_fragment_loc = {item: key.title() for key, item in fragment_loc.items()}
+inv_fragment_loc['blood fragment'] = 'Battle'
+
+fragment_tier_prob = {False: 0.05, 1: 0.02, 2: 0.05, 3: 0.08}
 
 capital_info = {'anafola':{'home':40,'home_cap':5,'capacity':4,'market':20,'return':5,'market_cap':2,'invest':8,'efficiency':0,'discount':0,'trader allowed':False},
                 'benfriege':{'home':8,'home_cap':2,'capacity':4,'market':3,'return':1,'market_cap':1,'invest':3,'efficiency':0,'discount':0,'trader allowed':False},
@@ -96,6 +127,7 @@ gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish
              'Knowledge Books':{'critical thinking book':8,'bartering book':5,'persuasion book':3,'crafting book':4, 'heating book':4,'smithing book':4,'stealth book':9,'survival book':6,'gathering book':5,'excavating book':8},
              'Cloth':{'benfriege cloth':4,'enfeir cloth':2,'glaser cloth':5,'pafiz cloth':2,'scetcher cloth':2,'starfex cloth':2,'tutalu cloth':2,'zinzibar cloth':2,'old fodker cloth':6,'old enfeir cloth':6,'old zinzibar cloth':6,'luxurious cloth':3},
              'Quests':{'cooling cubes':2},
+             'Fragment':{'water fragment': None, 'air fragment': None, 'earth fragment': 1, 'fire fragment': 2, 'ice fragment': 3, 'light fragment': 4, 'blood fragment': 5},
              # Hallmark Groups
              'GrandLibrary': lib_book_dict
              }
@@ -487,6 +519,19 @@ matter_conversion_rules = {'Basic': {'gr': {1}, 'type': 'same'},
                            'Gold': {'gr': {1, 2, 3, 4}, 'type': 'same'},
                            'Platinum': {'gr': {1, 2, 3, 4}, 'type': 'cross'}}
 max_teleport_distance = {'Basic': 3, 'Gold': 7, 'Platinum': float('inf')}
+
+# Starfex
+fragment_vp = {'water fragment': 1, 'air fragment': 2, 'earth fragment': 3, 'fire fragment': 4, 'ice fragment': 5, 'light fragment': 6, 'blood fragment': 7}
+starfex_max_vp = 20
+starfex_frag_finding_boost = 0.03
+stage_unlock_reducers = {2: ['water_donated', 'air_donated', 'earth_donated', 'fire_donated', 'ice_donated', 'light_donated', 'blood_donated'],
+                         3: ['earth_donated', 'fire_donated', 'ice_donated', 'light_donated', 'blood_donated'],
+                         4: ['ice_donated', 'light_donated', 'blood_donated'],
+                         5: ['blood_donated']}
+starfex_unlock_reducers = {2: ['water_donated', 'air_donated', 'earth_donated', 'fire_donated', 'ice_donated', 'light_donated', 'blood_donated'],
+                           3: ['air_donated', 'earth_donated', 'fire_donated', 'ice_donated', 'light_donated', 'blood_donated'],
+                           4: ['fire_donated', 'ice_donated', 'light_donated', 'blood_donated'],
+                           5: ['light_donated', 'blood_donated']}
 
 # Zinzibar
 zinzibar_class_benefit = {'sharpness': '+1 critical hit upon landing an attack', 

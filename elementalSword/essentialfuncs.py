@@ -30,6 +30,30 @@ def hex_distance(coord1, coord2):
     x2, y2, z2 = axial_to_cube(coord2)
     # Calculate the distance in cube coordinates
     return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+
+def parse_command(command):
+    result = []
+    buffer = ''
+    in_angle_brackets = False
+
+    for char in command:
+        if char == '<':
+            in_angle_brackets = True
+            buffer += char
+        elif char == '>':
+            in_angle_brackets = False
+            buffer += char
+        elif char == ' ' and not in_angle_brackets:
+            if buffer:
+                result.append(buffer.strip('<>'))
+                buffer = ''
+        else:
+            buffer += char
+
+    if buffer:
+        result.append(buffer.strip('<>'))
+
+    return result
     
 cities = {'anafola':{'Combat Style':'Wizard','Coins':3,'Knowledges':[('Excavating',1),('Persuasion',1)],'Combat Boosts':[('Stability',2)]},
           'benfriege':{'Combat Style':'Elemental','Coins':2,'Knowledges':[('Crafting',2)],'Combat Boosts':[('Stability',1),('Cunning',1)]},

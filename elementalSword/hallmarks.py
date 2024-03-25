@@ -420,7 +420,7 @@ class kubani:
             self.table.update_cell('Benefit', k, var.kubani_class_effect[field][next_value])
         elif split[-1] == 'progress':
             foi = '_'.join(split[:-1])
-            self.table_update_cell('Successful Session', foi, next_value)
+            self.table.update_cell('Successful Session', foi, next_value)
             self.check_level_up(foi, next_value)
         if hasattr(self, field):
             getattr(self, field)(previous_value, next_value)
@@ -468,7 +468,7 @@ class kubani:
                 self.update_field(field, True)
                 self.player.output(f"You now have {var.kubani_class_effect[field][True]}.", 'blue')
                 self.update_field(field+'_progress', 'Complete')
-                self.table.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), 'Complete')
+                self.table.update_cell('Sessions Needed', field.replace('_', ' ').title(), 'Complete')
         else:
             lvl = self.get(field)
             if progress >= var.kubani_progress_required[lvl]:
@@ -478,7 +478,7 @@ class kubani:
                     self.player.updateFellowshipVP(2, 'kubani')
                 self.player.output(f"You now have {var.kubani_class_effect[field][lvl+1]}.", 'blue')
                 value = var.kubani_progress_required[self.get(field)]
-                self.table.table_update_cell('Sessions Needed', field.replace('_', ' ').title(), value)
+                self.table.update_cell('Sessions Needed', field.replace('_', ' ').title(), value)
                 restart = 'Complete' if value == 'Complete' else 0
                 self.update_field(field+'_progress', restart)
                 
@@ -658,18 +658,117 @@ class scetcher:
     def begin_action_loop(self, _=None):
         if self.player.paused:
             return
+        
+def get_frag_name(x):
+    return x[::-1][9:][::-1].title()
     
 class starfex:
     def __init__(self, player):
         self.player = player
         self.actionFuncs = {}
         
-    def actionGrid(self):
-        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs, add_back=True)
+        self.foi = ['water fragment', 'air fragment', 'earth fragment', 'fire fragment', 'ice fragment', 'light fragment', 'blood fragment']
+        data = [[get_frag_name(k), var.inv_fragment_loc[k], self.get(k), 0, 0, self.get_next_reward(k)] for k in self.foi]
+        
+        self.table = Table(header=['Fragment', 'Location Found', 'All Donated', 'Your Donations', 'Your VP', 'Next Reward'], 
+                           data=data,
+                           color_odd_rows=True,
+                           key_field='Fragment')
+    
+    def get_next_reward(self, fragment):
+        idx = self.get(fragment)
+        coins = var.fragment_reward[fragment][idx]
+        if coins is None:
+            return '-'
+        reward = f"{coins} coins"
+        kb = var.fragment_kb[fragment][idx]
+        if kb > 0:
+            reward += f"\n{kb} knowledge book{'s' if kb>1 else ''}"
+        return reward
+        
+    def actionGrid(self, add_cancel=True):
+        if add_cancel:
+            self.actionFuncs['Cancel'] = self.player.exitActionLoop(amt=0)
+        self.player.parentBoard.game_page.make_actionGrid(self.actionFuncs)
+    
+    def get(self, field):
+        return self.player.ancient_magic_museum[field]
     
     def update_field(self, field, value):
-        pass
+        previous_value = self.player.ancient_magic_museum[field]
+        if type(value) is str:
+            try:
+                self.player.ancient_magic_museum[field] += int(value)
+            except ValueError:
+                # This means that we are not trying to add to the field, rather trying to set it.
+                self.player.ancient_magic_museum[field] = value
+        else:
+            self.player.ancient_magic_museum[field] = value
+        if field in self.foi:
+            k = get_frag_name(field)
+            self.table.update_cell('All Donated', k, self.get(field))
+            next_reward = self.get_next_reward(field)
+            self.table.update_cell('Next Reward', k, next_reward)
+        elif '_donated' in field:
+            k = field.split('_')[0].title()
+            donations = self.get(field)
+            self.table.update_cell('Your Donations', k, donations)
+            added = previous_value - donations
+            self.update_field('total_donations', f'+{added}')
+            possible_vp = var.fragment_vp[k.lower()+' fragment']
+            total_vp = self.get('total_vp')
+            add_vp = min([var.starfex_max_vp - total_vp, possible_vp])
+            self.update_field('total_vp', str(add_vp))
+            self.update_field(f'{k.lower()}_vp', str(add_vp))
+            self.table.update_cell('Your VP', k, self.get(f'{k.lower()}_vp'))
+            if add_vp != 0:
+                if add_vp > 0:
+                    self.player.output(f"You have gained {add_vp} VP for your donation!", 'green')
+                else:
+                    self.player.output(f"You lost {add_vp} somehow at the Starfex Ancient Magic Museum", 'red')
+                self.player.updateFellowshipVP(add_vp, 'starfex')
+        field = field.replace(' ', '_')
+        if hasattr(self, field):
+            getattr(self, field)(previous_value, self.get(field))
     
+    def check_donate(self, item, _=None):
+        if item in var.fragment_reward:
+            if self.player.ancient_magic_museum[item] in var.fragment_reward[item]:
+                self.player.output(f"The {item} you sold is being donated to the Ancient Magic Museum in Starfex.")
+                self.donate(item, False)
+                self.player.send_message_to_server('[DONATED]', item)
+    
+    def donate(self, fragment, this_user, _=None):
+        donated = self.get(fragment)
+        if donated not in var.fragment_reward[fragment]:
+            self.player.output(f"The museum has reached its max capacity of {fragment}, you may be able to sell to the marketplace for some value", 'yellow')
+            return
+        if this_user and (fragment not in self.player.items):
+            self.player.output(f"You do not have {fragment} in your inventory to donate!", 'yellow')
+            return
+        self.update_field(fragment, '+1')
+        if this_user:
+            self.player.addItem(fragment, -1, skip_update=True)
+            self.player.output(f"The Ancient Magic Museum thanks you for your donation of a {fragment}!", 'green')
+            k = get_frag_name(fragment)
+            field = k.lower()+'_donated'
+            coins = 0 if var.fragment_reward[fragment][donated] is None else var.fragment_reward[fragment][donated]
+            self.player.add_coins(coins)
+            if coins > 0:
+                self.player.output(f"You were rewarded {coins} coin{'s' if coins>1 else ''}!", 'green')
+            kb = var.fragment_kb[fragment][donated]
+            all_books = list(var.gameItems['Knowledge Books'].keys())
+            while kb > 0:
+                kb -= 1
+                book_reward = np.random.choice(list(all_books))
+                self.player.output(f"Receiving a {book_reward}!", 'green')
+                self.player.addItem(book_reward, 1, skip_update=True)
+            self.update_field(field, '+1')
+            self.player.send_message_to_server("[DONATED]", fragment)
+            self.player.exitActionLoop('minor')()
+        else:
+            self.player.output(f"The Ancient Magic Museum has received a {fragment} donation", 'blue')
+            
     def begin_action_loop(self, _=None):
         if self.player.paused:
             return
@@ -1022,7 +1121,7 @@ class zinzibar:
             self.table.update_cell('Chance', k, var.zinzibar_class_effect[field][next_value])
         elif split[-1] == 'progress':
             foi = split[0]
-            self.table.table_update_cell('Successful Session', foi.title(), next_value)
+            self.table.update_cell('Successful Session', foi.title(), next_value)
             self.check_level_up(foi, next_value)
         if hasattr(self, field):
             getattr(self, field)(previous_value, next_value)
@@ -1038,7 +1137,7 @@ class zinzibar:
                 self.player.updateFellowshipVP(2, 'zinzibar')
             self.player.output(f"You now have {var.zinzibar_class_effect[field][lvl+1]} for {var.zinzibar_class_benefit[field]}.", 'blue')
             value = var.zinzibar_progress_required[self.get(field)]
-            self.table.table_update_cell('Sessions Needed', field.title(), value)
+            self.table.update_cell('Sessions Needed', field.title(), value)
             restart = 'Complete' if value == 'Complete' else 0
             self.update_field(field+'_progress', restart)
     
