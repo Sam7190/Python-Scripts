@@ -63,7 +63,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.behaviors import HoverBehavior
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.properties import ListProperty
-from kivy.clock import Clock
+from kivy.clock import Clock, ClockEvent
 from kivy.core.window import Window
 from PIL import Image as PILImage
 
@@ -2498,6 +2498,7 @@ class Player(Image):
         self.titleIndex = {T: i for i, T in enumerate(self.titleOrder)}
 
         # Position Player
+        self.first_movement = True
         self.currentcoord = positions[birthcity][0]
         self.currenttile = self.parentBoard.gridtiles[self.currentcoord]
         self.moveto(self.currentcoord, False, True)
@@ -2635,6 +2636,10 @@ class Player(Image):
             self.remove_citypage() # go back to board page before the avatar moves
             if skip_check != True:
                 socket_client.send('[MOVE]',coord)
+            if self.first_movement:
+                Clocked(partial(self.parentBoard.add_highlight, self.parentBoard.gridtiles[coord], 'green', 0.5), 0.5, 'First movement lag on highlight')
+            else:
+                self.parentBoard.move_highlight(self.currenttile, self.parentBoard.gridtiles[coord])
             self.currenttile.source = f'images\\tile\\{self.currenttile.tile}.png' # remove green outline of tile moving away from.
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
@@ -2699,6 +2704,7 @@ class Player(Image):
         if self != self.parentBoard.localPlayer:
             # Check for player interactions
             self.parentBoard.game_page.check_players()
+        self.first_movement = False
     def add_PlayerTrack(self):
         self.PlayerTrack = PlayerTrack(self)
         screen = Screen(name='Player Track')
@@ -6247,6 +6253,8 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         super(Tile, self).__init__(**kwargs)
         self.source = f'images\\tile\\{tile}.png'
         self.hoveringOver = False
+        self.highlight = None
+        self.highlight_blinker = None
         self.entered = False
         self.parentBoard = None
         self.empty_label = None
@@ -6281,10 +6289,7 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
         self.is_empty = True
     def trader_appears(self, rounds=3, recvd=False):
         if not recvd:
-            Categories = list(gameItems)
-            Categories.remove('Quests')
-            Categories.remove('Cloth')
-            randomCategories = np.random.choice(Categories, 4)
+            randomCategories = np.random.choice(var.sold_categories, 4)
             self.trader_wares = set()
             for c in randomCategories:
                 self.trader_wares.add(np.random.choice(list(gameItems[c])))
@@ -6353,7 +6358,33 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             self.skirmishIcon.pos_hint = self.pos_hint
         self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
         # Get polygonal shape for mouse position detection
+        Clocked(partial(self.set_highlight_sizehint_and_pos), 0.1, 'Resize tile highlight')
         self.update_polygon()
+    def toggle_highlight_visibility(self, _=None):
+        if self.highlight is not None:
+            self.highlight.opacity = 0 if self.highlight.opacity == 1 else 1
+    def set_highlight(self, H, blinker=False):
+        if self.highlight is not None:
+            return AssertionError("Setting Highlight when already one set is not supported yet.")
+        self.highlight = H
+        self.set_highlight_sizehint_and_pos()
+        if blinker:
+            self.highlight_blinker = Clock.schedule_interval(self.toggle_highlight_visibility, blinker)
+    def remove_highlight(self):
+        self.highlight = None
+        blinker = True if self.highlight_blinker else False
+        if self.highlight_blinker is not None:
+            self.highlight_blinker.cancel()
+            self.highlight_blinker = None
+        return blinker
+    def set_highlight_sizehint_and_pos(self, _=None):
+        if self.highlight is not None:
+            width_hint = self.size_hint[0] * var.highlight_ratio_x
+            height_hint = self.size_hint[1] * var.highlight_ratio_y
+            posx = self.x - ((self.parentBoard.width * width_hint) - (self.size_hint[0] * self.parentBoard.width)) / 2
+            posy = self.y - ((self.parentBoard.height * height_hint) - (self.size_hint[1] * self.parentBoard.height)) / 2
+            self.highlight.size_hint = (width_hint, height_hint)
+            self.highlight.pos = (posx, posy)
     def set_neighbors(self):
         neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if self.gridy % 2 else -1, 1], [1 if self.gridy % 2 else -1, -1]]
         self.neighbors, self.neighbortiles = set(), set()
@@ -6486,6 +6517,7 @@ class BoardPage(FloatLayout):
         self.citytiles = {}
         self.Players = {}
         self.localPlayer = None
+        self.highlights = {}
         self.startLblMsgs = []
         self.startLblTimes = []
         self.startLblLast = []
@@ -6572,6 +6604,26 @@ class BoardPage(FloatLayout):
         self.gridtiles[(x,y)] = T
         T.parentBoard = self
         self.add_widget(T)
+    def add_highlight(self, tile, color, blinker, _=None):
+        H = Image(source = f'images\\assets\\tile_highlight_{color}.png')
+        tile.set_highlight(H, blinker)
+        self.highlights[(tile.gridx, tile.gridy)] = H
+        self.add_widget(H)
+    def remove_highlight(self, tile, remove_widget=True):
+        try:
+            H = self.highlights.pop((tile.gridx, tile.gridy))
+        except KeyError:
+            return None, None
+        if remove_widget:
+            self.remove_widget(H)
+        blinker = tile.remove_highlight()
+        return H, blinker
+    def move_highlight(self, tilebefore, tileafter):
+        H, blinker = self.remove_highlight(tilebefore, False)
+        if H is None:
+            return
+        self.highlights[(tileafter.gridx, tileafter.gridy)] = H
+        tileafter.set_highlight(H, blinker)
     def startRoundDelay(self, delay=None, _=None):
         if delay is None:
             delay = self.defaultRoundDelay

@@ -6,6 +6,10 @@ Created on Sun Feb  4 16:43:33 2024
 """
 import numpy as np
 
+#%% Tile Properties
+highlight_ratio_x = 411 / 343
+highlight_ratio_y = 475 / 396
+
 #%% Game Properties
 previous_stage_completion_required = 4
 
@@ -131,6 +135,7 @@ gameItems = {'Food':{'raw meat':1,'cooked meat':2,'well cooked meat':3,'raw fish
              # Hallmark Groups
              'GrandLibrary': lib_book_dict
              }
+sold_categories = ['Food', 'Crafting', 'Smithing', 'Knowledge Books']
 clothSpecials = {'benfriege cloth':{'zinzibar','glaser','enfeir','starfex'},
                  'enfeir cloth':{'benfriege','tutalu','pafiz'},
                  'glaser cloth':{'pafiz','fodker','benfriege','tutalu','scetcher'},
