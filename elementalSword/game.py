@@ -2639,7 +2639,7 @@ class Player(Image):
             if self.first_movement:
                 Clocked(partial(self.parentBoard.add_highlight, self.parentBoard.gridtiles[coord], 'green', 0.5), 0.5, 'First movement lag on highlight')
             else:
-                self.parentBoard.move_highlight(self.currenttile, self.parentBoard.gridtiles[coord])
+                self.parentBoard.move_highlight(self.currenttile, self.parentBoard.gridtiles[coord], 'green')
             self.currenttile.source = f'images\\tile\\{self.currenttile.tile}.png' # remove green outline of tile moving away from.
             self.currentcoord = coord
             self.currenttile = self.parentBoard.gridtiles[coord]
@@ -6247,12 +6247,60 @@ class CityPage(ButtonBehavior, HoverBehavior, FloatLayout):
                 self.select(region, pos)
 
         self.find_active_quests()
+        
+class TileHighlight(Image):
+    def __init__(self, tile, color, blinker, **kwargs):
+        super(TileHighlight, self).__init__(**kwargs)
+        self.highlight_color = color
+        self.blinker_speed = blinker
+        self.blinker = None
+        self.tile = None
+        self.source = f'images\\assets\\tile_highlight_{color}.png'
+        self.set_highlight(tile, add_widget=True)
+    def set_highlight(self, tile, add_widget=False):
+        if self.highlight_color in tile.highlights:
+            logging.error("Two of the same tile highlight colors being on the same tile is not supported!")
+            return
+        self.tile = tile
+        self.set_sizehint_and_pos()
+        self.activate_blinker()
+        self.tile.highlights[self.highlight_color] = self
+        if add_widget:
+            self.tile.parentBoard.add_widget(self)
+    def set_sizehint_and_pos(self, _=None):
+        width_hint = self.tile.size_hint[0] * var.highlight_ratio_x
+        height_hint = self.tile.size_hint[1] * var.highlight_ratio_y
+        posx = self.tile.x - ((self.tile.parentBoard.width * width_hint) - (self.tile.size_hint[0] * self.tile.parentBoard.width)) / 2
+        posy = self.tile.y - ((self.tile.parentBoard.height * height_hint) - (self.tile.size_hint[1] * self.tile.parentBoard.height)) / 2
+        self.size_hint = (width_hint, height_hint)
+        self.pos = (posx, posy)
+    def set_visibility(self, opacity):
+        if self.opacity and (not opacity):
+            self.cancel_blinker()
+        if (not self.opacity) and opacity:
+            self.activate_blinker()
+        self.opacity = opacity
+    def toggle_visibility(self, _=None):
+        self.opacity = 0 if self.opacity==1 else 1
+    def activate_blinker(self):
+        if self.blinker_speed:
+            self.blinker = Clock.schedule_interval(self.toggle_visibility, self.blinker_speed)
+    def cancel_blinker(self):
+        if self.blinker:
+            self.blinker.cancel()
+    def remove_highlight(self, remove_widget=True):
+        self.cancel_blinker()
+        self.tile.highlights.pop(self.highlight_color)
+        if remove_widget:
+            self.tile.parentBoard.remove_widget(self)
+        return self
 
 class Tile(ButtonBehavior, HoverBehavior, Image):
     def __init__(self, tile, x, y, **kwargs):
         super(Tile, self).__init__(**kwargs)
         self.source = f'images\\tile\\{tile}.png'
         self.hoveringOver = False
+        self.highlights = {}
         self.highlight = None
         self.highlight_blinker = None
         self.entered = False
@@ -6358,33 +6406,9 @@ class Tile(ButtonBehavior, HoverBehavior, Image):
             self.skirmishIcon.pos_hint = self.pos_hint
         self.centx, self.centy = xpos + xshift + (xprel*mag_x/2), ypos + yshift + (yprel*mag_y/2)
         # Get polygonal shape for mouse position detection
-        Clocked(partial(self.set_highlight_sizehint_and_pos), 0.1, 'Resize tile highlight')
+        for highlight in self.highlights.values():
+            Clocked(partial(highlight.set_sizehint_and_pos), 0.1, 'Resize tile highlight')
         self.update_polygon()
-    def toggle_highlight_visibility(self, _=None):
-        if self.highlight is not None:
-            self.highlight.opacity = 0 if self.highlight.opacity == 1 else 1
-    def set_highlight(self, H, blinker=False):
-        if self.highlight is not None:
-            return AssertionError("Setting Highlight when already one set is not supported yet.")
-        self.highlight = H
-        self.set_highlight_sizehint_and_pos()
-        if blinker:
-            self.highlight_blinker = Clock.schedule_interval(self.toggle_highlight_visibility, blinker)
-    def remove_highlight(self):
-        self.highlight = None
-        blinker = True if self.highlight_blinker else False
-        if self.highlight_blinker is not None:
-            self.highlight_blinker.cancel()
-            self.highlight_blinker = None
-        return blinker
-    def set_highlight_sizehint_and_pos(self, _=None):
-        if self.highlight is not None:
-            width_hint = self.size_hint[0] * var.highlight_ratio_x
-            height_hint = self.size_hint[1] * var.highlight_ratio_y
-            posx = self.x - ((self.parentBoard.width * width_hint) - (self.size_hint[0] * self.parentBoard.width)) / 2
-            posy = self.y - ((self.parentBoard.height * height_hint) - (self.size_hint[1] * self.parentBoard.height)) / 2
-            self.highlight.size_hint = (width_hint, height_hint)
-            self.highlight.pos = (posx, posy)
     def set_neighbors(self):
         neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1], [1 if self.gridy % 2 else -1, 1], [1 if self.gridy % 2 else -1, -1]]
         self.neighbors, self.neighbortiles = set(), set()
@@ -6518,6 +6542,7 @@ class BoardPage(FloatLayout):
         self.Players = {}
         self.localPlayer = None
         self.highlights = {}
+        self.player_position_highlight = None
         self.startLblMsgs = []
         self.startLblTimes = []
         self.startLblLast = []
@@ -6605,25 +6630,17 @@ class BoardPage(FloatLayout):
         T.parentBoard = self
         self.add_widget(T)
     def add_highlight(self, tile, color, blinker, _=None):
-        H = Image(source = f'images\\assets\\tile_highlight_{color}.png')
-        tile.set_highlight(H, blinker)
-        self.highlights[(tile.gridx, tile.gridy)] = H
-        self.add_widget(H)
-    def remove_highlight(self, tile, remove_widget=True):
-        try:
-            H = self.highlights.pop((tile.gridx, tile.gridy))
-        except KeyError:
-            return None, None
-        if remove_widget:
-            self.remove_widget(H)
-        blinker = tile.remove_highlight()
-        return H, blinker
-    def move_highlight(self, tilebefore, tileafter):
-        H, blinker = self.remove_highlight(tilebefore, False)
-        if H is None:
-            return
-        self.highlights[(tileafter.gridx, tileafter.gridy)] = H
-        tileafter.set_highlight(H, blinker)
+        H = TileHighlight(tile, color, blinker)
+        if color == 'green':
+            self.player_position_highlight = H
+    def remove_highlight(self, tile, color, remove_widget=True):
+        H = tile.highlights[color].remove_highlight(remove_widget=remove_widget)
+        if (color == 'green') and remove_widget:
+            self.player_position_highlight = None
+        return H
+    def move_highlight(self, tilebefore, tileafter, color):
+        H = self.remove_highlight(tilebefore, color, False)
+        H.set_highlight(tileafter)
     def startRoundDelay(self, delay=None, _=None):
         if delay is None:
             delay = self.defaultRoundDelay
